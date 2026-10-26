@@ -1,0 +1,25 @@
+# Build and test output
+**/bin/
+**/obj/
+**/TestResults/
+*.trx
+*.coverage
+*.coveragexml
+artifacts/
+
+# Local IDE and agent state
+.vs/
+.idea/
+.vscode/
+.pi/
+*.user
+*.suo
+*.sln.docstates
+
+# Local secrets and OS files
+.env
+.env.*
+!.env.example
+**/appsettings.Local.json
+.DS_Store
+Thumbs.db

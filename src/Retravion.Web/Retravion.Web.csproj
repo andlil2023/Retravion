@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../Retravion.Application/Retravion.Application.csproj" />
+    <ProjectReference Include="../Retravion.Infrastructure/Retravion.Infrastructure.csproj" />
+    <InternalsVisibleTo Include="Retravion.IntegrationTests" />
+  </ItemGroup>
+</Project>

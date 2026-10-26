@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore Retravion.slnx
+      - name: Build
+        run: dotnet build Retravion.slnx --configuration Release --no-restore
+      - name: Test
+        run: dotnet test Retravion.slnx --configuration Release --no-build --no-restore

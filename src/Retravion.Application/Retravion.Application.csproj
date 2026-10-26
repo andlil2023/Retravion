@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Retravion.Domain/Retravion.Domain.csproj" />
+  </ItemGroup>
+</Project>

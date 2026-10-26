@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Retravion.Web/Retravion.Web.csproj" />
+    <Project Path="src/Retravion.Application/Retravion.Application.csproj" />
+    <Project Path="src/Retravion.Domain/Retravion.Domain.csproj" />
+    <Project Path="src/Retravion.Infrastructure/Retravion.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Retravion.UnitTests/Retravion.UnitTests.csproj" />
+    <Project Path="tests/Retravion.IntegrationTests/Retravion.IntegrationTests.csproj" />
+  </Folder>
+</Solution>
