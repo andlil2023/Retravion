@@ -6,12 +6,11 @@ Retravion documents and traces the lifecycle of software products. Only features
 
 ## Established Starting Choices
 
-- .NET 10 and Blazor for the web application.
-- PostgreSQL for persistence.
-- Domain-driven design and Vertical Slice Architecture, with explicit domain boundaries.
+- Stack: .NET 10, Blazor, PostgreSQL, and MudBlazor (D-001/D-003 in `docs/decisions.md`).
+- Domain-driven design and Vertical Slice Architecture, with explicit domain boundaries (D-002).
 - Prefer modern C#, records, and immutable values where appropriate.
 - Railway-oriented result handling where it improves clarity; avoid unnecessary abstraction.
-- MudBlazor as the UI component library; application-level UI patterns will be established through reviewed implementations.
+- Establish application-level UI patterns through reviewed implementations.
 
 ## Structural Constraints
 
@@ -45,4 +44,4 @@ Retravion documents and traces the lifecycle of software products. Only features
 - Persistence models may represent multiple lifecycle states in one database table or persistence entity.
 - Persistence models must not be exposed as domain objects.
 - Mapping from persistence to domain must validate state-specific invariants.
-- Invalid persisted data must result in an explicit
+- Invalid persisted data must result in an explicit failure, never an invalid domain object.

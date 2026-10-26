@@ -9,14 +9,15 @@ Retravion is a product-lifecycle documentation application for software teams. D
 1. The current approved task and acceptance criteria define requested behavior.
 2. `docs/domain.md` defines established domain invariants. Read only sections relevant to the task.
 3. `docs/architecture.md` defines technical boundaries. Read relevant sections when planning or changing structure.
-4. `docs/patterns.md` points to approved examples. Use only patterns marked Established.
+4. `docs/patterns.md` indexes Established patterns and defines the fallback when none applies.
 5. `docs/decisions.md` records consequential choices and revisit triggers; consult only affected decisions.
 If instructions conflict, stop and report the conflict; do not silently pick one.
+Use prompt input or confirmed conversation context; ask for missing required input and never infer approval.
 
 ## Before editing
 - Identify the owning feature/module and the smallest coherent change.
 - Identify affected invariants, public contracts, and tests.
-- Inspect only explicitly named files first. Request additional files with a reason, rather than recursively reading the repository.
+- Inspect explicitly named files first. State a reason before reading directly related files; request permission for broader exploration.
 - State uncertainties that affect correctness. Ask at most the few essential questions; defer speculative questions.
 - Do not create ADRs, design documents, or new patterns automatically.
 
@@ -32,5 +33,6 @@ If instructions conflict, stop and report the conflict; do not silently pick one
 ## Completion
 - Run relevant build, tests, and available architecture checks; report exact commands and results.
 - Summarize changed files, behavior, unresolved risks, and any deviations.
-- Do not claim success without evidence. Do not merge unless the review gate passes.
+- Do not claim success without evidence or self-approve. Review must be by a different human or agent session against the current diff.
+- Only a `PASS` verdict from `.pi/prompts/review.md` satisfies the review gate; changes after review require re-review. `BLOCKED` and `NEEDS_HUMAN_DECISION` do not pass. Passing review does not authorize merging.
 - Temporary plans and agent reasoning are not permanent project documentation.
