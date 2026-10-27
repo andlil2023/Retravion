@@ -19,7 +19,17 @@ public sealed class IdentityArchitectureTests
 
         Assert.Equal("Microsoft.NET.Sdk", (string?)project.Root?.Attribute("Sdk"));
         Assert.Equal(expectedReferences, references);
-        Assert.Empty(project.Descendants("PackageReference"));
+        var packages = project.Descendants("PackageReference").ToArray();
+        var expectedPackages = projectName == "Retravion.Identity.Infrastructure"
+            ? Array.Empty<string>()
+            : new[] { "CSharpFunctionalExtensions" };
+
+        Assert.Equal(expectedPackages, packages.Select(package => (string?)package.Attribute("Include")).ToArray());
+        Assert.All(packages, package =>
+        {
+            Assert.Null(package.Attribute("Version"));
+            Assert.Null(package.Attribute("VersionOverride"));
+        });
         Assert.Empty(project.Descendants("FrameworkReference"));
     }
 

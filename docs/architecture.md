@@ -12,6 +12,17 @@ Retravion documents and traces the lifecycle of software products. Only features
 - Railway-oriented result handling where it improves clarity; avoid unnecessary abstraction.
 - Establish application-level UI patterns through reviewed implementations.
 
+## Expected Failures and Legitimate Absence
+
+Use CSharpFunctionalExtensions (D-004) rather than custom Result/Maybe wrappers. Its version is managed in `Directory.Packages.props`; Identity Domain and Application reference it directly. Add references elsewhere only when an approved slice needs them.
+
+- Use `Result` for an operation that can fail as expected without returning a value, and `Result<T>` when success produces a value. Validation failures and invalid lifecycle transitions are explicit failures, not exceptions used for normal control flow. Unexpected faults remain exceptions; do not silently turn every exception into an expected failure.
+- Use `Maybe<T>` when absence is a legitimate outcome, such as an optional lookup result. If a lookup can also fail, `Result<Maybe<T>>` distinguishes a failed operation from a successful lookup with no match. Convert absence to failure only where the use case requires a value.
+- Prefer fluent `Ensure`, `Bind`, `Map`, and `Tap` composition when it makes validation, sequencing, transformation, and success-only effects clearer. A failure must short-circuit later success steps; keep explicit branching when it is clearer.
+- Do not use `Maybe<T>` (or nullable properties) to make required domain state optional for convenience. Validated construction, state-specific domain types, and typed lifecycle transitions still enforce required values. Return a failure rather than constructing invalid state.
+
+This is usage guidance, not an established application implementation pattern. Do not introduce a parallel Result/Maybe framework or speculative adapters.
+
 ## Structural Constraints
 
 - Domain logic must not depend on UI, database, or infrastructure details.
