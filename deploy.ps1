@@ -27,7 +27,7 @@ function Read-ReviewEnvironment {
     $path = Join-Path $Root '.env'
     if (-not (Test-Path $path)) {
         $text = Get-Content (Join-Path $Root '.env.example') -Raw
-        foreach ($key in @('POSTGRES_PASSWORD', 'INITIAL_ADMIN_PASSWORD', 'HTTPS_CERT_PASSWORD')) {
+        foreach ($key in @('POSTGRES_PASSWORD', 'HTTPS_CERT_PASSWORD')) {
             $text = $text.Replace("$key=", "$key=$(New-ReviewSecret)")
         }
         # CreateNew prevents overwriting a file created by another invocation.
@@ -36,18 +36,23 @@ function Read-ReviewEnvironment {
             $bytes = [Text.Encoding]::UTF8.GetBytes($text)
             $stream.Write($bytes, 0, $bytes.Length)
         } finally { $stream.Dispose() }
-        Write-Host 'Created .env with random secrets. Keep this file private.'
+        Write-Host 'Created .env with random database/certificate secrets. Supply INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD before first startup. Keep this file private.'
     }
     $values = @{}
     foreach ($line in Get-Content $path) {
         if ($line -match '^\s*(#|$)') { continue }
-        if ($line -notmatch '^([A-Z_]+)=([A-Za-z0-9_.-]+)$') {
-            throw '.env contains an invalid entry. Use unquoted letters, digits, dots, underscores or hyphens; see .env.example.'
+        if ($line -notmatch '^([A-Z_]+)=(.*)$') {
+            throw '.env contains an invalid entry; see .env.example.'
         }
-        if ($values.ContainsKey($Matches[1])) { throw "Duplicate .env key: $($Matches[1])" }
-        $values[$Matches[1]] = $Matches[2]
+        $key = $Matches[1]
+        $value = $Matches[2]
+        if ($values.ContainsKey($key)) { throw "Duplicate .env key: $key" }
+        if ($key -notin @('INITIAL_ADMIN_USERNAME', 'INITIAL_ADMIN_PASSWORD') -and $value -notmatch '^[A-Za-z0-9_.-]+$') {
+            throw '.env contains an invalid entry. Non-admin values allow letters, digits, dots, underscores or hyphens.'
+        }
+        $values[$key] = $value
     }
-    foreach ($key in @('APP_HTTPS_PORT', 'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'INITIAL_ADMIN_PASSWORD', 'HTTPS_CERT_PASSWORD')) {
+    foreach ($key in @('APP_HTTPS_PORT', 'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'INITIAL_ADMIN_USERNAME', 'INITIAL_ADMIN_PASSWORD', 'HTTPS_CERT_PASSWORD')) {
         if (-not $values.ContainsKey($key)) { throw "Missing .env key: $key" }
     }
     $port = 0
@@ -167,6 +172,7 @@ function Invoke-ReviewDeployment {
         POSTGRES_USER = $config.POSTGRES_USER
         POSTGRES_PASSWORD = $config.POSTGRES_PASSWORD
         ConnectionStrings__DefaultConnection = "Host=$database;Port=5432;Database=$($config.POSTGRES_DB);Username=$($config.POSTGRES_USER);Password=$($config.POSTGRES_PASSWORD)"
+        InitialAdmin__Username = $config.INITIAL_ADMIN_USERNAME
         InitialAdmin__Password = $config.INITIAL_ADMIN_PASSWORD
         ASPNETCORE_Kestrel__Certificates__Default__Password = $config.HTTPS_CERT_PASSWORD
     }
@@ -193,7 +199,7 @@ function Invoke-ReviewDeployment {
             '--pull=never', '-p', "127.0.0.1:$($config.APP_HTTPS_PORT):8443", '-v', "${certificatePath}:/https/localhost.pfx:ro",
             '-e', 'ASPNETCORE_URLS=https://+:8443', '-e', 'ASPNETCORE_Kestrel__Certificates__Default__Path=/https/localhost.pfx',
             '-e', 'ASPNETCORE_Kestrel__Certificates__Default__Password', '-e', 'ConnectionStrings__DefaultConnection',
-            '-e', 'InitialAdmin__Password', 'localhost/retravion-review:local') | Out-Null
+            '-e', 'InitialAdmin__Username', '-e', 'InitialAdmin__Password', 'localhost/retravion-review:local') | Out-Null
     } finally {
         foreach ($key in $previous.Keys) { [Environment]::SetEnvironmentVariable($key, $previous[$key], 'Process') }
     }
@@ -207,7 +213,7 @@ function Invoke-ReviewDeployment {
     }
     if (-not $ready) { throw "Application HTTPS check failed. Inspect: podman logs $app" }
     Write-Host "Ready: $url"
-    Write-Host 'Database and initial-admin settings are reserved; this app does not consume them yet.'
+    Write-Host 'Administrator provisioning is create-only. Editing .env does not reset existing credentials.'
 }
 
 # Dot-sourcing exposes helpers for tests without running deployment.
