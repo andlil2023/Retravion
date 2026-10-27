@@ -1,3 +1,4 @@
+@using Microsoft.AspNetCore.Components.Forms
 @inherits LayoutComponentBase
 
 <MudThemeProvider Theme="PrototypeTheme.Value" IsDarkMode="_darkMode" />
@@ -20,7 +21,10 @@
         </nav>
         <div class="sidebar-footer">
             <span class="prototype-badge">UI PROTOTYPE</span>
-            <a href="/">Return to login</a>
+            <form method="post" action="/identity/logout" data-enhance="false">
+                <AntiforgeryToken />
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Text">Log out</MudButton>
+            </form>
         </div>
     </aside>
 

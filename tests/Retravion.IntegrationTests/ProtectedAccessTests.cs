@@ -100,7 +100,7 @@ public sealed class ProtectedAccessTests
         {
             new Claim(ClaimTypes.NameIdentifier, "admin"), new Claim(ClaimTypes.Role, "Administrator")
         }, CookieAuthenticationDefaults.AuthenticationScheme));
-        var expired = options.TicketDataFormat.Protect(new AuthenticationTicket(principal,
+        var expired = await SessionCookie(options, new AuthenticationTicket(principal,
             new AuthenticationProperties
             {
                 IssuedUtc = DateTimeOffset.UtcNow.AddHours(-2), ExpiresUtc = DateTimeOffset.UtcNow.AddHours(-1)
@@ -125,7 +125,7 @@ public sealed class ProtectedAccessTests
             .Get(CookieAuthenticationDefaults.AuthenticationScheme);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, "admin") },
             CookieAuthenticationDefaults.AuthenticationScheme));
-        var cookie = options.TicketDataFormat.Protect(new AuthenticationTicket(principal,
+        var cookie = await SessionCookie(options, new AuthenticationTicket(principal,
             new AuthenticationProperties { ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(10) },
             CookieAuthenticationDefaults.AuthenticationScheme));
         using var request = new HttpRequestMessage(HttpMethod.Get, "/protected-probe");
@@ -156,7 +156,7 @@ public sealed class ProtectedAccessTests
         {
             new Claim(ClaimTypes.NameIdentifier, "admin"), new Claim(ClaimTypes.Role, "Administrator")
         }, CookieAuthenticationDefaults.AuthenticationScheme));
-        var ticket = options.TicketDataFormat.Protect(new AuthenticationTicket(principal,
+        var ticket = await SessionCookie(options, new AuthenticationTicket(principal,
             new AuthenticationProperties { IssuedUtc = DateTimeOffset.UtcNow, ExpiresUtc = expires },
             CookieAuthenticationDefaults.AuthenticationScheme));
         client.DefaultRequestHeaders.Add("Cookie", $"Retravion.Identity={ticket}");
@@ -217,6 +217,17 @@ public sealed class ProtectedAccessTests
         return WebUtility.HtmlDecode(match.Groups[1].Value);
     }
 
+    private static async Task<string> SessionCookie(CookieAuthenticationOptions options, AuthenticationTicket ticket)
+    {
+        var key = await options.SessionStore!.StoreAsync(ticket);
+        var reference = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim("Microsoft.AspNetCore.Authentication.Cookies-SessionId", key)
+        }, CookieAuthenticationDefaults.AuthenticationScheme));
+        return options.TicketDataFormat.Protect(new AuthenticationTicket(reference, ticket.Properties,
+            CookieAuthenticationDefaults.AuthenticationScheme));
+    }
+
     private static async Task AssertDenied(HttpResponseMessage response, string location)
     {
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
@@ -236,6 +247,15 @@ public sealed class ProtectedAccessTests
         var services = scope.ServiceProvider;
         var claims = pending ? new[] { new Claim("Retravion.PasswordReplacementRequired", "true") } : Array.Empty<Claim>();
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, pending ? "test" : null));
+        if (pending)
+        {
+            var store = factory.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+                .Get(CookieAuthenticationDefaults.AuthenticationScheme).SessionStore!;
+            var key = await store.StoreAsync(new AuthenticationTicket(principal,
+                new AuthenticationProperties { ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(10) },
+                CookieAuthenticationDefaults.AuthenticationScheme));
+            principal = (await store.RetrieveAsync(key))!.Principal;
+        }
         var authentication = (IHostEnvironmentAuthenticationStateProvider)services.GetRequiredService<AuthenticationStateProvider>();
         authentication.SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));
         await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
