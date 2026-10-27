@@ -121,6 +121,9 @@ a, button, input { -webkit-tap-highlight-color: transparent; }
 .sidebar-footer { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; margin: auto 12px 0; padding-top: 32px; font-size: 12px; }
 .prototype-badge { color: var(--sidebar-muted); font-size: 9px; letter-spacing: .16em; }
 .sidebar-footer a { color: #d2e2ed; text-underline-offset: 4px; }
+.sidebar-footer .mud-button-root { color: #e5edf3; }
+.sidebar-footer .mud-button-root:hover { background: #1b4056; }
+.sidebar-footer .mud-button-root:focus-visible { outline: 3px solid #6bd4d4; outline-offset: 4px; }
 .workspace { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .page-toolbar { display: flex; align-items: center; gap: 16px; min-height: 88px; padding: 16px 32px; border-bottom: 1px solid var(--shell-border); background: var(--mud-palette-surface); }
 .page-heading .eyebrow { display: block; margin-bottom: 3px; color: var(--mud-palette-text-secondary); font-size: 9px; }
