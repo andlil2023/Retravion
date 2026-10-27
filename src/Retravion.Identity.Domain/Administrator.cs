@@ -8,17 +8,29 @@ public sealed class Administrator
     public string Username { get; }
     public string PasswordHash { get; }
 
-    private Administrator(string username, string passwordHash)
+    public bool RequiresPasswordReplacement { get; }
+
+    private Administrator(string username, string passwordHash, bool requiresPasswordReplacement)
     {
         Username = username;
         PasswordHash = passwordHash;
+        RequiresPasswordReplacement = requiresPasswordReplacement;
     }
 
-    public static Result<Administrator> Create(string? username, string? passwordHash) =>
+    public Result<Administrator> ReplacePassword(string? password, string? passwordHash) =>
+        Result.Success()
+            .Ensure(() => RequiresPasswordReplacement, "Password replacement is not required.")
+            .Bind(() => PasswordPolicy.Validate(password))
+            .Ensure(() => !string.Equals(PasswordHash, passwordHash, StringComparison.Ordinal),
+                "The replacement password hash must differ from the current hash.")
+            .Bind(() => Create(Username, passwordHash, requiresPasswordReplacement: false));
+
+    public static Result<Administrator> Create(string? username, string? passwordHash,
+        bool requiresPasswordReplacement = true) =>
         Result.Success()
             .Ensure(() => !string.IsNullOrWhiteSpace(username) && !username.Contains('\0'),
                 "An administrator username without null characters is required.")
             .Ensure(() => !string.IsNullOrWhiteSpace(passwordHash) && !passwordHash.Contains('\0'),
                 "An administrator password hash is required.")
-            .Map(() => new Administrator(username!, passwordHash!));
+            .Map(() => new Administrator(username!, passwordHash!, requiresPasswordReplacement));
 }

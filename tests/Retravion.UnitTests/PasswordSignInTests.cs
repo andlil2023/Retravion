@@ -63,6 +63,10 @@ public sealed class PasswordSignInTests
                 : Result.Success(account));
         }
 
+        public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("Sign-in must not write credentials.");
+
         public Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("Sign-in must not write credentials.");
     }

@@ -96,6 +96,9 @@ internal sealed class StartupAdministratorStore : IAdministratorStore
         return Task.FromResult(Result.Success(Account));
     }
 
+    public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
+        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
     public Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default)
     {
         if (Account.HasNoValue) { Account = administrator; Writes++; }

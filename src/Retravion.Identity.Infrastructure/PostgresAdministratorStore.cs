@@ -22,12 +22,14 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
                 username text NOT NULL CHECK (length(btrim(username)) > 0),
                 password_hash text NOT NULL CHECK (length(btrim(password_hash)) > 0)
             );
+            ALTER TABLE retravion_identity.administrator
+                ADD COLUMN IF NOT EXISTS requires_password_replacement boolean NOT NULL DEFAULT TRUE;
             """, connection, transaction);
         await setup.ExecuteNonQueryAsync(cancellationToken);
 
         Result<Maybe<Administrator>> result;
         await using (var command = new NpgsqlCommand(
-            "SELECT username, password_hash FROM retravion_identity.administrator", connection, transaction))
+            "SELECT username, password_hash, requires_password_replacement FROM retravion_identity.administrator", connection, transaction))
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             if (!await reader.ReadAsync(cancellationToken))
@@ -36,7 +38,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
             }
             else
             {
-                result = Administrator.Create(reader.GetString(0), reader.GetString(1))
+                result = Administrator.Create(reader.GetString(0), reader.GetString(1), reader.GetBoolean(2))
                     .Match(
                         administrator => Result.Success(Maybe<Administrator>.From(administrator)),
                         _ => Result.Failure<Maybe<Administrator>>("The persisted administrator is invalid."));
@@ -52,12 +54,36 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
-            INSERT INTO retravion_identity.administrator (singleton, username, password_hash)
-            VALUES (TRUE, $1, $2)
+            INSERT INTO retravion_identity.administrator (singleton, username, password_hash, requires_password_replacement)
+            VALUES (TRUE, $1, $2, $3)
             ON CONFLICT (singleton) DO NOTHING
             """, connection);
         command.Parameters.AddWithValue(administrator.Username);
         command.Parameters.AddWithValue(administrator.PasswordHash);
+        command.Parameters.AddWithValue(administrator.RequiresPasswordReplacement);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
+        CancellationToken cancellationToken = default)
+    {
+        if (!expected.RequiresPasswordReplacement || replacement.RequiresPasswordReplacement ||
+            !string.Equals(expected.Username, replacement.Username, StringComparison.Ordinal) ||
+            string.Equals(expected.PasswordHash, replacement.PasswordHash, StringComparison.Ordinal))
+            return Result.Failure("Invalid password replacement transition.");
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE retravion_identity.administrator
+            SET password_hash = $1, requires_password_replacement = FALSE
+            WHERE singleton AND username = $2 AND password_hash = $3 AND requires_password_replacement
+            """, connection);
+        command.Parameters.AddWithValue(replacement.PasswordHash);
+        command.Parameters.AddWithValue(expected.Username);
+        command.Parameters.AddWithValue(expected.PasswordHash);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1
+            ? Result.Success()
+            : Result.Failure("The administrator changed; authenticate again before replacing the password.");
     }
 }
