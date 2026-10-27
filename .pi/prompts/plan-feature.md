@@ -18,7 +18,7 @@ Plan only the next feature from approved User Needs and requirements, using the 
 - Do not split tasks merely to make them smaller.
 - Do not create ADRs, new patterns, or implementation code.
 - Do not make irreversible choices based on hypothetical future needs.
-- Stop after presenting the plan and verification design. Obtain one explicit approval covering both before implementation.
+- Present the plan and verification design with PBI drafts for the proposed increments, using the sections required by `AGENTS.md`. Obtain explicit approval covering the plan, verification design, and drafts before creating the GitHub issues and adding them to the project. Stop before implementation.
 
 ## Input
 

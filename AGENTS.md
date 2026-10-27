@@ -14,6 +14,12 @@ Retravion is a product-lifecycle documentation application for software teams. D
 If instructions conflict, stop and report the conflict; do not silently pick one.
 Use prompt input or confirmed conversation context; ask for missing required input and never infer approval.
 
+## Task workflow
+- Track every implementation task as a GitHub issue labeled `PBI` in https://github.com/users/andlil2023/projects/3. Present the draft for explicit approval before creating it.
+- Each PBI must include **What**, **Why**, **Implementation Guide**, **Requirements**, and **Acceptance Criteria** sections. Reference implemented requirements by ID only. If none apply, use `N/A` with a brief explanation. When acceptance criteria do not apply, use `N/A` or explain their omission in that section.
+- Before any change task, fetch `origin` and create a new branch and git worktree from the latest `origin/main`; make all changes there, never on `main`. Default to one PBI per worktree.
+- Keep acceptance criteria in the PBI; report their verification in the PR.
+
 ## Before editing
 - Identify the owning feature/module and the smallest coherent change.
 - Identify affected invariants, public contracts, and tests.
