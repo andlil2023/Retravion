@@ -15,19 +15,26 @@ Use the supplied approved User Need as the authority. Do not infer missing appro
 - Avoid unnecessary micro-requirements and speculative future functionality.
 - Do not edit files or create issues until explicitly requested.
 
+## Template
+
+Use this format for each proposed requirement:
+
+### [Provisional Requirement ID] — [Title]
+
+**Parent need:** [Approved Need ID]
+
+**Requirement:** The system shall [observable behavior or constraint].
+
+**Acceptance criteria:**
+- [Only the conditions needed to verify this requirement.]
+
 ## Output
 
-Provide a table:
-
-| Provisional ID | Requirement | Type (functional/constraint) | Parent Need | Verification idea | Uncertainty |
-|---|---|---|---|---|---|
-
-Then provide:
-- Explicit exclusions.
-- Blocking questions, if any (maximum three).
-- Recommendation for the smallest useful first increment.
-
-Do not treat proposed requirements as approved until explicitly confirmed.
+- Keep each requirement to the template above; do not add extra metadata.
+- Add acceptance criteria only when they clarify verification beyond the requirement statement; otherwise omit that section.
+- List uncertainties, scope exclusions, or blocking questions separately only when necessary (maximum three questions).
+- Recommend the smallest useful first increment only when the proposed requirements span multiple increments.
+- Do not treat proposed requirements as approved until explicitly confirmed.
 
 ## Input
 

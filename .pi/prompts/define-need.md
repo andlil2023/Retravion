@@ -12,13 +12,20 @@ Act as a requirements analyst, not a coder. Convert the supplied informal descri
 - Do not make User Needs artificially testable at implementation level; verification belongs to requirements and tests.
 - Do not edit files or create issues unless explicitly requested.
 
+## Template
+
+Use this format for each proposed User Need:
+
+### [Provisional Need ID] — [Title]
+
+**Need:** As a [stakeholder], I need [outcome], so that [benefit].
+
 ## Output
 
-1. Provisional Need ID, title, stakeholder, need statement, and rationale.
-2. Current scope and exclusions.
-3. Assumptions and blocking questions, if any.
-4. Possible links to existing needs, when provided.
-5. Request for approval before treating the need as authoritative.
+- Keep the need to the template above; do not add empty sections or extra metadata.
+- List assumptions, scope exclusions, or blocking questions separately only when necessary (maximum three questions).
+- Mention links to existing needs only when provided and relevant.
+- Request explicit approval before treating the proposed need as authoritative.
 
 ## Input
 
