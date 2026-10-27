@@ -28,6 +28,12 @@ public sealed class Administrator
                 "The replacement password hash must differ from the current hash.")
             .Bind(() => Create(Username, passwordHash, requiresPasswordReplacement: false, failures: Failures));
 
+    public Result<Administrator> RecoverPassword(string? password, string? passwordHash) =>
+        PasswordPolicy.Validate(password)
+            .Ensure(() => !string.Equals(PasswordHash, passwordHash, StringComparison.Ordinal),
+                "The recovery password hash must differ from the current hash.")
+            .Bind(() => Create(Username, passwordHash, requiresPasswordReplacement: true, failures: SignInFailures.None));
+
     public static Result<Administrator> Create(string? username, string? passwordHash,
         bool requiresPasswordReplacement = true, SignInFailures? failures = null) =>
         Result.Success()

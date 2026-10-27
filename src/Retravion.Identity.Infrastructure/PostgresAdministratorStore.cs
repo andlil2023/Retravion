@@ -100,6 +100,33 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
         return !usernameMatches || affected == 1;
     }
 
+    public async Task<Result> RecoverPassword(Administrator expected, Administrator replacement,
+        CancellationToken cancellationToken = default)
+    {
+        if (!replacement.RequiresPasswordReplacement || replacement.Failures != SignInFailures.None ||
+            !string.Equals(expected.Username, replacement.Username, StringComparison.Ordinal) ||
+            string.Equals(expected.PasswordHash, replacement.PasswordHash, StringComparison.Ordinal))
+            return Result.Failure("Invalid administrator recovery transition.");
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE retravion_identity.administrator
+            SET password_hash = $1, requires_password_replacement = TRUE, failed_sign_ins = 0, retry_at = '-infinity'
+            WHERE singleton AND username = $2 AND password_hash = $3 AND requires_password_replacement = $4
+                AND failed_sign_ins = $5 AND retry_at = $6
+            """, connection);
+        command.Parameters.AddWithValue(replacement.PasswordHash);
+        command.Parameters.AddWithValue(expected.Username);
+        command.Parameters.AddWithValue(expected.PasswordHash);
+        command.Parameters.AddWithValue(expected.RequiresPasswordReplacement);
+        command.Parameters.AddWithValue(expected.Failures.Count);
+        command.Parameters.AddWithValue(expected.Failures.RetryAt);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1
+            ? Result.Success()
+            : Result.Failure("The administrator changed; retry recovery.");
+    }
+
     public async Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
         CancellationToken cancellationToken = default)
     {

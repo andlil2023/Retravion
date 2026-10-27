@@ -142,6 +142,9 @@ public sealed class AdministratorInitializationTests
         public Task<bool> TryRecordSignIn(Administrator expected, string? username, bool succeeded, DateTimeOffset now,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
+        public Task<Result> RecoverPassword(Administrator expected, Administrator replacement,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
