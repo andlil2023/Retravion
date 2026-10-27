@@ -45,6 +45,7 @@ public sealed class AdministratorRecoveryTests
         Assert.True(result.IsFailure);
         if (!string.IsNullOrEmpty(password)) Assert.DoesNotContain(password, result.Error);
         Assert.Same(original, store.Account.Value);
+        Assert.Equal(0, store.Loads);
         Assert.Equal(0, store.Writes);
         Assert.Equal(0, hasher.Calls);
     }
@@ -59,7 +60,10 @@ public sealed class AdministratorRecoveryTests
         {
             var store = new Store { Invalid = invalid };
             var hasher = new CountingHasher();
-            Assert.True((await new AdministratorRecovery(store, hasher).Recover(Password)).IsFailure);
+            var result = await new AdministratorRecovery(store, hasher).Recover(Password);
+            Assert.True(result.IsFailure);
+            Assert.Equal(invalid ? "Invalid persisted state" : "The administrator does not exist.", result.Error);
+            Assert.Equal(1, store.Loads);
             Assert.True(store.Account.HasNoValue);
             Assert.Equal(0, store.Writes);
             Assert.Equal(0, hasher.Calls);
@@ -75,6 +79,38 @@ public sealed class AdministratorRecoveryTests
         Assert.True((await new AdministratorRecovery(store, Hasher).Recover(Password)).IsFailure);
         Assert.Same(concurrent, store.Account.Value);
         Assert.Equal(0, store.Writes);
+    }
+
+    [Fact]
+    public async Task CancellationAndUnexpectedLoadFaultRemainExceptions()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var cancelled = new Store();
+        var hasher = new CountingHasher();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new AdministratorRecovery(cancelled, hasher).Recover(Password, cancellation.Token));
+        Assert.Equal(cancellation.Token, cancelled.LoadToken);
+        Assert.Equal(0, hasher.Calls);
+        Assert.Equal(0, cancelled.Writes);
+
+        var faulty = new Store { Fault = true };
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new AdministratorRecovery(faulty, hasher).Recover(Password));
+        Assert.Equal("Unexpected load failure", exception.Message);
+        Assert.Equal(0, hasher.Calls);
+        Assert.Equal(0, faulty.Writes);
+    }
+
+    [Fact]
+    public async Task SuccessfulRecoveryPassesCancellationTokenToLoadAndWrite()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var store = new Store { Account = Administrator.Create("admin", "old-hash").Value };
+
+        Assert.True((await new AdministratorRecovery(store, Hasher).Recover(Password, cancellation.Token)).IsSuccess);
+        Assert.Equal(cancellation.Token, store.LoadToken);
+        Assert.Equal(cancellation.Token, store.WriteToken);
     }
 
     [Fact]
@@ -98,11 +134,22 @@ public sealed class AdministratorRecoveryTests
         public Maybe<Administrator> Account { get; set; }
         public Administrator? Concurrent { get; init; }
         public bool Invalid { get; init; }
+        public bool Fault { get; init; }
+        public int Loads { get; private set; }
         public int Writes { get; private set; }
-        public Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default) =>
-            Task.FromResult(Invalid ? Result.Failure<Maybe<Administrator>>("Invalid persisted state") : Result.Success(Account));
+        public CancellationToken LoadToken { get; private set; }
+        public CancellationToken WriteToken { get; private set; }
+        public Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default)
+        {
+            Loads++;
+            LoadToken = cancellationToken;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Fault) throw new InvalidOperationException("Unexpected load failure");
+            return Task.FromResult(Invalid ? Result.Failure<Maybe<Administrator>>("Invalid persisted state") : Result.Success(Account));
+        }
         public Task<Result> RecoverPassword(Administrator expected, Administrator replacement, CancellationToken cancellationToken = default)
         {
+            WriteToken = cancellationToken;
             if (Concurrent is not null) Account = Concurrent;
             if (Account.HasNoValue || !ReferenceEquals(Account.Value, expected)) return Task.FromResult(Result.Failure("Stale account"));
             Account = replacement;
