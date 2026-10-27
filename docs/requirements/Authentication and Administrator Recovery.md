@@ -87,10 +87,13 @@ These system requirements may be verified through their child software requireme
 
 **Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003
 
-**Requirement:** The software shall accept passwords only when they contain 10–30 characters inclusive and include at least three of these four categories: lowercase letters (`a–z`), uppercase letters (`A–Z`), digits (`0–9`), and symbols.
+**Requirement:** The software shall accept passwords only when they contain 10–30 Unicode scalar values inclusive and include at least three of these four categories: ASCII lowercase letters (`a–z`), ASCII uppercase letters (`A–Z`), ASCII digits (`0–9`), and Unicode punctuation or symbol characters.
 
 **Acceptance criteria:**
 - The supplied symbol examples are not an exhaustive allowlist.
+- Whitespace and other characters contribute to length but not to a category.
+- Validate the original input without trimming or normalization.
+- Reject null, empty, out-of-range, and insufficient-category inputs.
 - These rules apply to initial configuration, password changes, and recovery passwords.
 
 ### REQ-SW-AUTH-005 — Require Initial Password Replacement
