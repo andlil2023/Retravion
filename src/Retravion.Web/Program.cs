@@ -37,6 +37,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
         options.SlidingExpiration = false;
     });
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<PasswordSignIn>();
 builder.Services.AddSingleton<Retravion.Identity.Application.PasswordReplacement>();
 
