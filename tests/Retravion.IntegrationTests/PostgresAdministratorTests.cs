@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Retravion.Identity.Domain;
 using Npgsql;
 using Retravion.Identity.Application;
 using Retravion.Identity.Infrastructure;
@@ -53,15 +55,16 @@ public sealed class PostgresAdministratorTests
             Assert.DoesNotContain("ValidPass", original.PasswordHash);
             Assert.True(original.RequiresPasswordReplacement);
 
-            // Simulate the pre-replacement schema: migration must restrict the existing account,
-            // preserve credentials, and remain idempotent on later loads.
+            // Simulate the pre-replacement/lockout schema: migration must restrict the existing account,
+            // preserve credentials, initialize failure tracking, and remain idempotent on later loads.
             await using (var legacy = new NpgsqlCommand(
-                "ALTER TABLE retravion_identity.administrator DROP COLUMN requires_password_replacement", connection))
+                "ALTER TABLE retravion_identity.administrator DROP COLUMN requires_password_replacement, DROP COLUMN failed_sign_ins, DROP COLUMN retry_at", connection))
                 await legacy.ExecuteNonQueryAsync();
             var migrated = (await new PostgresAdministratorStore(connectionString).Load()).Value.Value;
             Assert.True(migrated.RequiresPasswordReplacement);
             Assert.Equal(original.Username, migrated.Username);
             Assert.Equal(original.PasswordHash, migrated.PasswordHash);
+            Assert.Equal(SignInFailures.None, migrated.Failures);
             await using (var count = new NpgsqlCommand("SELECT count(*) FROM retravion_identity.administrator", connection))
                 Assert.Equal(1L, await count.ExecuteScalarAsync());
 
@@ -131,6 +134,98 @@ public sealed class PostgresAdministratorTests
             await using var drop = new NpgsqlCommand($"DROP DATABASE {database} WITH (FORCE)", server);
             await drop.ExecuteNonQueryAsync();
         }
+    }
+
+    [PostgresFact]
+    public async Task FailureTrackingAndLockoutSurviveHostsAndRejectStaleSuccess()
+    {
+        var serverConnection = Environment.GetEnvironmentVariable("RETRAVION_TEST_POSTGRES")!;
+        var database = $"retravion_test_{Guid.NewGuid():N}";
+        await using var server = new NpgsqlConnection(serverConnection);
+        await server.OpenAsync();
+        await using (var create = new NpgsqlCommand($"CREATE DATABASE {database}", server))
+            await create.ExecuteNonQueryAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(serverConnection)
+            { Database = database, Pooling = false }.ConnectionString;
+        try
+        {
+            var hasher = new Pbkdf2PasswordHasher();
+            var store = new PostgresAdministratorStore(connectionString);
+            Assert.True((await new AdministratorInitializer(store, hasher).Initialize("admin", "ValidPass123!")).IsSuccess);
+            var clock = new Clock();
+            for (var i = 0; i < 3; i++)
+                Assert.True((await new PasswordSignIn(new PostgresAdministratorStore(connectionString), hasher, clock)
+                    .Authenticate("admin", "wrong")).IsFailure);
+            Assert.Equal(3, (await store.Load()).Value.Value.Failures.Count);
+            Assert.True((await new PasswordSignIn(new PostgresAdministratorStore(connectionString), hasher, clock)
+                .Authenticate("admin", "ValidPass123!")).IsFailure);
+            clock.Advance(TimeSpan.FromSeconds(5));
+            Assert.True((await new PasswordSignIn(new PostgresAdministratorStore(connectionString), hasher, clock)
+                .Authenticate("admin", "ValidPass123!")).IsSuccess);
+            Assert.Equal(SignInFailures.None, (await store.Load()).Value.Value.Failures);
+
+            for (var i = 0; i < 9; i++)
+            {
+                Assert.True((await new PasswordSignIn(new PostgresAdministratorStore(connectionString), hasher, clock)
+                    .Authenticate("admin", "wrong")).IsFailure);
+                Assert.Equal(i + 1, (await store.Load()).Value.Value.Failures.Count);
+                clock.Advance(TimeSpan.FromSeconds(5));
+            }
+            var ninth = (await store.Load()).Value.Value;
+            var competingFailures = await Task.WhenAll(
+                store.TryRecordSignIn(ninth, "admin", false, clock.GetUtcNow()),
+                new PostgresAdministratorStore(connectionString).TryRecordSignIn(ninth, "admin", false, clock.GetUtcNow()));
+            Assert.Single(competingFailures, succeeded => succeeded);
+            Assert.Single(competingFailures, succeeded => !succeeded);
+            Assert.False(await store.TryRecordSignIn(ninth, "admin", true, clock.GetUtcNow()));
+            var locked = (await store.Load()).Value.Value;
+            Assert.True(locked.Failures.IsLocked);
+            clock.Advance(TimeSpan.FromDays(3650));
+            Assert.False(await store.TryRecordSignIn(locked, "admin", true, clock.GetUtcNow()));
+            Assert.True(await store.TryRecordSignIn(locked, "unknown", false, clock.GetUtcNow()));
+            Assert.Equal(locked.Failures, (await store.Load()).Value.Value.Failures);
+
+            // Password replacement is not recovery and must leave the lockout intact.
+            var replacement = locked.ReplacePassword("Replacement123!", hasher.Hash("Replacement123!")).Value;
+            Assert.True((await store.ReplacePassword(locked, replacement)).IsSuccess);
+            Assert.True((await store.Load()).Value.Value.Failures.IsLocked);
+
+            await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["ConnectionStrings:DefaultConnection"] = connectionString,
+                        ["InitialAdmin:Username"] = "different-admin",
+                        ["InitialAdmin:Password"] = "DifferentPass123!"
+                    })));
+            using var client = factory.CreateClient();
+            Assert.True((await client.GetAsync("/")).IsSuccessStatusCode);
+            Assert.Equal(PasswordSignIn.FailureMessage,
+                (await factory.Services.GetRequiredService<PasswordSignIn>()
+                    .Authenticate("admin", "Replacement123!")).Error);
+            Assert.True((await store.Load()).Value.Value.Failures.IsLocked);
+            Assert.Equal(locked.Username, (await store.Load()).Value.Value.Username);
+
+            // Even data that passes SQL's count constraint must pass domain validation.
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+            await using var corrupt = new NpgsqlCommand(
+                "UPDATE retravion_identity.administrator SET failed_sign_ins = 3, retry_at = '-infinity'", connection);
+            await corrupt.ExecuteNonQueryAsync();
+            Assert.Equal("The persisted administrator is invalid.", (await store.Load()).Error);
+        }
+        finally
+        {
+            await using var drop = new NpgsqlCommand($"DROP DATABASE {database} WITH (FORCE)", server);
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
+    private sealed class Clock : TimeProvider
+    {
+        private DateTimeOffset now = DateTimeOffset.UnixEpoch;
+        public override DateTimeOffset GetUtcNow() => now;
+        public void Advance(TimeSpan duration) => now += duration;
     }
 }
 

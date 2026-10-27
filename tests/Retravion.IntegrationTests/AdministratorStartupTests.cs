@@ -96,6 +96,20 @@ internal sealed class StartupAdministratorStore : IAdministratorStore
         return Task.FromResult(Result.Success(Account));
     }
 
+    public Task<bool> TryRecordSignIn(Administrator expected, string? username, bool succeeded, DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.Equals(username, expected.Username, StringComparison.Ordinal)) return Task.FromResult(true);
+        lock (this)
+        {
+            if (Account.HasNoValue || !ReferenceEquals(Account.Value, expected) || !expected.Failures.CanAttempt(now))
+                return Task.FromResult(false);
+            Account = Administrator.Create(expected.Username, expected.PasswordHash, expected.RequiresPasswordReplacement,
+                succeeded ? SignInFailures.None : expected.Failures.RecordFailure(now)).Value;
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
         CancellationToken cancellationToken = default)
     {

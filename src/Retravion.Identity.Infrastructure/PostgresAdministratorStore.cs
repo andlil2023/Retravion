@@ -24,12 +24,16 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
             );
             ALTER TABLE retravion_identity.administrator
                 ADD COLUMN IF NOT EXISTS requires_password_replacement boolean NOT NULL DEFAULT TRUE;
+            ALTER TABLE retravion_identity.administrator
+                ADD COLUMN IF NOT EXISTS failed_sign_ins integer NOT NULL DEFAULT 0
+                    CHECK (failed_sign_ins BETWEEN 0 AND 10),
+                ADD COLUMN IF NOT EXISTS retry_at timestamp with time zone NOT NULL DEFAULT '-infinity';
             """, connection, transaction);
         await setup.ExecuteNonQueryAsync(cancellationToken);
 
         Result<Maybe<Administrator>> result;
         await using (var command = new NpgsqlCommand(
-            "SELECT username, password_hash, requires_password_replacement FROM retravion_identity.administrator", connection, transaction))
+            "SELECT username, password_hash, requires_password_replacement, failed_sign_ins, retry_at FROM retravion_identity.administrator", connection, transaction))
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             if (!await reader.ReadAsync(cancellationToken))
@@ -38,7 +42,9 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
             }
             else
             {
-                result = Administrator.Create(reader.GetString(0), reader.GetString(1), reader.GetBoolean(2))
+                var failures = SignInFailures.Restore(reader.GetInt32(3), reader.GetFieldValue<DateTimeOffset>(4));
+                result = failures.Bind(state => Administrator.Create(reader.GetString(0), reader.GetString(1),
+                        reader.GetBoolean(2), state))
                     .Match(
                         administrator => Result.Success(Maybe<Administrator>.From(administrator)),
                         _ => Result.Failure<Maybe<Administrator>>("The persisted administrator is invalid."));
@@ -54,14 +60,44 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
-            INSERT INTO retravion_identity.administrator (singleton, username, password_hash, requires_password_replacement)
-            VALUES (TRUE, $1, $2, $3)
+            INSERT INTO retravion_identity.administrator
+                (singleton, username, password_hash, requires_password_replacement, failed_sign_ins, retry_at)
+            VALUES (TRUE, $1, $2, $3, $4, $5)
             ON CONFLICT (singleton) DO NOTHING
             """, connection);
         command.Parameters.AddWithValue(administrator.Username);
         command.Parameters.AddWithValue(administrator.PasswordHash);
         command.Parameters.AddWithValue(administrator.RequiresPasswordReplacement);
+        command.Parameters.AddWithValue(administrator.Failures.Count);
+        command.Parameters.AddWithValue(administrator.Failures.RetryAt);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<bool> TryRecordSignIn(Administrator expected, string? username, bool succeeded, DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        var usernameMatches = string.Equals(username, expected.Username, StringComparison.Ordinal);
+        if (usernameMatches && !expected.Failures.CanAttempt(now)) return false;
+        var failures = !usernameMatches ? expected.Failures
+            : succeeded ? SignInFailures.None : expected.Failures.RecordFailure(now);
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE retravion_identity.administrator
+            SET failed_sign_ins = $1, retry_at = $2
+            WHERE singleton AND username = $3 AND password_hash = $4
+                AND requires_password_replacement = $5 AND failed_sign_ins = $6 AND retry_at = $7 AND $8
+            """, connection);
+        command.Parameters.AddWithValue(failures.Count);
+        command.Parameters.AddWithValue(failures.RetryAt);
+        command.Parameters.AddWithValue(expected.Username);
+        command.Parameters.AddWithValue(expected.PasswordHash);
+        command.Parameters.AddWithValue(expected.RequiresPasswordReplacement);
+        command.Parameters.AddWithValue(expected.Failures.Count);
+        command.Parameters.AddWithValue(expected.Failures.RetryAt);
+        command.Parameters.AddWithValue(usernameMatches);
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+        return !usernameMatches || affected == 1;
     }
 
     public async Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
