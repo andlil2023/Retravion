@@ -10,6 +10,8 @@ using MudBlazor.Services;
 using Retravion.Identity.Application;
 using Retravion.Identity.Infrastructure;
 using Retravion.Web.Components;
+using Retravion.Application.AuditTrail;
+using Retravion.Infrastructure.AuditTrail;
 
 var builder = WebApplication.CreateBuilder(args);
 // Also support source-tree `dotnet run` without a Development launch profile.
@@ -57,6 +59,9 @@ builder.Services.AddSingleton<IAdministratorStore>(_ => new PostgresAdministrato
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddSingleton<AdministratorInitializer>();
+builder.Services.AddSingleton<IAuditSubmission>(_ => new PostgresAuditSubmission(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 
 var app = builder.Build();
 try
