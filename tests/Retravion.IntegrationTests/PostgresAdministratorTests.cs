@@ -221,6 +221,71 @@ public sealed class PostgresAdministratorTests
         }
     }
 
+    [PostgresFact]
+    public async Task RecoveryIsAtomicRejectsStaleSnapshotsAndNeverCreatesAnAccount()
+    {
+        var serverConnection = Environment.GetEnvironmentVariable("RETRAVION_TEST_POSTGRES")!;
+        var database = $"retravion_test_{Guid.NewGuid():N}";
+        await using var server = new NpgsqlConnection(serverConnection);
+        await server.OpenAsync();
+        await using (var create = new NpgsqlCommand($"CREATE DATABASE {database}", server))
+            await create.ExecuteNonQueryAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(serverConnection)
+            { Database = database, Pooling = false }.ConnectionString;
+        try
+        {
+            var hasher = new Pbkdf2PasswordHasher();
+            var store = new PostgresAdministratorStore(connectionString);
+            var recovery = new AdministratorRecovery(store, hasher);
+            Assert.True((await recovery.Recover("RecoveryPass123!")).IsFailure);
+            Assert.True((await store.Load()).Value.HasNoValue);
+            Assert.True((await new AdministratorInitializer(store, hasher).Initialize("admin", "OriginalPass123!")).IsSuccess);
+            var initial = (await store.Load()).Value.Value;
+            Assert.True(await store.TryRecordSignIn(initial, "admin", false, DateTimeOffset.UnixEpoch));
+            var changed = (await store.Load()).Value.Value;
+            var staleReplacement = initial.RecoverPassword("RecoveryPass123!", hasher.Hash("RecoveryPass123!")).Value;
+            Assert.True((await store.RecoverPassword(initial, staleReplacement)).IsFailure);
+            Assert.Equal(changed.Failures, (await store.Load()).Value.Value.Failures);
+            Assert.True((await recovery.Recover("short")).IsFailure);
+            Assert.Equal(changed.PasswordHash, (await store.Load()).Value.Value.PasswordHash);
+            Assert.Equal(changed.Failures, (await store.Load()).Value.Value.Failures);
+
+            // Competing recoveries match the same credential and failure snapshot; only one may commit.
+            var first = changed.RecoverPassword("RecoveryPass123!", hasher.Hash("RecoveryPass123!")).Value;
+            var second = changed.RecoverPassword("OtherRecovery123!", hasher.Hash("OtherRecovery123!")).Value;
+            var results = await Task.WhenAll(store.RecoverPassword(changed, first),
+                new PostgresAdministratorStore(connectionString).RecoverPassword(changed, second));
+            Assert.Single(results, result => result.IsSuccess);
+            Assert.Single(results, result => result.IsFailure);
+            var persisted = (await new PostgresAdministratorStore(connectionString).Load()).Value.Value;
+            Assert.Equal("admin", persisted.Username);
+            Assert.True(persisted.RequiresPasswordReplacement);
+            Assert.Equal(SignInFailures.None, persisted.Failures);
+            Assert.Equal(results[0].IsSuccess ? first.PasswordHash : second.PasswordHash, persisted.PasswordHash);
+            Assert.True(hasher.Verify(results[0].IsSuccess ? "RecoveryPass123!" : "OtherRecovery123!", persisted.PasswordHash));
+            Assert.False(hasher.Verify("OriginalPass123!", persisted.PasswordHash));
+
+            // A terminal lockout is cleared by the public recovery operation as one persisted transition.
+            var locked = Administrator.Create(persisted.Username, persisted.PasswordHash, false,
+                SignInFailures.Restore(10, DateTimeOffset.MinValue).Value).Value;
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+            await using (var command = new NpgsqlCommand("UPDATE retravion_identity.administrator SET requires_password_replacement = FALSE, failed_sign_ins = 10, retry_at = '-infinity'", connection))
+                await command.ExecuteNonQueryAsync();
+            Assert.Equal(locked.Failures, (await store.Load()).Value.Value.Failures);
+            Assert.True((await recovery.Recover("FinalRecovery123!")).IsSuccess);
+            var recovered = (await store.Load()).Value.Value;
+            Assert.Equal(SignInFailures.None, recovered.Failures);
+            Assert.True(recovered.RequiresPasswordReplacement);
+            Assert.True(hasher.Verify("FinalRecovery123!", recovered.PasswordHash));
+        }
+        finally
+        {
+            await using var drop = new NpgsqlCommand($"DROP DATABASE {database} WITH (FORCE)", server);
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
     private sealed class Clock : TimeProvider
     {
         private DateTimeOffset now = DateTimeOffset.UnixEpoch;

@@ -378,6 +378,9 @@ public sealed class PasswordSignInTests
             }
         }
 
+        public Task<Result> RecoverPassword(Administrator expected, Administrator replacement,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("Sign-in must not write credentials.");

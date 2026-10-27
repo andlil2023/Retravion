@@ -177,6 +177,9 @@ public sealed class PasswordReplacementTests
             return Task.FromResult(true);
         }
 
+        public Task<Result> RecoverPassword(Administrator expected, Administrator replacement,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
             CancellationToken cancellationToken = default)
         {
