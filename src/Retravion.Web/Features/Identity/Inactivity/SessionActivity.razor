@@ -7,12 +7,25 @@
 @inject SessionTicketStore Sessions
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject TimeProvider Time
+
+@if (_authenticated && _showWarning)
+{
+    <MudAlert Severity="Severity.Warning" role="alert" aria-label="Inactivity warning">
+        You have been inactive for five minutes. Confirm your presence to keep your session active.
+        <MudButton OnClick="ConfirmPresence" Variant="Variant.Filled" Color="Color.Primary">
+            I'm still here
+        </MudButton>
+    </MudAlert>
+}
 
 @code {
     private IJSObjectReference? _module;
     private DotNetObjectReference<SessionActivity>? _reference;
     private bool _authenticated;
     private bool _disposed;
+    private bool _showWarning;
+    private ITimer? _warningTimer;
 
     protected override async Task OnInitializedAsync()
     {
@@ -24,6 +37,9 @@
         if (!firstRender || !_authenticated) return;
         Authentication.AuthenticationStateChanged += AuthenticationChanged;
         AuthenticationChanged(Authentication.GetAuthenticationStateAsync());
+        _warningTimer = Time.CreateTimer(_ => _ = InvokeAsync(UpdateWarning), null,
+            Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        await UpdateWarning();
         try
         {
             _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/sessionActivity.js");
@@ -43,8 +59,39 @@
     {
         if (_disposed) return false;
         var state = await Authentication.GetAuthenticationStateAsync();
-        return state.User.Identity?.IsAuthenticated == true &&
+        var active = state.User.Identity?.IsAuthenticated == true &&
             Sessions.RecordActivity(state.User.FindFirstValue(SessionTicketStore.SessionClaim));
+        if (active) await InvokeAsync(UpdateWarning);
+        return active;
+    }
+
+    private async Task ConfirmPresence()
+    {
+        if (!await RecordActivity() && !_disposed)
+            Navigation.NavigateTo("/", forceLoad: true);
+    }
+
+    private async Task UpdateWarning()
+    {
+        if (_disposed) return;
+        var state = await Authentication.GetAuthenticationStateAsync();
+        var key = state.User.FindFirstValue(SessionTicketStore.SessionClaim);
+        var ticket = key is not null ? await Sessions.RetrieveAsync(key) : null;
+        if (_disposed) return;
+        if (ticket?.Properties.ExpiresUtc is not { } expiry)
+        {
+            _showWarning = false;
+            _warningTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        }
+        else
+        {
+            // Reading the server deadline never records activity. If another circuit or
+            // application request moved it, defer the warning to that session's new deadline.
+            var remaining = expiry - SessionTicketStore.InactivityTimeout + TimeSpan.FromMinutes(5) - Time.GetUtcNow();
+            _showWarning = remaining <= TimeSpan.Zero;
+            _warningTimer?.Change(_showWarning ? Timeout.InfiniteTimeSpan : remaining, Timeout.InfiniteTimeSpan);
+        }
+        StateHasChanged();
     }
 
     private void AuthenticationChanged(Task<AuthenticationState> stateTask) => _ = InvokeAsync(async () =>
@@ -53,6 +100,9 @@
         if (!_disposed && _authenticated && !authenticated)
         {
             _authenticated = false;
+            _showWarning = false;
+            _warningTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            StateHasChanged();
             Navigation.NavigateTo("/", forceLoad: true);
         }
     });
@@ -61,6 +111,7 @@
     {
         _disposed = true;
         Authentication.AuthenticationStateChanged -= AuthenticationChanged;
+        if (_warningTimer is not null) await _warningTimer.DisposeAsync();
         if (_module is not null)
         {
             try

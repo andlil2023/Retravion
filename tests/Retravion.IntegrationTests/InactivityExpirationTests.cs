@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
+using MudBlazor.Services;
 using Retravion.Web.Components;
 using Retravion.Web.Features.Identity.Inactivity;
 using Retravion.Web.Features.Identity.Logout;
@@ -159,13 +160,7 @@ public sealed class InactivityExpirationTests
         await using var factory = Factory(time);
         using var client = Client(factory);
         var principal = await Principal(factory, await SignIn(client, pending: false));
-        await using var services = new ServiceCollection()
-            .AddLogging()
-            .AddSingleton(factory.Services.GetRequiredService<SessionTicketStore>())
-            .AddScoped<AuthenticationStateProvider, SessionAuthenticationStateProvider>()
-            .AddSingleton<NavigationManager>(navigation)
-            .AddSingleton<IJSRuntime>(js)
-            .BuildServiceProvider();
+        await using var services = ActivityServices(factory.Services.GetRequiredService<SessionTicketStore>(), time, navigation, js);
         var provider = services.GetRequiredService<AuthenticationStateProvider>();
         ((IHostEnvironmentAuthenticationStateProvider)provider).SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));
         await using var renderer = new InteractiveRenderer(services, services.GetRequiredService<ILoggerFactory>());
@@ -185,6 +180,107 @@ public sealed class InactivityExpirationTests
         });
         Assert.Empty(renderer.Errors);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WarningAppearsAtFiveMinutesWithoutExtendingExpiryAndUnattendedSessionStillExpires(bool pending)
+    {
+        var time = new ManualTime();
+        var navigation = new TestNavigation();
+        await using var factory = Factory(time);
+        using var client = Client(factory);
+        var principal = await Principal(factory, await SignIn(client, pending));
+        var store = factory.Services.GetRequiredService<SessionTicketStore>();
+        var key = principal.FindFirstValue(SessionTicketStore.SessionClaim)!;
+        var expiry = (await store.RetrieveAsync(key))!.Properties.ExpiresUtc;
+        await using var services = ActivityServices(store, time, navigation, new TestJS());
+        var provider = services.GetRequiredService<AuthenticationStateProvider>();
+        ((IHostEnvironmentAuthenticationStateProvider)provider).SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));
+        await using var renderer = new InteractiveRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.Mount();
+            Assert.False(renderer.WarningVisible);
+            time.Advance(TimeSpan.FromMinutes(5) - TimeSpan.FromTicks(1));
+            Assert.False(renderer.WarningVisible);
+            time.Advance(TimeSpan.FromTicks(1));
+            Assert.True(renderer.WarningVisible);
+            Assert.Equal(expiry, (await store.RetrieveAsync(key))!.Properties.ExpiresUtc);
+            time.Advance(TimeSpan.FromMinutes(25) - TimeSpan.FromTicks(1));
+            Assert.True(renderer.WarningVisible);
+            Assert.Null(navigation.Destination);
+            Assert.True(store.IsActive(key));
+            time.Advance(TimeSpan.FromTicks(1));
+            Assert.False(renderer.WarningVisible);
+            Assert.Null(await store.RetrieveAsync(key));
+            Assert.False((await provider.GetAuthenticationStateAsync()).User.Identity!.IsAuthenticated);
+            Assert.Equal("/", navigation.Destination);
+            Assert.True(navigation.ForceLoad);
+            Assert.False(await component.RecordActivity());
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PresenceButtonAndOtherInteractionsDismissWarningAndRestartBothDeadlines(bool pending)
+    {
+        var time = new ManualTime();
+        var navigation = new TestNavigation();
+        await using var factory = Factory(time);
+        using var client = Client(factory);
+        var principal = await Principal(factory, await SignIn(client, pending));
+        var store = factory.Services.GetRequiredService<SessionTicketStore>();
+        var key = principal.FindFirstValue(SessionTicketStore.SessionClaim)!;
+        await using var services = ActivityServices(store, time, navigation, new TestJS());
+        var provider = services.GetRequiredService<AuthenticationStateProvider>();
+        ((IHostEnvironmentAuthenticationStateProvider)provider).SetAuthenticationState(Task.FromResult(new AuthenticationState(principal)));
+        await using var renderer = new InteractiveRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.Mount();
+            time.Advance(TimeSpan.FromMinutes(5));
+            Assert.True(renderer.WarningVisible);
+            // Dispatch the actual rendered button, independently of the browser input listener.
+            await renderer.ConfirmPresence();
+            Assert.False(renderer.WarningVisible);
+            Assert.Equal(time.GetUtcNow().AddMinutes(30), (await store.RetrieveAsync(key))!.Properties.ExpiresUtc);
+            time.Advance(TimeSpan.FromMinutes(5) - TimeSpan.FromTicks(1));
+            Assert.False(renderer.WarningVisible);
+            time.Advance(TimeSpan.FromTicks(1));
+            Assert.True(renderer.WarningVisible);
+            Assert.True(await component.RecordActivity());
+            Assert.False(renderer.WarningVisible);
+            Assert.Equal(time.GetUtcNow().AddMinutes(30), (await store.RetrieveAsync(key))!.Properties.ExpiresUtc);
+            // Activity from another circuit or an application request also defers the warning.
+            time.Advance(TimeSpan.FromMinutes(4));
+            Assert.True(store.RecordActivity(key));
+            time.Advance(TimeSpan.FromMinutes(1));
+            Assert.False(renderer.WarningVisible);
+            time.Advance(TimeSpan.FromMinutes(4));
+            Assert.True(renderer.WarningVisible);
+            time.Advance(TimeSpan.FromMinutes(25) - TimeSpan.FromTicks(1));
+            Assert.Null(navigation.Destination);
+            Assert.True(store.IsActive(key));
+            time.Advance(TimeSpan.FromTicks(1));
+            Assert.Equal("/", navigation.Destination);
+            Assert.False(store.IsActive(key));
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    private static ServiceProvider ActivityServices(SessionTicketStore store, TimeProvider time, TestNavigation navigation, TestJS js) =>
+        new ServiceCollection()
+            .AddLogging()
+            .AddSingleton(store)
+            .AddSingleton(time)
+            .AddScoped<AuthenticationStateProvider, SessionAuthenticationStateProvider>()
+            .AddSingleton<NavigationManager>(navigation)
+            .AddSingleton<IJSRuntime>(js)
+            .AddMudServices()
+            .BuildServiceProvider();
 
     private static AuthenticationTicket Ticket(TimeProvider time) => new(new ClaimsPrincipal(new ClaimsIdentity(new[]
     {
@@ -274,10 +370,29 @@ public sealed class InactivityExpirationTests
         internal List<Exception> Errors { get; } = new();
         protected override void HandleException(Exception exception) => Errors.Add(exception);
         protected override Task UpdateDisplayAsync(in RenderBatch renderBatch) => Task.CompletedTask;
+        private int _root;
+        internal bool WarningVisible => Frames(_root).Any(frame => frame.FrameType == RenderTreeFrameType.Attribute &&
+            frame.AttributeName == "aria-label" && Equals(frame.AttributeValue, "Inactivity warning"));
+        internal Task ConfirmPresence() => DispatchEventAsync(Frames(_root)
+            .SkipWhile(frame => frame.FrameType != RenderTreeFrameType.Element || frame.ElementName != "button")
+            .Skip(1).TakeWhile(frame => frame.FrameType == RenderTreeFrameType.Attribute)
+            .Single(frame => frame.AttributeName == "onclick" && frame.AttributeEventHandlerId != 0)
+            .AttributeEventHandlerId, null, new MouseEventArgs());
+        private IEnumerable<RenderTreeFrame> Frames(int componentId)
+        {
+            var frames = GetCurrentRenderTreeFrames(componentId);
+            foreach (var frame in frames.Array.Take(frames.Count))
+            {
+                yield return frame;
+                if (frame.FrameType == RenderTreeFrameType.Component)
+                    foreach (var child in Frames(frame.ComponentId)) yield return child;
+            }
+        }
         internal async Task<SessionActivity> Mount()
         {
             var component = (SessionActivity)InstantiateComponent(typeof(SessionActivity));
-            await RenderRootComponentAsync(AssignRootComponentId(component));
+            _root = AssignRootComponentId(component);
+            await RenderRootComponentAsync(_root);
             return component;
         }
     }
