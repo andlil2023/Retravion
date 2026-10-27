@@ -37,6 +37,12 @@
 - Successfully committed records survive an application restart.
 - The submission interface provides no operation for modifying or deleting existing records.
 
+### REQ-AUDIT-03 — Audit Login Attempts
+
+**Parent need:** UN-AUDIT-01
+
+**Requirement:** The system shall submit audit information for successful and failed authentication decisions and shall not grant a new authenticated session unless audit submission is confirmed successful.
+
 ## Approved Architectural Direction
 
 Place the audit submission interface and information types in `src/Retravion.Application/AuditTrail/`, without creating a separate project.
@@ -45,8 +51,8 @@ Implement PostgreSQL persistence under `src/Retravion.Infrastructure/AuditTrail/
 
 ## Scope
 
-REQ-AUDIT-01 defines the submission interface and audit information types; REQ-AUDIT-02 adds durable submission and database storage. Defining or resolving the contract alone does not claim that audit information has been stored.
+REQ-AUDIT-01 defines the submission interface and audit information types; REQ-AUDIT-02 adds durable submission and database storage; REQ-AUDIT-03 integrates login decisions. A successful login event records the authentication decision at the initial credential recheck, not proof of session creation. A later recheck may deny a session after that event has been submitted. Defining or resolving the contract alone does not claim that audit information has been stored.
 
-Integration of login or other application operations, audit browsing/search UI, retention, export, tamper-evidence mechanisms, retry queues, duplicate-submission guarantees, and caller reactions to submission failure remain outside this increment. A failed submission is not a guarantee that no record was committed if confirmation was lost; automatic retries are not provided.
+Integration of other application operations, audit browsing/search UI, retention, export, tamper-evidence mechanisms, retry queues, and duplicate-submission guarantees remain outside this increment. Audit storage and session creation are not atomic: a failed or uncertain submission may have committed an event even when access is denied. Automatic retries are not provided.
 
 These requirements are incremental contributions to UN-AUDIT-01, not delivery of a complete audit trail or evidence of compliance with a particular regulatory standard.

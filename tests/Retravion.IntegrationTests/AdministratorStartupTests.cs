@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
+using Retravion.Application.AuditTrail;
 using Retravion.Identity.Application;
 using Retravion.Identity.Domain;
 using Retravion.Identity.Infrastructure;
@@ -81,8 +82,16 @@ internal sealed class AdministratorWebFactory(
         {
             services.RemoveAll<IAdministratorStore>();
             services.AddSingleton<IAdministratorStore>(store);
+            services.RemoveAll<IAuditSubmission>();
+            services.AddSingleton<IAuditSubmission, SuccessfulAuditSubmission>();
         });
     }
+}
+
+internal sealed class SuccessfulAuditSubmission : IAuditSubmission
+{
+    public Task<AuditSubmissionResult> SubmitAsync(AuditInformation information, CancellationToken cancellationToken = default) =>
+        Task.FromResult(AuditSubmissionResult.Success);
 }
 
 internal sealed class StartupAdministratorStore : IAdministratorStore
