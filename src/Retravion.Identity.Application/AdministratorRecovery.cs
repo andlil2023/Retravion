@@ -8,15 +8,10 @@ public sealed class AdministratorRecovery(IAdministratorStore store, IPasswordHa
 {
     public async Task<Result> Recover(string? password, CancellationToken cancellationToken = default)
     {
-        var validation = PasswordPolicy.Validate(password);
-        if (validation.IsFailure) return validation;
-
-        var loaded = await store.Load(cancellationToken);
-        if (loaded.IsFailure) return Result.Failure(loaded.Error);
-        if (loaded.Value.HasNoValue) return Result.Failure("The administrator does not exist.");
-
-        var administrator = loaded.Value.Value;
-        return await administrator.RecoverPassword(password, hasher.Hash(password!))
-            .Bind(replacement => store.RecoverPassword(administrator, replacement, cancellationToken));
+        return await PasswordPolicy.Validate(password)
+            .Bind(() => store.Load(cancellationToken))
+            .Bind(account => account.ToResult("The administrator does not exist."))
+            .Bind(administrator => administrator.RecoverPassword(password, hasher.Hash(password!))
+                .Bind(replacement => store.RecoverPassword(administrator, replacement, cancellationToken)));
     }
 }
