@@ -110,6 +110,11 @@ These system requirements may be verified through their child software requireme
 - Before authentication, only login is accessible.
 - After authentication, access remains limited to completing the required password change.
 - The replacement password satisfies REQ-SW-AUTH-004 and differs from the initial password.
+- The replacement form retains the current-password field and includes labeled, masked new-password and confirm-new-password fields that support new-password autofill.
+- The new password and confirmation are both required and must match exactly, case-sensitively, without trimming or Unicode normalization. This validation is enforced server-side, including direct submissions that bypass the form.
+- Missing, empty, or mismatched new-password/confirmation values prevent replacement and display a clear, accessible validation message. The stored password remains unchanged and access remains limited to completing the required password change.
+- Password values are not echoed in validation responses or URLs.
+- Confirmation is required both after initial setup and after administrator recovery.
 - Successful completion routes the administrator to the home page with full administrator access.
 - Subsequent sign-ins do not require this initial-password change again unless recovery resets the account.
 
