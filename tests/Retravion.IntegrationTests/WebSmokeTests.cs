@@ -29,13 +29,13 @@ public sealed class WebSmokeTests
         Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
         Assert.Contains("<title>Retravion</title>", html);
         Assert.Contains("<h1>Retravion</h1>", html);
-        Assert.Contains("aria-label=\"Login prototype\"", html);
+        Assert.Contains("aria-label=\"Login\"", html);
         Assert.Contains("Log in", html);
         Assert.Contains("id=\"username\"", html);
         Assert.Contains("id=\"password\"", html);
-        Assert.Contains("novalidate", html);
-        Assert.DoesNotContain(" required", html);
-        Assert.Contains("No authentication or validation.", html);
+        Assert.Contains("action=\"/identity/login\"", html);
+        Assert.Contains("name=\"__RequestVerificationToken\"", html);
+        Assert.DoesNotContain("No authentication or validation.", html);
         Assert.DoesNotContain("aria-label=\"Main navigation\"", html);
     }
 
@@ -60,7 +60,7 @@ public sealed class WebSmokeTests
         Assert.Contains("aria-label=\"Page actions\"", html);
         Assert.Contains("aria-label=\"Use dark theme\"", html);
         Assert.Matches("<main[^>]*id=\"page-content\"[^>]*>\\s*</main>", html);
-        Assert.DoesNotContain("aria-label=\"Login prototype\"", html);
+        Assert.DoesNotContain("aria-label=\"Login\"", html);
         Assert.DoesNotContain("<table", html);
     }
 
