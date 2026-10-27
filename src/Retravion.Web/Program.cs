@@ -1,4 +1,6 @@
 using System.Data.Common;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Retravion.Web.Features.Identity.Login;
 using MudBlazor.Services;
 using Retravion.Identity.Application;
 using Retravion.Identity.Infrastructure;
@@ -10,6 +12,18 @@ builder.WebHost.UseStaticWebAssets();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/";
+        options.Cookie.Name = "Retravion.Identity";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
+        options.SlidingExpiration = false;
+    });
+builder.Services.AddSingleton<PasswordSignIn>();
 
 builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 builder.Services.AddSingleton<IAdministratorStore>(_ => new PostgresAdministratorStore(
@@ -33,7 +47,9 @@ catch (Exception exception) when (exception is DbException or ArgumentException)
     throw new InvalidOperationException("Administrator initialization failed. Check database configuration and availability.");
 }
 
+app.UseAuthentication();
 app.UseAntiforgery();
+app.MapLogin();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

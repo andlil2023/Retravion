@@ -1,6 +1,7 @@
 @page "/"
 @layout LoginLayout
-@inject NavigationManager Navigation
+@using Microsoft.AspNetCore.Components.Forms
+@using Retravion.Identity.Application
 
 <PageTitle>Retravion</PageTitle>
 
@@ -13,22 +14,27 @@
         <h1>Retravion</h1>
         <p class="login-intro">A clear view of your product lifecycle.</p>
 
-        <form @onsubmit="OpenHome" @onsubmit:preventDefault novalidate aria-label="Login prototype">
+        <form method="post" action="/identity/login" data-enhance="false" aria-label="Login">
+            <AntiforgeryToken />
             <label for="username">Username</label>
-            <input id="username" type="text" autocomplete="off" placeholder="Your username" />
+            <input id="username" name="username" type="text" autocomplete="username" placeholder="Your username" />
 
             <label for="password">Password</label>
-            <input id="password" type="password" autocomplete="off" placeholder="Your password" />
+            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Your password" />
 
             <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
                        FullWidth="true" DropShadow="false" Class="login-button">
                 Log in
             </MudButton>
-            <p class="prototype-note">UI prototype only. No authentication or validation.<br />Do not enter real credentials.</p>
+            @if (Failed)
+            {
+                <p role="alert">@PasswordSignIn.FailureMessage</p>
+            }
         </form>
     </MudPaper>
 </main>
 
 @code {
-    private void OpenHome() => Navigation.NavigateTo("/home");
+    [SupplyParameterFromQuery(Name = "failed")]
+    public bool Failed { get; set; }
 }
