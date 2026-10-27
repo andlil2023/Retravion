@@ -62,7 +62,7 @@ public sealed class ProtectedAccessTests
         using var replaced = await client.PostAsync("/identity/password-replacement", new FormUrlEncodedContent(
             new Dictionary<string, string>
             {
-                ["currentPassword"] = Initial, ["newPassword"] = Replacement,
+                ["currentPassword"] = Initial, ["newPassword"] = Replacement, ["confirmNewPassword"] = Replacement,
                 ["__RequestVerificationToken"] = Token(await client.GetStringAsync("/password-replacement"))
             }));
         Assert.Equal("/home", replaced.Headers.Location?.OriginalString);

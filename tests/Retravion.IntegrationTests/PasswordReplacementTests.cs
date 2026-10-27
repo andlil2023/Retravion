@@ -28,6 +28,8 @@ public sealed class PasswordReplacementTests
         var html = await client.GetStringAsync("/password-replacement");
         Assert.Contains("aria-label=\"Replace password\"", html);
         Assert.Contains("autocomplete=\"current-password\"", html);
+        Assert.Contains("<label for=\"confirm-new-password\">Confirm new password</label>", html);
+        Assert.Contains("name=\"confirmNewPassword\" type=\"password\" autocomplete=\"new-password\"", html);
         Assert.Contains("autocomplete=\"new-password\"", html);
         Assert.DoesNotContain("aria-label=\"Main navigation\"", html);
         Assert.False(observer.FullAccess);
@@ -59,7 +61,6 @@ public sealed class PasswordReplacementTests
     [InlineData(Initial, "short")]
     [InlineData(Initial, Initial)]
     [InlineData("wrong-current", Replacement)]
-    [InlineData(Initial, "")]
     public async Task FailureShowsMessageAndRetainsRestriction(string current, string replacement)
     {
         var store = new StartupAdministratorStore();
@@ -79,6 +80,55 @@ public sealed class PasswordReplacementTests
         using var home = await client.GetAsync("/home");
         Assert.Equal("/password-replacement", home.Headers.Location?.OriginalString);
         Assert.DoesNotContain("Main navigation", await home.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData(" Replacement123! ")]
+    [InlineData("ValidPass123!e\u0301")]
+    public async Task ExactlyMatchingPasswordIsNotTrimmedOrNormalized(string password)
+    {
+        var store = new StartupAdministratorStore();
+        await using var factory = new AdministratorWebFactory(store, "admin", Initial);
+        using var client = CreateClient(factory);
+        using var login = await Login(client, Initial);
+        using var response = await Replace(client, Token(await client.GetStringAsync("/password-replacement")), Initial, password);
+        Assert.Equal("/home", response.Headers.Location?.OriginalString);
+        Assert.True(new Pbkdf2PasswordHasher().Verify(password, store.Account.Value.PasswordHash));
+    }
+
+    [Theory]
+    [InlineData(null, "Replacement123!")]
+    [InlineData("", "Replacement123!")]
+    [InlineData("Replacement123!", null)]
+    [InlineData("Replacement123!", "")]
+    [InlineData("Replacement123!", "replacement123!")]
+    [InlineData("Replacement123!", "Replacement123! ")]
+    [InlineData("ValidPass123!é", "ValidPass123!e\u0301")]
+    public async Task ConfirmationFailureIsRejectedServerSideWithoutChangingPassword(string? password, string? confirmation)
+    {
+        var store = new StartupAdministratorStore();
+        await using var factory = new AdministratorWebFactory(store, "admin", Initial);
+        using var client = CreateClient(factory);
+        using var login = await Login(client, Initial);
+        var original = store.Account.Value;
+        var form = new Dictionary<string, string>
+        {
+            ["currentPassword"] = Initial,
+            ["__RequestVerificationToken"] = Token(await client.GetStringAsync("/password-replacement"))
+        };
+        if (password is not null) form["newPassword"] = password;
+        if (confirmation is not null) form["confirmNewPassword"] = confirmation;
+        using var response = await client.PostAsync("/identity/password-replacement", new FormUrlEncodedContent(form));
+        Assert.Equal("/password-replacement?confirmationFailed=true", response.Headers.Location?.OriginalString);
+        var html = await client.GetStringAsync(response.Headers.Location);
+        Assert.Contains("role=\"alert\"", html);
+        Assert.Contains("Enter a new password and matching confirmation.", html);
+        if (!string.IsNullOrEmpty(password)) Assert.DoesNotContain(password, html);
+        if (!string.IsNullOrEmpty(confirmation)) Assert.DoesNotContain(confirmation, html);
+        Assert.Same(original, store.Account.Value);
+        Assert.Equal(1, store.Writes);
+        using var home = await client.GetAsync("/home");
+        Assert.Equal("/password-replacement", home.Headers.Location?.OriginalString);
     }
 
     [Theory]
@@ -134,7 +184,7 @@ public sealed class PasswordReplacementTests
 
     private static Task<HttpResponseMessage> Replace(HttpClient client, string? token, string current, string replacement)
     {
-        var form = new Dictionary<string, string> { ["currentPassword"] = current, ["newPassword"] = replacement };
+        var form = new Dictionary<string, string> { ["currentPassword"] = current, ["newPassword"] = replacement, ["confirmNewPassword"] = replacement };
         if (token is not null) form["__RequestVerificationToken"] = token;
         return client.PostAsync("/identity/password-replacement", new FormUrlEncodedContent(form));
     }
