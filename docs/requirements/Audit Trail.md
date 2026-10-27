@@ -22,12 +22,31 @@
 - The contract distinguishes an unidentified target from an activity with no applicable target.
 - The submission interface reports success or failure to its caller, separately from the outcome of the audited action.
 
+### REQ-AUDIT-02 — Durable Audit Submission
+
+**Parent need:** UN-AUDIT-01
+
+**Requirement:** The system shall provide a working implementation of the common audit submission contract that durably records submitted audit information.
+
+**Acceptance criteria:**
+- A successful submission stores the supplied actor, occurrence time, action, target, and action outcome.
+- Unknown actors and the different target variants remain distinguishable after storage.
+- Occurrence time preserves the supplied instant; storage may normalize it to UTC.
+- Submission reports success only after the database transaction has committed.
+- Expected storage failures report submission failure independently of the audited action's outcome. Unexpected faults remain exceptions.
+- Successfully committed records survive an application restart.
+- The submission interface provides no operation for modifying or deleting existing records.
+
 ## Approved Architectural Direction
 
 Place the audit submission interface and information types in `src/Retravion.Application/AuditTrail/`, without creating a separate project.
 
+Implement PostgreSQL persistence under `src/Retravion.Infrastructure/AuditTrail/`, using the existing database. Register the implementation through application composition. Callers depend on the submission contract, not storage details.
+
 ## Scope
 
-The current increment defines only the submission interface and audit information types. It includes no working submission implementation, database storage, or integration of application operations. Defining the contract does not claim that audit information has been stored. Caller reactions to submission failure are not defined in this increment.
+REQ-AUDIT-01 defines the submission interface and audit information types; REQ-AUDIT-02 adds durable submission and database storage. Defining or resolving the contract alone does not claim that audit information has been stored.
 
-This contract is an incremental contribution to UN-AUDIT-01, not delivery of a complete audit trail or evidence of compliance with a particular regulatory standard.
+Integration of login or other application operations, audit browsing/search UI, retention, export, tamper-evidence mechanisms, retry queues, duplicate-submission guarantees, and caller reactions to submission failure remain outside this increment. A failed submission is not a guarantee that no record was committed if confirmation was lost; automatic retries are not provided.
+
+These requirements are incremental contributions to UN-AUDIT-01, not delivery of a complete audit trail or evidence of compliance with a particular regulatory standard.
