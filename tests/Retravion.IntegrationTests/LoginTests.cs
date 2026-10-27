@@ -119,6 +119,67 @@ public sealed class LoginTests
         Assert.False(observer.User?.IsInRole("Administrator"));
     }
 
+    [Theory]
+    [InlineData("specific-admin")]
+    [InlineData("unknown")]
+    public async Task RetryRestrictionsAreSharedAcrossBrowsersAndUseTheSameOutwardFailure(string username)
+    {
+        var clock = new Clock();
+        await using var factory = CreateFactory().WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddSingleton<TimeProvider>(clock)));
+        using var firstBrowser = CreateClient(factory);
+        using var secondBrowser = CreateClient(factory);
+        var firstToken = await GetToken(firstBrowser);
+        var secondToken = await GetToken(secondBrowser);
+
+        for (var i = 0; i < 3; i++)
+        {
+            using var failure = await Submit(firstBrowser, firstToken, username, "wrong");
+            Assert.Equal(HttpStatusCode.Redirect, failure.StatusCode);
+            Assert.Equal("/?failed=true", failure.Headers.Location?.OriginalString);
+        }
+
+        using var blocked = await Submit(secondBrowser, secondToken, username, "ValidPass123!");
+        Assert.Equal("/?failed=true", blocked.Headers.Location?.OriginalString);
+        Assert.Contains(PasswordSignIn.FailureMessage, await secondBrowser.GetStringAsync("/?failed=true"));
+        clock.Advance(TimeSpan.FromMilliseconds(4999));
+        using var early = await Submit(secondBrowser, secondToken, username, "ValidPass123!");
+        Assert.Equal("/?failed=true", early.Headers.Location?.OriginalString);
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        using var fourth = await Submit(secondBrowser, secondToken, username, "wrong");
+        Assert.Equal("/?failed=true", fourth.Headers.Location?.OriginalString);
+        using var blockedAgain = await Submit(firstBrowser, firstToken, username, "ValidPass123!");
+        Assert.Equal("/?failed=true", blockedAgain.Headers.Location?.OriginalString);
+
+        clock.Advance(TimeSpan.FromSeconds(5));
+        using var allowed = await Submit(secondBrowser, secondToken, username, "ValidPass123!");
+        Assert.Equal(username == "specific-admin" ? "/password-replacement" : "/?failed=true",
+            allowed.Headers.Location?.OriginalString);
+
+        if (username == "specific-admin")
+        {
+            for (var i = 0; i < 2; i++)
+            {
+                using var failure = await Submit(firstBrowser, firstToken, username, "wrong");
+                Assert.Equal("/?failed=true", failure.Headers.Location?.OriginalString);
+            }
+            using var reset = await Submit(firstBrowser, firstToken, username, "ValidPass123!");
+            Assert.Equal("/password-replacement", reset.Headers.Location?.OriginalString);
+        }
+        else
+        {
+            using var unaffected = await Submit(firstBrowser, firstToken, "specific-admin", "ValidPass123!");
+            Assert.Equal("/password-replacement", unaffected.Headers.Location?.OriginalString);
+        }
+    }
+
+    private sealed class Clock : TimeProvider
+    {
+        private DateTimeOffset now = DateTimeOffset.UnixEpoch;
+        public override DateTimeOffset GetUtcNow() => now;
+        public void Advance(TimeSpan duration) => now += duration;
+    }
+
     private sealed class ConcurrentReplacementStore(Administrator initial, Administrator replaced) : IAdministratorStore
     {
         public int Loads { get; private set; }
