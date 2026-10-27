@@ -10,7 +10,7 @@ Plan only the next feature from approved User Needs and requirements, using the 
 - Uncertainties requiring a human decision (maximum three, blockers only).
 - Fewest independently verifiable implementation increments that preserve coherent behavior.
 - Observable acceptance criteria and verification tests for each increment, traced to Requirement IDs.
-- Proposed file scope and context needed per increment.
+- For each PBI draft, name a bounded read set (exact files or narrowly scoped directories), expected changed files, relevant contracts (or explicitly none), and exact verification commands in its Implementation Guide.
 - Architecture impact: none / existing boundary / new decision required, with reason.
 
 ## Rules

@@ -20,6 +20,17 @@ Retravion documents and traces the lifecycle of software products. Only features
 - Avoid speculative generalized frameworks or premature microservices.
 - Persistence and authentication details are not yet fully designed; choose them when the first slice requires them.
 
+## Identity and Access Ownership
+
+- `src/Retravion.Identity.Domain/` owns account invariants and password rules; it has no UI, infrastructure, or unrelated-feature dependencies.
+- `src/Retravion.Identity.Application/` owns Identity use cases and contracts and references only `Retravion.Identity.Domain`.
+- `src/Retravion.Identity.Infrastructure/` owns external dependency implementations and references only `Retravion.Identity.Application`.
+- `src/Retravion.Web/Features/Identity/` owns authentication UI, grouped by use case (currently `Login/`). UI consumes Application contracts, not Infrastructure implementation types.
+- Web references Identity Application and Identity Infrastructure; Infrastructure access is restricted to composition in `Program.cs`.
+- Identity projects must not reference unrelated application/domain projects. Keep implementation types `internal` where practical and expose only necessary contracts.
+
+These projects establish ownership only. Authentication functionality and contracts are introduced by subsequent approved slices, not this foundation.
+
 ## Domain Modeling Principles
 
 ### Single Responsibility

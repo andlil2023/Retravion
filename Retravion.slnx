@@ -4,6 +4,9 @@
     <Project Path="src/Retravion.Application/Retravion.Application.csproj" />
     <Project Path="src/Retravion.Domain/Retravion.Domain.csproj" />
     <Project Path="src/Retravion.Infrastructure/Retravion.Infrastructure.csproj" />
+    <Project Path="src/Retravion.Identity.Domain/Retravion.Identity.Domain.csproj" />
+    <Project Path="src/Retravion.Identity.Application/Retravion.Identity.Application.csproj" />
+    <Project Path="src/Retravion.Identity.Infrastructure/Retravion.Identity.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Retravion.UnitTests/Retravion.UnitTests.csproj" />

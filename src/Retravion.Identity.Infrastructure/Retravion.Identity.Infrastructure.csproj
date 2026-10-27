@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Retravion.Identity.Application/Retravion.Identity.Application.csproj" />
+  </ItemGroup>
+</Project>
