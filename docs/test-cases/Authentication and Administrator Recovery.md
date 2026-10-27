@@ -1,0 +1,60 @@
+# Authentication and Administrator Recovery — Test Specifications
+
+This design is provisional. It specifies verification intent, not implemented tests or successful verification results.
+
+**Requirements:** [Authentication and Administrator Recovery](../requirements/Authentication%20and%20Administrator%20Recovery.md)
+
+## Verification Method and Automation Status
+
+- **Verification method:** Automated or Manual.
+- **Automation status:** All automation candidates below are Planned, not implemented. Manual verification has automation status Not applicable.
+- A Yes value in Automation candidate identifies proposed Automated verification. A No value identifies Manual verification.
+- No automated test code has been implemented as part of this specification.
+
+## Test Cases
+
+| Test ID | Verifies | Level | Preconditions | Steps/stimulus | Expected result | Automation candidate |
+|---|---|---|---|---|---|---|
+| TC-AUTH-001 | REQ-SW-AUTH-001 | Integration | Uninitialized application; valid configured credentials | Initialize the application | Exactly one administrator exists with the configured username; configured credentials authenticate | Yes |
+| TC-AUTH-002 | REQ-SW-AUTH-001 | Integration | Uninitialized application | Initialize separately with missing/empty username, missing/empty password, and invalid password | Initialization is refused; error identifies the configuration problem without exposing credentials | Yes |
+| TC-AUTH-003 | REQ-SW-AUTH-002 | Integration | Initialized administrator | Sign in with correct credentials | Authentication identifies the administrator | Yes |
+| TC-AUTH-004 | REQ-SW-AUTH-002 | UI/integration | Initialized administrator | Separately submit an incorrect password and an unknown username | No authenticated identity is established; equivalent generic failure messages appear | Yes |
+| TC-AUTH-005 | REQ-SW-AUTH-003 | Inspection | Credential implementation available | Inspect password creation, change, recovery, and storage handling | All three paths use salted one-way hashing; no plaintext or reversibly encrypted application credential storage | No—manual review |
+| TC-AUTH-006 | REQ-SW-AUTH-004 | Unit/integration | Password validation available | Test lengths 9, 10, 30, and 31 with otherwise valid passwords; test one, two, three, and four character categories | Only lengths 10–30 with at least three categories are accepted; exercise all four possible three-category combinations | Yes |
+| TC-AUTH-007 | REQ-SW-AUTH-004 | Integration | Setup, password-change, and recovery operations available | Exercise valid and invalid password cases through each operation, including symbols beyond the original examples | Each operation enforces the same approved rules; the examples are not treated as an exhaustive symbol allowlist | Yes |
+| TC-AUTH-008 | REQ-SW-AUTH-005, REQ-SW-AUTH-009 | UI/end-to-end | Initial setup complete; initial password unchanged | Try protected access before authentication; authenticate; try protected access before changing password | Login remains available; protected access is denied; after authentication only the mandatory password-change operation becomes available | Yes |
+| TC-AUTH-009 | REQ-SW-AUTH-004, REQ-SW-AUTH-005, REQ-SW-AUTH-009 | UI/end-to-end | Administrator awaiting mandatory password change | Submit an invalid replacement, then the initial password, then a different valid password; subsequently sign in again | Invalid and unchanged passwords are rejected; valid replacement leads to home with full access; subsequent sign-in does not repeat the mandatory change | Yes |
+| TC-AUTH-010 | REQ-SW-AUTH-006 | Integration | Unlocked account; no consecutive failures | Fail twice, then a third time; retry before and after five seconds; repeat using another browser session | Five-second restrictions begin after the third failure and apply to subsequent retries across browser sessions | Yes |
+| TC-AUTH-011 | REQ-SW-AUTH-006 | Integration | Account has fewer than ten failures | Complete a successful sign-in after any required delay; then submit another incorrect password | Successful sign-in resets the consecutive failure count | Yes |
+| TC-AUTH-012 | REQ-SW-AUTH-006, REQ-SW-AUTH-007 | Integration | Existing account and unused username | Apply equivalent failure sequences to each, respecting retry delays | Outward messages and retry restrictions do not distinguish existing from unknown usernames | Yes |
+| TC-AUTH-013 | REQ-SW-AUTH-007 | Integration | Account already has an active session | Reach ten consecutive failed sign-ins; attempt correct credentials from a new session; exercise the existing session | New sign-ins remain blocked pending recovery; the existing session retains access subject to normal expiration | Yes |
+| TC-AUTH-014 | REQ-SW-AUTH-008 | Integration | Recoverable administrator; valid recovery configuration; existing sessions | Run recovery with authorized hosting-environment access; reuse existing sessions; sign in with restored credentials | Recovery clears lockout, restores the configured initial password, invalidates existing sessions, and requires password replacement | Yes |
+| TC-AUTH-015 | REQ-SW-AUTH-004, REQ-SW-AUTH-005, REQ-SW-AUTH-008 | UI/end-to-end | Successful administrator recovery | Authenticate with restored credentials; attempt protected access; complete password replacement | Protected access is denied until replacement; afterward home and full administrator access are available | Yes |
+| TC-AUTH-016 | REQ-SW-AUTH-008 | Integration | Locked account with known credential state | Attempt recovery with missing, empty, and policy-invalid configured passwords | Recovery is rejected; credentials and lockout remain unchanged; errors do not expose the password | Yes |
+| TC-AUTH-017 | REQ-SW-AUTH-008 | Deployment/security | Recovery mechanism and deployment permissions available | Attempt recovery without the required hosting authority, then with authorized IT-administrator access | Unauthorized recovery is denied; authorized recovery is available | Yes—details depend on the selected mechanism |
+| TC-AUTH-018 | REQ-SW-AUTH-009 | Integration | Unauthenticated, password-change-pending, and fully authenticated states | Request each protected application entry point directly in each state | Only the fully authenticated state receives protected data or functionality; denials disclose no protected data | Yes |
+| TC-AUTH-019 | REQ-SW-AUTH-010 | UI/end-to-end | Active session; no user interaction | Observe just before five minutes, at five minutes, and at thirty minutes without responding | Presence warning appears at five minutes; warning does not reset inactivity; session expires at thirty minutes and returns to login | Yes |
+| TC-AUTH-020 | REQ-SW-AUTH-010 | UI/integration | Active session, including a displayed warning | Perform representative supported interactions and confirm presence; measure subsequent inactivity | Each interaction resets inactivity; warning and expiration are measured from the latest interaction | Yes |
+| TC-AUTH-021 | REQ-SW-AUTH-010, REQ-SW-AUTH-009 | Integration | Session has expired | Reuse the expired session to request protected data | Protected access is denied | Yes |
+| TC-AUTH-022 | REQ-SW-AUTH-011, REQ-SW-AUTH-009 | UI/integration | Active authenticated session | Log out; reuse the terminated session for protected access | Login page appears; the terminated session cannot regain protected access without authentication | Yes |
+
+## System Verification Coverage
+
+| System requirement | Collective verification |
+|---|---|
+| REQ-SYS-AUTH-001 | TC-AUTH-001–TC-AUTH-013 |
+| REQ-SYS-AUTH-002 | TC-AUTH-008–TC-AUTH-009, TC-AUTH-018–TC-AUTH-022 |
+| REQ-SYS-AUTH-003 | TC-AUTH-005–TC-AUTH-007, TC-AUTH-014–TC-AUTH-017 |
+
+This mapping is a coverage plan, not evidence that verification has passed.
+
+## Coverage Gaps and Unresolved Ambiguities
+
+- **Password character classification:** The requirements do not define how whitespace or non-ASCII characters count. Tests must not silently invent that policy.
+- **“Any user interaction”:** Concrete interaction examples need to be identified when the application behavior is designed.
+- **Recovery authority:** TC-AUTH-017 needs the selected recovery mechanism and permission boundary before its executable procedure can be completed.
+
+## Deferred Tests
+
+- Concrete recovery-command, password-hashing, and protected-entry-point checks await implementation design.
+- Additional-user creation, role-specific permissions, and audit-trail tests remain outside scope.
