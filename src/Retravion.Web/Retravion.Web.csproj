@@ -3,6 +3,8 @@
     <PackageReference Include="MudBlazor" />
     <ProjectReference Include="../Retravion.Application/Retravion.Application.csproj" />
     <ProjectReference Include="../Retravion.Infrastructure/Retravion.Infrastructure.csproj" />
+    <ProjectReference Include="../Retravion.Identity.Application/Retravion.Identity.Application.csproj" />
+    <ProjectReference Include="../Retravion.Identity.Infrastructure/Retravion.Identity.Infrastructure.csproj" />
     <InternalsVisibleTo Include="Retravion.IntegrationTests" />
   </ItemGroup>
 </Project>
