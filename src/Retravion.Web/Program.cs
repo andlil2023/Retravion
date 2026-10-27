@@ -1,5 +1,7 @@
 using System.Data.Common;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Connections;
 using Retravion.Web.Features.Identity.Login;
 using Retravion.Web.Features.Identity.PasswordReplacement;
 using MudBlazor.Services;
@@ -13,6 +15,17 @@ builder.WebHost.UseStaticWebAssets();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
+builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("CompletedPasswordReplacement", policy => policy
+        .RequireAuthenticatedUser()
+        .RequireRole("Administrator")
+        .RequireAssertion(context => !context.User.HasClaim(PasswordReplacementEndpoint.RestrictedClaim, "true")));
+    options.AddPolicy("PasswordReplacementRequired", policy => policy
+        .RequireAuthenticatedUser()
+        .RequireClaim(PasswordReplacementEndpoint.RestrictedClaim, "true"));
+});
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
@@ -50,13 +63,17 @@ catch (Exception exception) when (exception is DbException or ArgumentException)
 }
 
 app.UseAuthentication();
-// This increment guards the replacement flow and restricted-session access to home only.
-// Comprehensive protected-entry-point enforcement belongs to its own slice.
+// Default-deny application requests. Only login, replacement, mapped public assets,
+// and the Blazor transport (whose routed content is guarded separately) are exceptions.
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
     var replacementPage = string.Equals(path.Value?.TrimEnd('/'), "/password-replacement", StringComparison.OrdinalIgnoreCase);
-    var home = string.Equals(path.Value?.TrimEnd('/'), "/home", StringComparison.OrdinalIgnoreCase);
+    var replacementOperation = string.Equals(path.Value?.TrimEnd('/'), "/identity/password-replacement", StringComparison.OrdinalIgnoreCase);
+    var login = path == "/" || string.Equals(path.Value?.TrimEnd('/'), "/identity/login", StringComparison.OrdinalIgnoreCase);
+    var publicResource = context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null
+        || path.StartsWithSegments("/_blazor");
+    var authenticated = context.User.Identity?.IsAuthenticated == true;
     var restricted = context.User.HasClaim(PasswordReplacementEndpoint.RestrictedClaim, "true");
     if (replacementPage && context.User.Identity?.IsAuthenticated != true)
     {
@@ -68,17 +85,38 @@ app.Use(async (context, next) =>
         context.Response.Redirect("/home");
         return;
     }
-    if (home && restricted)
+    if (!login && !replacementPage && !replacementOperation && !publicResource)
     {
-        context.Response.Redirect("/password-replacement");
-        return;
+        if (!authenticated)
+        {
+            context.Response.Redirect("/");
+            return;
+        }
+        if (restricted)
+        {
+            context.Response.Redirect("/password-replacement");
+            return;
+        }
+        if (!context.User.IsInRole("Administrator"))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
     }
     await next(context);
 });
+app.UseAuthorization();
 app.UseAntiforgery();
 app.MapLogin();
 app.MapPasswordReplacement();
-app.MapStaticAssets();
+app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .Add(endpoint =>
+    {
+        // The negotiate metadata holds the same dispatcher options used by the hub.
+        // Expire connected sessions as well as subsequent HTTP requests.
+        foreach (var options in endpoint.Metadata.OfType<HttpConnectionDispatcherOptions>())
+            options.CloseOnAuthenticationExpiration = true;
+    });
 app.Run();
