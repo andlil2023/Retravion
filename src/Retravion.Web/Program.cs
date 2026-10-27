@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Retravion.Web.Features.Identity.Logout;
-using Microsoft.AspNetCore.Http.Connections;
+using System.Security.Claims;
 using Retravion.Web.Features.Identity.Login;
 using Retravion.Web.Features.Identity.PasswordReplacement;
 using MudBlazor.Services;
@@ -18,10 +18,15 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SessionTicketStore>();
 builder.Services.AddScoped<AuthenticationStateProvider, SessionAuthenticationStateProvider>();
 builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
-    .Configure<SessionTicketStore>((options, store) => options.SessionStore = store);
+    .Configure<SessionTicketStore, TimeProvider>((options, store, time) =>
+    {
+        options.SessionStore = store;
+        options.TimeProvider = time;
+    });
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("CompletedPasswordReplacement", policy => policy
@@ -81,6 +86,10 @@ app.Use(async (context, next) =>
     var login = path == "/" || string.Equals(path.Value?.TrimEnd('/'), "/identity/login", StringComparison.OrdinalIgnoreCase);
     var publicResource = context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null
         || path.StartsWithSegments("/_blazor");
+    if (context.User.Identity?.IsAuthenticated == true && !publicResource &&
+        !context.RequestServices.GetRequiredService<SessionTicketStore>()
+            .RecordActivity(context.User.FindFirstValue(SessionTicketStore.SessionClaim)))
+        context.User = new ClaimsPrincipal(new ClaimsIdentity());
     var authenticated = context.User.Identity?.IsAuthenticated == true;
     var restricted = context.User.HasClaim(PasswordReplacementEndpoint.RestrictedClaim, "true");
     if (replacementPage && context.User.Identity?.IsAuthenticated != true)
@@ -119,13 +128,8 @@ app.MapLogin();
 app.MapLogout();
 app.MapPasswordReplacement();
 app.MapStaticAssets().AllowAnonymous();
+// SessionTicketStore expires and revokes circuit principals. A transport-level
+// ticket deadline would disconnect active users at their original sign-in expiry.
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode()
-    .Add(endpoint =>
-    {
-        // The negotiate metadata holds the same dispatcher options used by the hub.
-        // Expire connected sessions as well as subsequent HTTP requests.
-        foreach (var options in endpoint.Metadata.OfType<HttpConnectionDispatcherOptions>())
-            options.CloseOnAuthenticationExpiration = true;
-    });
+    .AddInteractiveServerRenderMode();
 app.Run();

@@ -2,6 +2,8 @@
 @using Retravion.Web.Features.Identity.Login
 @using ReplacementPage = Retravion.Web.Features.Identity.PasswordReplacement.PasswordReplacement
 
+<Retravion.Web.Features.Identity.Inactivity.SessionActivity />
+
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
         @if (routeData.PageType == typeof(Login))
