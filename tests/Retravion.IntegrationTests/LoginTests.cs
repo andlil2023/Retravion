@@ -1,4 +1,7 @@
 using System.Net;
+using CSharpFunctionalExtensions;
+using Retravion.Identity.Domain;
+using Retravion.Identity.Infrastructure;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
@@ -23,7 +26,7 @@ public sealed class LoginTests
         using var response = await Submit(client, token, "specific-admin", "ValidPass123!");
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.Equal("/home", response.Headers.Location?.OriginalString);
+        Assert.Equal("/password-replacement", response.Headers.Location?.OriginalString);
         var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"), value => value.StartsWith("Retravion.Identity="));
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=lax", cookie, StringComparison.OrdinalIgnoreCase);
@@ -34,6 +37,9 @@ public sealed class LoginTests
         Assert.True(observer.User?.Identity?.IsAuthenticated);
         Assert.Equal("specific-admin", observer.User?.Identity?.Name);
         Assert.Equal("specific-admin", observer.User?.FindFirstValue(ClaimTypes.NameIdentifier));
+        Assert.False(observer.User?.IsInRole("Administrator"));
+        Assert.Equal(HttpStatusCode.Redirect, home.StatusCode);
+        Assert.Equal("/password-replacement", home.Headers.Location?.OriginalString);
     }
 
     [Theory]
@@ -86,6 +92,45 @@ public sealed class LoginTests
         using var response = await Submit(client, token, "specific-admin", "ValidPass123!");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.False(response.Headers.TryGetValues("Set-Cookie", out _));
+    }
+
+    [Fact]
+    public async Task ReplacementBetweenAuthenticationAndSessionCreationCannotGrantAccessWithOldPassword()
+    {
+        var hasher = new Pbkdf2PasswordHasher();
+        var initial = Administrator.Create("specific-admin", hasher.Hash("ValidPass123!")).Value;
+        var replaced = initial.ReplacePassword("Replacement123!", hasher.Hash("Replacement123!")).Value;
+        var store = new ConcurrentReplacementStore(initial, replaced);
+        var observer = new IdentityObserver();
+        await using var factory = CreateFactory().WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                services.AddSingleton<IAdministratorStore>(store);
+                services.AddSingleton<IStartupFilter>(observer);
+            }));
+        using var client = CreateClient(factory);
+        using var response = await Submit(client, await GetToken(client), "specific-admin", "ValidPass123!");
+
+        Assert.Equal(3, store.Loads); // Startup, credential verification, then access decision.
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/?failed=true", response.Headers.Location?.OriginalString);
+        using var next = await client.GetAsync("/");
+        Assert.False(observer.User?.Identity?.IsAuthenticated);
+        Assert.False(observer.User?.IsInRole("Administrator"));
+    }
+
+    private sealed class ConcurrentReplacementStore(Administrator initial, Administrator replaced) : IAdministratorStore
+    {
+        public int Loads { get; private set; }
+        public Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default)
+        {
+            Loads++;
+            return Task.FromResult(Result.Success<Maybe<Administrator>>(Loads <= 2 ? initial : replaced));
+        }
+        public Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private static AdministratorWebFactory CreateFactory() =>
