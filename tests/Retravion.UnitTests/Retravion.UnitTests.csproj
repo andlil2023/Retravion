@@ -9,5 +9,7 @@
     <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
     <ProjectReference Include="../../src/Retravion.Domain/Retravion.Domain.csproj" />
     <ProjectReference Include="../../src/Retravion.Application/Retravion.Application.csproj" />
+    <ProjectReference Include="../../src/Retravion.Identity.Application/Retravion.Identity.Application.csproj" />
+    <ProjectReference Include="../../src/Retravion.Identity.Infrastructure/Retravion.Identity.Infrastructure.csproj" />
   </ItemGroup>
 </Project>
