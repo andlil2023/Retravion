@@ -13,7 +13,8 @@ using Retravion.Web.Components;
 using Retravion.Application.AuditTrail;
 using Retravion.Infrastructure.AuditTrail;
 
-var builder = WebApplication.CreateBuilder(args);
+var recoveryMode = args.Length == 1 && args[0] == "--recover-initial-administrator";
+var builder = WebApplication.CreateBuilder(recoveryMode ? [] : args);
 // Also support source-tree `dotnet run` without a Development launch profile.
 builder.WebHost.UseStaticWebAssets();
 builder.Services.AddRazorComponents()
@@ -59,11 +60,37 @@ builder.Services.AddSingleton<IAdministratorStore>(_ => new PostgresAdministrato
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddSingleton<AdministratorInitializer>();
+builder.Services.AddSingleton<AdministratorRecovery>();
 builder.Services.AddSingleton<IAuditSubmission>(_ => new PostgresAuditSubmission(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 
 var app = builder.Build();
+if (recoveryMode)
+{
+    // This command is for offline use only: all application hosts must already be stopped.
+    try
+    {
+        var recovery = await app.Services.GetRequiredService<AdministratorRecovery>()
+            .Recover(app.Configuration["InitialAdmin:Password"]);
+        if (recovery.IsFailure)
+        {
+            Console.Error.WriteLine("Administrator recovery failed. Check the recovery configuration and account state.");
+            Environment.ExitCode = 1;
+        }
+    }
+    catch (Exception)
+    {
+        // Configuration and provider exceptions may include secrets.
+        Console.Error.WriteLine("Administrator recovery failed. Check the recovery configuration and database availability.");
+        Environment.ExitCode = 1;
+    }
+    finally
+    {
+        await app.DisposeAsync();
+    }
+    return;
+}
 try
 {
     var initialization = await app.Services.GetRequiredService<AdministratorInitializer>().Initialize(

@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [switch] $ResetDatabase,
-    [switch] $UpdateImages
+    [switch] $UpdateImages,
+    [switch] $RecoverAdministrator
 )
 
 Set-StrictMode -Version Latest
@@ -122,6 +123,70 @@ function Initialize-ReviewCertificate {
     return $pfx
 }
 
+function Invoke-ReviewRecovery {
+    if (-not $IsWindows) { throw 'This script supports Windows only.' }
+    if (-not (Get-Command podman -ErrorAction SilentlyContinue)) { throw 'Podman is required.' }
+    $config = Read-ReviewEnvironment $PSScriptRoot
+    Start-ReviewMachine
+    $app = 'retravion-review-app'
+    $database = 'retravion-review-db'
+    $network = 'retravion-review-network'
+    if (-not (Assert-ReviewResource 'container' $app) -or
+        -not (Assert-ReviewResource 'container' $database) -or
+        -not (Assert-ReviewResource 'network' $network)) {
+        throw 'Recovery requires the existing review application, database, and network.'
+    }
+    if ((Read-Host 'Confirm all other application instances are stopped. Recovery stops this application and ends all sessions. Type RECOVER') -cne 'RECOVER') {
+        throw 'Recovery cancelled. Nothing was stopped.'
+    }
+    $pfx = Initialize-ReviewCertificate $PSScriptRoot $config.HTTPS_CERT_PASSWORD
+    # Build the command from this checkout before disrupting the running host. The
+    # previously deployed image may predate recovery and would start a web server.
+    Write-Host 'Building recovery-capable application image...'
+    Invoke-Podman @('build', '--pull=never', '-f', (Join-Path $PSScriptRoot 'Containerfile'),
+        '-t', 'localhost/retravion-review:local', $PSScriptRoot) | Out-Null
+    # A failed stop or recovery must not restart the host.
+    Invoke-Podman @('stop', $app) | Out-Null
+    $state = @(Invoke-Podman @('container', 'inspect', $app) | ConvertFrom-Json)[0]
+    if ($state.State.Running) { throw 'Application did not stop; recovery was not run.' }
+    $environment = @{
+        ConnectionStrings__DefaultConnection = "Host=$database;Port=5432;Database=$($config.POSTGRES_DB);Username=$($config.POSTGRES_USER);Password=$($config.POSTGRES_PASSWORD)"
+        InitialAdmin__Username = $config.INITIAL_ADMIN_USERNAME
+        InitialAdmin__Password = $config.INITIAL_ADMIN_PASSWORD
+        ASPNETCORE_Kestrel__Certificates__Default__Password = $config.HTTPS_CERT_PASSWORD
+    }
+    $previous = @{}
+    try {
+        foreach ($key in $environment.Keys) {
+            $previous[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+            [Environment]::SetEnvironmentVariable($key, $environment[$key], 'Process')
+        }
+        # Never include provider output or environment values in errors or arguments.
+        & podman run --rm --network $network --pull=never -e ConnectionStrings__DefaultConnection `
+            -e InitialAdmin__Password localhost/retravion-review:local --recover-initial-administrator *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'Administrator recovery failed. Check configuration and database availability; the application remains stopped.' }
+        # A stopped container retains its old image even after the tag is rebuilt.
+        Invoke-Podman @('rm', $app) | Out-Null
+        $certificatePath = $pfx.Replace('\', '/')
+        Invoke-Podman @('run', '-d', '--name', $app, '--label', 'com.retravion.review=1', '--network', $network,
+            '--pull=never', '-p', "127.0.0.1:$($config.APP_HTTPS_PORT):8443", '-v', "${certificatePath}:/https/localhost.pfx:ro",
+            '-e', 'ASPNETCORE_URLS=https://+:8443', '-e', 'ASPNETCORE_Kestrel__Certificates__Default__Path=/https/localhost.pfx',
+            '-e', 'ASPNETCORE_Kestrel__Certificates__Default__Password', '-e', 'ConnectionStrings__DefaultConnection',
+            '-e', 'InitialAdmin__Username', '-e', 'InitialAdmin__Password', 'localhost/retravion-review:local') | Out-Null
+    } finally {
+        foreach ($key in $previous.Keys) { [Environment]::SetEnvironmentVariable($key, $previous[$key], 'Process') }
+    }
+    $ready = $false
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        try {
+            $response = Invoke-WebRequest "https://localhost:$($config.APP_HTTPS_PORT)" -TimeoutSec 3
+            if ($response.StatusCode -eq 200) { $ready = $true; break }
+        } catch { Start-Sleep -Seconds 2 }
+    }
+    if (-not $ready) { throw 'Recovery succeeded, but the application HTTPS check failed. Inspect the application container.' }
+    Write-Host 'Administrator recovery completed. All previous sessions ended; sign in and replace the recovery password.'
+}
+
 function Invoke-ReviewDeployment {
     if (-not $IsWindows) { throw 'This script supports Windows only.' }
     if (-not (Get-Command podman -ErrorAction SilentlyContinue)) {
@@ -218,5 +283,10 @@ function Invoke-ReviewDeployment {
 
 # Dot-sourcing exposes helpers for tests without running deployment.
 if ($MyInvocation.InvocationName -ne '.') {
-    try { Invoke-ReviewDeployment } catch { Write-Error $_ -ErrorAction Continue; exit 1 }
+    try {
+        if ($RecoverAdministrator) {
+            if ($ResetDatabase -or $UpdateImages) { throw 'Recovery cannot be combined with deployment options.' }
+            Invoke-ReviewRecovery
+        } else { Invoke-ReviewDeployment }
+    } catch { Write-Error $_ -ErrorAction Continue; exit 1 }
 }
