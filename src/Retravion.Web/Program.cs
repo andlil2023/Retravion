@@ -1,6 +1,8 @@
 using System.Data.Common;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Components.Authorization;
+using Retravion.Web.Features.Identity.Logout;
 using Microsoft.AspNetCore.Http.Connections;
 using Retravion.Web.Features.Identity.Login;
 using Retravion.Web.Features.Identity.PasswordReplacement;
@@ -16,6 +18,10 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddSingleton<SessionTicketStore>();
+builder.Services.AddScoped<AuthenticationStateProvider, SessionAuthenticationStateProvider>();
+builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
+    .Configure<SessionTicketStore>((options, store) => options.SessionStore = store);
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("CompletedPasswordReplacement", policy => policy
@@ -70,6 +76,7 @@ app.Use(async (context, next) =>
     var path = context.Request.Path;
     var replacementPage = string.Equals(path.Value?.TrimEnd('/'), "/password-replacement", StringComparison.OrdinalIgnoreCase);
     var replacementOperation = string.Equals(path.Value?.TrimEnd('/'), "/identity/password-replacement", StringComparison.OrdinalIgnoreCase);
+    var logout = string.Equals(path.Value?.TrimEnd('/'), "/identity/logout", StringComparison.OrdinalIgnoreCase);
     var login = path == "/" || string.Equals(path.Value?.TrimEnd('/'), "/identity/login", StringComparison.OrdinalIgnoreCase);
     var publicResource = context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() is not null
         || path.StartsWithSegments("/_blazor");
@@ -85,7 +92,7 @@ app.Use(async (context, next) =>
         context.Response.Redirect("/home");
         return;
     }
-    if (!login && !replacementPage && !replacementOperation && !publicResource)
+    if (!login && !logout && !replacementPage && !replacementOperation && !publicResource)
     {
         if (!authenticated)
         {
@@ -108,6 +115,7 @@ app.Use(async (context, next) =>
 app.UseAuthorization();
 app.UseAntiforgery();
 app.MapLogin();
+app.MapLogout();
 app.MapPasswordReplacement();
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
