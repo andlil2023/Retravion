@@ -137,7 +137,7 @@ public sealed class ProtectedAccessTests
     }
 
     [Fact]
-    public async Task ConnectedCompletedSessionIsClosedAtTicketExpiryAndCannotRegainProtectedAccess()
+    public async Task ActivityKeepsConnectedSessionUsableBeyondTheOriginalTicketExpiry()
     {
         var probe = new ProtectedProbe();
         await using var factory = CreateFactory(probe);
@@ -147,7 +147,7 @@ public sealed class ProtectedAccessTests
             .Single(endpoint => endpoint.RoutePattern.RawText == "/_blazor/negotiate")
             .Metadata.GetMetadata<HttpConnectionDispatcherOptions>();
         Assert.NotNull(dispatcher);
-        Assert.True(dispatcher.CloseOnAuthenticationExpiration);
+        Assert.False(dispatcher.CloseOnAuthenticationExpiration);
 
         var options = factory.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(CookieAuthenticationDefaults.AuthenticationScheme);
@@ -177,20 +177,18 @@ public sealed class ProtectedAccessTests
         Assert.Equal("{}\u001e", Encoding.UTF8.GetString(buffer, 0, handshake.Count));
         Assert.Equal(WebSocketState.Open, socket.State);
 
-        WebSocketReceiveResult message;
-        do
-        {
-            message = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), timeout.Token);
-        } while (message.MessageType != WebSocketMessageType.Close);
-        Assert.True(DateTimeOffset.UtcNow >= expires);
-        await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", timeout.Token);
-
-        // Reconnects reauthenticate through the same pipeline; an expired cookie is anonymous.
+        // The application request above records activity and extends the stored ticket.
+        // Neither the original cookie reference nor the transport may impose its old deadline.
+        var receive = socket.ReceiveAsync(new ArraySegment<byte>(buffer), timeout.Token);
+        await Task.Delay(expires - DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(200), timeout.Token);
+        Assert.False(receive.IsCompleted, "An active connection was closed at the original ticket deadline.");
         using var reconnect = await client.GetAsync("/home");
-        await AssertDenied(reconnect, "/");
+        Assert.Equal(HttpStatusCode.OK, reconnect.StatusCode);
         using var operation = await client.PostAsync("/protected-probe", null);
-        await AssertDenied(operation, "/");
-        Assert.Equal(0, probe.Calls);
+        Assert.Equal(HttpStatusCode.OK, operation.StatusCode);
+        Assert.Equal("protected-data", await operation.Content.ReadAsStringAsync());
+        Assert.Equal(1, probe.Calls);
+        timeout.Cancel();
     }
 
     private static WebApplicationFactory<Program> CreateFactory(ProtectedProbe probe) =>
