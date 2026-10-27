@@ -1,0 +1,12 @@
+**
+!global.json
+!Directory.Build.props
+!Directory.Packages.props
+!src/
+!src/**
+src/**/bin/
+src/**/obj/
+src/**/.env*
+src/**/appsettings.Local.json
+src/**/*.pfx
+src/**/*.key

@@ -16,6 +16,9 @@ artifacts/
 *.suo
 *.sln.docstates
 
+# Generated local review certificates
+.local/
+
 # Local secrets and OS files
 .env
 .env.*
