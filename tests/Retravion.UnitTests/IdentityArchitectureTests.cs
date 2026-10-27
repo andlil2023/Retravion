@@ -21,7 +21,7 @@ public sealed class IdentityArchitectureTests
         Assert.Equal(expectedReferences, references);
         var packages = project.Descendants("PackageReference").ToArray();
         var expectedPackages = projectName == "Retravion.Identity.Infrastructure"
-            ? Array.Empty<string>()
+            ? new[] { "Npgsql" }
             : new[] { "CSharpFunctionalExtensions" };
 
         Assert.Equal(expectedPackages, packages.Select(package => (string?)package.Attribute("Include")).ToArray());

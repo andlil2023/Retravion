@@ -4,11 +4,11 @@ Retravion is a product-lifecycle documentation application for software teams, i
 
 ## Current status
 
-The repository currently contains a .NET 10 solution with a minimal Blazor landing page, application/domain/infrastructure project boundaries, smoke tests, and GitHub Actions CI. Product features, persistence, and authentication are not implemented yet.
+The repository contains a .NET 10 Blazor prototype, Identity boundaries, password validation/hashing, and create-only administrator provisioning in PostgreSQL. Login, sessions, and protected access are not implemented yet.
 
 ## Getting started
 
-Install the .NET SDK version specified in [`global.json`](global.json) (currently `10.0.403`). No database or external services are required for the bootstrap.
+Install the .NET SDK version specified in [`global.json`](global.json) (currently `10.0.403`). Application startup requires PostgreSQL and a connection configured as `ConnectionStrings__DefaultConnection`. On an empty database, also supply `InitialAdmin__Username` and `InitialAdmin__Password`; there are no defaults. Passwords must contain 10–30 Unicode scalar values and at least three of ASCII lowercase, ASCII uppercase, ASCII digits, and Unicode punctuation/symbols. Initialization errors never echo credentials.
 
 From the repository root:
 
@@ -30,8 +30,8 @@ Open <http://localhost:5080> to view the landing page.
 
 This is a disposable internal-review environment, not a production installer. It runs
 exactly two Linux containers: the application and PostgreSQL 17. The app currently
-has no database access or admin-account implementation; their settings are reserved
-for future features.
+initializes exactly one administrator in PostgreSQL before serving requests. Existing
+credentials are never reset on startup, even if provisioning settings change or are blank.
 
 ### Prerequisites and first start
 
@@ -49,10 +49,15 @@ No host .NET SDK or Compose provider is required. Initial image downloads and Nu
 restore during the container build need internet access. The app is built from your
 checkout on every run. Images remain in Podman's cache and are never committed.
 
-On first run, the script creates `.env` from `.env.example` and generates independent
-random secrets. You can instead copy the template and fill in all blank secrets
-before running. Values must be unquoted letters, digits, dots, underscores or hyphens;
-variable expansion is not supported. Do not share or commit `.env`.
+Before first startup, copy `.env.example` to `.env` and fill in every blank value,
+including `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD`. Alternatively, run the
+script once to create `.env` with independent random database/certificate secrets,
+then supply your chosen administrator credentials and rerun. Administrator credentials
+are never generated. Startup fails until valid initial credentials are supplied.
+
+Entries use `KEY=value`, one per line, with no expansion or quote processing. Administrator
+values preserve spaces and Unicode exactly; quote characters are literal. Other values
+allow only letters, digits, dots, underscores or hyphens. Do not share or commit `.env`.
 
 The script creates a password-protected localhost certificate under `.local/review/`.
 Type `TRUST` when asked to trust it for your Windows account; Windows may also prompt.
@@ -76,8 +81,9 @@ network. Both services are checked for readiness before the script reports succe
 ```
 
 A normal rerun replaces this setup's containers but retains the named database volume.
-No automatic schema upgrades are performed. Early schema changes may require an
-explicit reset; future database features must supply current-schema initialization.
+Identity creates its schema/table when absent; no automatic upgrades of existing tables
+are performed. Early schema changes may require an explicit reset. The singleton key
+and atomic insert prevent duplicate administrators, including concurrent startup.
 Changing database credentials/names in `.env` does **not** modify an existing database:
 restore the previous values or reset explicitly. Never discard `.env` unless you also
 intend to recreate the database and certificate with new secrets.
@@ -87,9 +93,10 @@ Images are `postgres:17`, .NET SDK `10.0.403` (matching `global.json`), and ASP.
 Normal runs download only missing images; package restore may still require a network
 connection. Image cache availability is not a guarantee of a fully offline build.
 
-Configuration passed to the app uses `ConnectionStrings__DefaultConnection` and
-`InitialAdmin__Password`. The latter does not create a user, change a password, or
-implement authentication. No credentials are baked into the app image. Podman users
+Configuration passed to the app uses `ConnectionStrings__DefaultConnection`,
+`InitialAdmin__Username`, and `InitialAdmin__Password`. Initial provisioning stores only
+a salted one-way password hash. Once provisioned, absent/changed initial credentials
+are ignored; editing `.env` is not a recovery mechanism. No credentials are baked into the app image. Podman users
 can inspect container environment values: this setup is for a trusted local machine.
 
 ### Stop and troubleshoot
@@ -114,7 +121,20 @@ certificates:
 pwsh -NoProfile -File tests/Deployment.Tests.ps1
 ```
 
-These checks mock external operations. A real Windows/Podman smoke test must also
+These checks mock external operations. PostgreSQL integration verification can be run
+against a disposable server using a connection with CREATE DATABASE permission:
+
+```powershell
+$env:RETRAVION_TEST_POSTGRES = 'Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=<test-server-password>'
+dotnet test Retravion.slnx --configuration Release
+```
+
+The database test creates and drops its own uniquely named database. Without this
+variable, that test is explicitly skipped; other unit and web-host tests still run.
+It covers invalid provisioning, concurrent startup, singleton enforcement, hashed
+storage, and preservation through new web hosts.
+
+A real Windows/Podman smoke test must also
 verify certificate trust, container builds/startup, a second run preserving secrets and
 data, an explicit reset, and `-UpdateImages` on the target machine.
 

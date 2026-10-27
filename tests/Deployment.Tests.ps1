@@ -21,10 +21,19 @@ try {
     $config = Read-ReviewEnvironment $temp
     $original = Get-Content (Join-Path $temp '.env') -Raw
     Assert-True ($config.POSTGRES_PASSWORD -match '^[a-f0-9]{48}$') 'Random database password'
-    Assert-True ($config.INITIAL_ADMIN_PASSWORD -ne $config.POSTGRES_PASSWORD) 'Independent random secrets'
+    Assert-True ($config.INITIAL_ADMIN_USERNAME -ceq '') 'No default administrator username'
+    Assert-True ($config.INITIAL_ADMIN_PASSWORD -ceq '') 'No generated or default administrator password'
+    Assert-True ($config.HTTPS_CERT_PASSWORD -ne $config.POSTGRES_PASSWORD) 'Independent random secrets'
     $again = Read-ReviewEnvironment $temp
     Assert-True ($again.HTTPS_CERT_PASSWORD -eq $config.HTTPS_CERT_PASSWORD) 'Secrets preserved on rerun'
     Assert-True ((Get-Content (Join-Path $temp '.env') -Raw) -ceq $original) '.env never rewritten'
+    $adminText = $original.Replace('INITIAL_ADMIN_USERNAME=', 'INITIAL_ADMIN_USERNAME= chosen user ').Replace('INITIAL_ADMIN_PASSWORD=', 'INITIAL_ADMIN_PASSWORD= Abc123!💡 =# ')
+    Set-Content (Join-Path $temp '.env') $adminText
+    $config = Read-ReviewEnvironment $temp
+    Assert-True ($config.INITIAL_ADMIN_USERNAME -ceq ' chosen user ') 'Username preserved verbatim'
+    Assert-True ($config.INITIAL_ADMIN_PASSWORD -ceq ' Abc123!💡 =# ') 'Unicode, spaces, punctuation and equals preserved verbatim'
+    Set-Content (Join-Path $temp '.env') ($original.Replace('INITIAL_ADMIN_USERNAME=', '#INITIAL_ADMIN_USERNAME='))
+    Assert-Throws { Read-ReviewEnvironment $temp } 'INITIAL_ADMIN_USERNAME'
     Set-Content (Join-Path $temp '.env') ($original.Replace('APP_HTTPS_PORT=8443', 'APP_HTTPS_PORT=80'))
     Assert-Throws { Read-ReviewEnvironment $temp } 'APP_HTTPS_PORT'
     Set-Content (Join-Path $temp '.env') ($original + "`nPOSTGRES_USER=duplicate")
@@ -85,6 +94,9 @@ try {
     Assert-True ((Count-Calls 'run|*') -eq 2) 'Exactly two containers'
     Assert-True ((Count-Calls 'run|*127.0.0.1:8443:8443*') -eq 1) 'Only app port exposed, bound to loopback'
     Assert-True ((Count-Calls 'run|*POSTGRES_PASSWORD*') -eq 1) 'Database receives environment variable name'
+    Assert-True ((Count-Calls 'run|*InitialAdmin__Username*InitialAdmin__Password*') -eq 1) 'App receives both provisioning variable names'
+    Assert-True ((Count-Calls "*$($config.INITIAL_ADMIN_PASSWORD)*") -eq 0) 'Administrator password absent from arguments'
+    Assert-True ((Count-Calls "*$($config.INITIAL_ADMIN_USERNAME)*") -eq 0) 'Administrator username absent from arguments'
     Assert-True ((Count-Calls "*$($config.POSTGRES_PASSWORD)*") -eq 0) 'Secrets absent from argument values'
     Assert-True ([Environment]::GetEnvironmentVariable('POSTGRES_PASSWORD', 'Process') -eq 'prior-process-value') 'Process environment restored'
 } finally { [Environment]::SetEnvironmentVariable('POSTGRES_PASSWORD', $oldPassword, 'Process') }

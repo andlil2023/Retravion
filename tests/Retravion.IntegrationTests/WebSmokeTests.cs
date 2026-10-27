@@ -8,10 +8,15 @@ namespace Retravion.IntegrationTests;
 
 public sealed class WebSmokeTests
 {
+    private static AdministratorWebFactory CreateFactory() => new(new StartupAdministratorStore
+    {
+        Account = Retravion.Identity.Domain.Administrator.Create("test-admin", "test-hash").Value
+    });
+
     [Fact]
     public async Task HomePageRendersSuccessfully()
     {
-        await using var factory = new WebApplicationFactory<Program>();
+        await using var factory = CreateFactory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -37,7 +42,7 @@ public sealed class WebSmokeTests
     [Fact]
     public async Task HomeShowsNavigationAndAnEmptyContentAreaWithoutAuthentication()
     {
-        await using var factory = new WebApplicationFactory<Program>();
+        await using var factory = CreateFactory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -67,7 +72,7 @@ public sealed class WebSmokeTests
     [InlineData("/_framework/blazor.web.js", "text/javascript")]
     public async Task PrototypeAssetsAreServed(string path, string contentType)
     {
-        await using var factory = new WebApplicationFactory<Program>()
+        await using var factory = CreateFactory()
             .WithWebHostBuilder(builder => builder.UseEnvironment("Production"));
         using var client = factory.CreateClient();
 
@@ -81,7 +86,7 @@ public sealed class WebSmokeTests
     [Fact]
     public async Task FingerprintedPageAssetsAreServedInTheDefaultRunEnvironment()
     {
-        await using var factory = new WebApplicationFactory<Program>()
+        await using var factory = CreateFactory()
             .WithWebHostBuilder(builder => builder.UseEnvironment("Production"));
         using var client = factory.CreateClient();
         var html = await client.GetStringAsync("/");
