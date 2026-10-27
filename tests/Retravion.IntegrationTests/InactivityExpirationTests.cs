@@ -307,7 +307,7 @@ public sealed class InactivityExpirationTests
         if (pending) return Cookie(login);
         using var replacement = await client.PostAsync("/identity/password-replacement", new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["currentPassword"] = "InitialPass123!", ["newPassword"] = "Replacement123!",
+            ["currentPassword"] = "InitialPass123!", ["newPassword"] = "Replacement123!", ["confirmNewPassword"] = "Replacement123!",
             ["__RequestVerificationToken"] = Token(await client.GetStringAsync("/password-replacement"))
         }));
         Assert.Equal("/home", replacement.Headers.Location?.OriginalString);

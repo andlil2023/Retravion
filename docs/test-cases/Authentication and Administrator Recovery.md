@@ -7,7 +7,7 @@ This design is provisional. It specifies verification intent, not implemented te
 ## Verification Method and Automation Status
 
 - **Verification method:** Automated or Manual.
-- **Automation status:** This specification is a verification plan, not an inventory of completed automation. The new password-confirmation scenarios in TC-AUTH-009 and TC-AUTH-015 are Planned, not implemented. Manual verification has automation status Not applicable.
+- **Automation status:** This specification is a verification plan, not an inventory of completed automation. Initial-setup password-confirmation scenarios have focused integration coverage; the post-recovery scenarios in TC-AUTH-015 remain planned until recovery integration is delivered. Manual verification has automation status Not applicable.
 - A Yes value in Automation candidate identifies proposed Automated verification. A No value identifies Manual verification.
 - No automated test code has been implemented as part of this specification.
 
@@ -50,7 +50,7 @@ This mapping is a coverage plan, not evidence that verification has passed.
 
 ## Coverage Gaps and Unresolved Ambiguities
 
-- **Password confirmation:** [PBI #39](https://github.com/andlil2023/Retravion/issues/39) tracks the confirmation requirement and implementation. Existing `tests/Retravion.IntegrationTests/PasswordReplacementTests.cs` covers the baseline replacement flow, but the form, endpoint, and automated tests do not yet implement confirmation. The new confirmation scenarios in TC-AUTH-009 and TC-AUTH-015 remain planned; this documentation update is not evidence that they pass.
+- **Password confirmation:** [PBI #39](https://github.com/andlil2023/Retravion/issues/39) tracks the confirmation requirement and implementation. `tests/Retravion.IntegrationTests/PasswordReplacementTests.cs` covers the initial-setup replacement flow, including direct confirmation rejection and matching success. TC-AUTH-015 post-recovery confirmation scenarios remain planned until recovery integration is delivered.
 - **“Any user interaction”:** Concrete interaction examples need to be identified when the application behavior is designed.
 - **Recovery authority:** TC-AUTH-017 needs the selected recovery mechanism and permission boundary before its executable procedure can be completed.
 

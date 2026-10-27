@@ -42,9 +42,15 @@ internal static class PasswordReplacementEndpoint
             }
 
             var form = await context.Request.ReadFormAsync(context.RequestAborted);
+            var newPassword = form["newPassword"].ToString();
+            var confirmation = form["confirmNewPassword"].ToString();
+            if (string.IsNullOrEmpty(newPassword) || string.IsNullOrEmpty(confirmation) ||
+                !string.Equals(newPassword, confirmation, StringComparison.Ordinal))
+                return Results.LocalRedirect("/password-replacement?confirmationFailed=true");
+
             var username = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
             var result = await replacement.Replace(username, form["currentPassword"].ToString(),
-                form["newPassword"].ToString(), context.RequestAborted);
+                newPassword, context.RequestAborted);
             if (result.IsFailure)
                 return Results.LocalRedirect("/password-replacement?failed=true");
 
