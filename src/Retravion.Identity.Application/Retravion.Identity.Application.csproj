@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <InternalsVisibleTo Include="Retravion.UnitTests" />
     <ProjectReference Include="../Retravion.Identity.Domain/Retravion.Identity.Domain.csproj" />
     <PackageReference Include="CSharpFunctionalExtensions" />
   </ItemGroup>

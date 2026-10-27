@@ -11,6 +11,25 @@ public sealed class PasswordSignInTests
     private static readonly IPasswordHasher Hasher = new Pbkdf2PasswordHasher();
     private static readonly Administrator Account = Administrator.Create(" Admin ", Hasher.Hash(" ValidPass123! ")).Value;
 
+    [Theory]
+    [InlineData(false, false, false, false)]
+    [InlineData(false, false, true, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, true, true, false)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, false, true, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, true, true, true)]
+    public void CredentialDecisionRequiresAllCredentialChecks(bool usernameMatches, bool passwordSupplied,
+        bool passwordMatches, bool succeeds)
+    {
+        var result = PasswordSignIn.CredentialDecision("administrator", usernameMatches, passwordSupplied, passwordMatches);
+
+        Assert.Equal(succeeds, result.IsSuccess);
+        if (succeeds) Assert.Equal("administrator", result.Value);
+        else Assert.Equal(PasswordSignIn.FailureMessage, result.Error);
+    }
+
     [Fact]
     public async Task MatchingCredentialsReturnOnlyTheStoredUsername()
     {
