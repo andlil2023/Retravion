@@ -60,31 +60,33 @@ public sealed class PasswordSignInTests
     {
         var clock = new Clock();
         var store = new Store(Account);
-        var signIn = new PasswordSignIn(store, Hasher, clock);
+        var hasher = new CountingHasher();
+        var signIn = new PasswordSignIn(store, hasher, clock);
         for (var i = 0; i < 3; i++)
             Assert.Equal(PasswordSignIn.FailureMessage, (await signIn.Authenticate(username, "wrong")).Error);
 
-        Assert.Equal(3, store.Loads);
+        Assert.Equal(3, hasher.Verifications);
         Assert.Equal(PasswordSignIn.FailureMessage,
             (await signIn.Authenticate(username, " ValidPass123! ")).Error);
         clock.Advance(TimeSpan.FromMilliseconds(4999));
         Assert.True((await signIn.Authenticate(username, "wrong")).IsFailure);
-        Assert.Equal(3, store.Loads);
+        Assert.Equal(3, hasher.Verifications);
 
         clock.Advance(TimeSpan.FromMilliseconds(1));
         Assert.True((await signIn.Authenticate(username, "wrong")).IsFailure);
-        Assert.Equal(4, store.Loads);
+        Assert.Equal(4, hasher.Verifications);
         Assert.True((await signIn.Authenticate(username, "wrong")).IsFailure);
-        Assert.Equal(4, store.Loads);
+        Assert.Equal(4, hasher.Verifications);
         clock.Advance(TimeSpan.FromSeconds(5));
         Assert.True((await signIn.Authenticate(username, "wrong")).IsFailure);
-        Assert.Equal(5, store.Loads);
+        Assert.Equal(5, hasher.Verifications);
     }
 
     [Theory]
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(5)]
+    [InlineData(9)]
     public async Task SuccessResetsTheConsecutiveFailures(int failures)
     {
         var clock = new Clock();
@@ -104,13 +106,17 @@ public sealed class PasswordSignInTests
     public async Task ConcurrentAttemptsCannotBypassTheThresholdAndOtherUsernamesRemainIndependent()
     {
         var store = new Store(Account);
-        var signIn = new PasswordSignIn(store, Hasher, new Clock());
+        var hasher = new CountingHasher();
+        var signIn = new PasswordSignIn(store, hasher, new Clock());
         var results = await Task.WhenAll(Enumerable.Range(0, 20)
             .Select(_ => signIn.Authenticate("unknown", "wrong")));
         Assert.All(results, result => Assert.Equal(PasswordSignIn.FailureMessage, result.Error));
-        Assert.Equal(3, store.Loads);
+        Assert.Equal(20, store.Loads);
+        Assert.Equal(3, hasher.Verifications);
+        Assert.Equal(3, store.Recordings);
         Assert.True((await signIn.Authenticate(Account.Username, " ValidPass123! ")).IsSuccess);
-        Assert.Equal(4, store.Loads);
+        Assert.Equal(21, store.Loads);
+        Assert.Equal(4, hasher.Verifications);
     }
 
     [Fact]
@@ -147,6 +153,131 @@ public sealed class PasswordSignInTests
         Assert.Equal(1032, hasher.Verifications);
     }
 
+    [Theory]
+    [InlineData(" Admin ")]
+    [InlineData("unknown")]
+    public async Task TenthFailurePermanentlyBlocksBothPasswordsWithoutFurtherVerification(string username)
+    {
+        var clock = new Clock();
+        var hasher = new CountingHasher();
+        var store = new Store(Account);
+        var signIn = new PasswordSignIn(store, hasher, clock);
+        for (var i = 0; i < 10; i++)
+        {
+            Assert.Equal(PasswordSignIn.FailureMessage, (await signIn.Authenticate(username, "wrong")).Error);
+            clock.Advance(TimeSpan.FromSeconds(5));
+        }
+
+        foreach (var wait in new[] { TimeSpan.Zero, TimeSpan.FromSeconds(10), TimeSpan.FromDays(3650) })
+        {
+            clock.Advance(wait);
+            Assert.Equal(PasswordSignIn.FailureMessage,
+                (await signIn.Authenticate(username, " ValidPass123! ")).Error);
+            Assert.Equal(PasswordSignIn.FailureMessage, (await signIn.Authenticate(username, "wrong")).Error);
+        }
+        Assert.Equal(10, hasher.Verifications);
+        if (username == Account.Username)
+        {
+            Assert.True((await store.Load()).Value.Value.Failures.IsLocked);
+            Assert.Equal(PasswordSignIn.FailureMessage,
+                (await new PasswordSignIn(store, hasher, clock).Authenticate(username, " ValidPass123! ")).Error);
+            Assert.Equal(10, hasher.Verifications);
+        }
+        else
+        {
+            Assert.True((await signIn.Authenticate(Account.Username, " ValidPass123! ")).IsSuccess);
+        }
+    }
+
+    [Fact]
+    public async Task FailureCountAndDelaySurviveNewSignInInstancesAndConcurrentTenthAttempts()
+    {
+        var clock = new Clock();
+        var hasher = new CountingHasher();
+        var store = new Store(Account);
+        for (var i = 0; i < 9; i++)
+        {
+            Assert.True((await new PasswordSignIn(store, hasher, clock).Authenticate(Account.Username, "wrong")).IsFailure);
+            if (i >= 2)
+            {
+                Assert.True((await new PasswordSignIn(store, hasher, clock)
+                    .Authenticate(Account.Username, " ValidPass123! ")).IsFailure);
+                Assert.Equal(i + 1, hasher.Verifications);
+            }
+            clock.Advance(TimeSpan.FromSeconds(5));
+        }
+        var results = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ =>
+            new PasswordSignIn(store, hasher, clock).Authenticate(Account.Username, "wrong")));
+        Assert.All(results, result => Assert.Equal(PasswordSignIn.FailureMessage, result.Error));
+        Assert.Equal(10, (await store.Load()).Value.Value.Failures.Count);
+        clock.Advance(TimeSpan.FromDays(1));
+        Assert.True((await new PasswordSignIn(store, hasher, clock)
+            .Authenticate(Account.Username, " ValidPass123! ")).IsFailure);
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(10)]
+    public async Task KnownAndUnknownNamesUseEquivalentPersistenceAndVerificationWork(int failures)
+    {
+        var clock = new Clock();
+        var knownStore = new Store(Account);
+        var unknownStore = new Store(Account);
+        var knownHasher = new CountingHasher();
+        var unknownHasher = new CountingHasher();
+        var known = new PasswordSignIn(knownStore, knownHasher, clock);
+        var unknown = new PasswordSignIn(unknownStore, unknownHasher, clock);
+        for (var i = 0; i < failures; i++)
+        {
+            Assert.Equal(PasswordSignIn.FailureMessage, (await known.Authenticate(Account.Username, "wrong")).Error);
+            Assert.Equal(PasswordSignIn.FailureMessage, (await unknown.Authenticate("unknown", "wrong")).Error);
+            Assert.Equal(i + 1, knownStore.Loads);
+            Assert.Equal(knownStore.Loads, unknownStore.Loads);
+            Assert.Equal(i + 1, knownStore.Recordings);
+            Assert.Equal(knownStore.Recordings, unknownStore.Recordings);
+            Assert.Equal(i + 1, knownHasher.Verifications);
+            Assert.Equal(knownHasher.Verifications, unknownHasher.Verifications);
+            if (i < failures - 1) clock.Advance(TimeSpan.FromSeconds(5));
+        }
+        foreach (var password in new[] { "wrong", " ValidPass123! " })
+        {
+            Assert.Equal(PasswordSignIn.FailureMessage, (await known.Authenticate(Account.Username, password)).Error);
+            Assert.Equal(PasswordSignIn.FailureMessage, (await unknown.Authenticate("unknown", password)).Error);
+            Assert.Equal(knownStore.Loads, unknownStore.Loads);
+            Assert.Equal(failures, knownStore.Recordings);
+            Assert.Equal(knownStore.Recordings, unknownStore.Recordings);
+            Assert.Equal(failures, knownHasher.Verifications);
+            Assert.Equal(knownHasher.Verifications, unknownHasher.Verifications);
+        }
+        Assert.Equal(failures + 2, knownStore.Loads);
+        Assert.Equal(SignInFailures.None, (await unknownStore.Load()).Value.Value.Failures);
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(10)]
+    public async Task FreshHostsRejectPersistedRestrictionsWithIdenticalWorkForEveryUsername(int count)
+    {
+        var clock = new Clock();
+        var failures = SignInFailures.Restore(count,
+            count == 10 ? DateTimeOffset.MinValue : clock.GetUtcNow().AddSeconds(5)).Value;
+        var account = Administrator.Create(Account.Username, Account.PasswordHash, failures: failures).Value;
+        foreach (var username in new[] { Account.Username, "unknown" })
+        foreach (var password in new[] { "wrong", " ValidPass123! " })
+        {
+            var store = new Store(account);
+            var hasher = new CountingHasher();
+            // Each request starts with an entirely empty local tracker, as on another host.
+            var signIn = new PasswordSignIn(store, hasher, clock);
+            Assert.Equal(PasswordSignIn.FailureMessage, (await signIn.Authenticate(username, password)).Error);
+            Assert.Equal(1, store.Loads);
+            Assert.Equal(0, hasher.Verifications);
+            Assert.Equal(0, store.Recordings);
+            Assert.Equal(failures, (await store.Load()).Value.Value.Failures);
+            clock.Advance(count == 10 ? TimeSpan.FromDays(365) : TimeSpan.Zero);
+        }
+    }
+
     private sealed class CountingHasher : IPasswordHasher
     {
         private int verifications;
@@ -178,6 +309,35 @@ public sealed class PasswordSignInTests
         }
     }
 
+    [Fact]
+    public void FailureStateLocksAtTenAndCannotAdvanceOrExpire()
+    {
+        var state = SignInFailures.None;
+        for (var i = 1; i <= 10; i++)
+        {
+            state = state.RecordFailure(DateTimeOffset.UnixEpoch);
+            Assert.Equal(i, state.Count);
+            Assert.Equal(i == 10, state.IsLocked);
+        }
+        Assert.False(state.CanAttempt(DateTimeOffset.MaxValue));
+        Assert.Same(state, state.RecordFailure(DateTimeOffset.UnixEpoch));
+        Assert.Equal(state, SignInFailures.Restore(10, DateTimeOffset.MinValue).Value);
+    }
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(11, false)]
+    [InlineData(0, true)]
+    [InlineData(2, true)]
+    [InlineData(3, false)]
+    [InlineData(9, false)]
+    [InlineData(10, true)]
+    public void InvalidPersistedFailureStatesAreRejected(int count, bool hasRetryTime)
+    {
+        var retryAt = hasRetryTime ? DateTimeOffset.UnixEpoch : DateTimeOffset.MinValue;
+        Assert.True(SignInFailures.Restore(count, retryAt).IsFailure);
+    }
+
     private sealed class Clock : TimeProvider
     {
         private DateTimeOffset now = DateTimeOffset.UnixEpoch;
@@ -188,7 +348,9 @@ public sealed class PasswordSignInTests
     private sealed class Store(Maybe<Administrator> account, bool invalid = false, bool fault = false) : IAdministratorStore
     {
         private int loads;
+        private int recordings;
         public int Loads => loads;
+        public int Recordings => recordings;
 
         public async Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default)
         {
@@ -198,6 +360,22 @@ public sealed class PasswordSignInTests
             return invalid
                 ? Result.Failure<Maybe<Administrator>>("Invalid persisted state")
                 : Result.Success(account);
+        }
+
+        public Task<bool> TryRecordSignIn(Administrator expected, string? username, bool succeeded, DateTimeOffset now,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref recordings);
+            if (!string.Equals(username, expected.Username, StringComparison.Ordinal)) return Task.FromResult(true);
+            lock (this)
+            {
+                if (account.HasNoValue || !ReferenceEquals(account.Value, expected) || !expected.Failures.CanAttempt(now))
+                    return Task.FromResult(false);
+                var failures = succeeded ? SignInFailures.None : expected.Failures.RecordFailure(now);
+                account = Administrator.Create(expected.Username, expected.PasswordHash,
+                    expected.RequiresPasswordReplacement, failures).Value;
+                return Task.FromResult(true);
+            }
         }
 
         public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,

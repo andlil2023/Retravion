@@ -135,6 +135,19 @@ public sealed class PasswordReplacementTests
         Assert.True(changed.Value.ReplacePassword(Initial, "third-hash").IsFailure);
     }
 
+    [Fact]
+    public async Task PasswordReplacementDoesNotUnlockAnAccount()
+    {
+        var failures = SignInFailures.Restore(10, DateTimeOffset.MinValue).Value;
+        var store = new Store
+        {
+            Account = Administrator.Create("admin", Hasher.Hash(Initial), failures: failures).Value
+        };
+        Assert.True((await new PasswordReplacement(store, Hasher).Replace("admin", Initial, Replacement)).IsSuccess);
+        Assert.True(store.Account.Value.Failures.IsLocked);
+        Assert.True((await new PasswordSignIn(store, Hasher).Authenticate("admin", Replacement)).IsFailure);
+    }
+
     private sealed class TrackingHasher : IPasswordHasher
     {
         public int HashCalls { get; private set; }
@@ -153,6 +166,17 @@ public sealed class PasswordReplacementTests
             Task.FromResult(Invalid ? Result.Failure<Maybe<Administrator>>("Invalid persisted state") : Result.Success(Account));
         public Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("Existing account must not be provisioned again.");
+        public Task<bool> TryRecordSignIn(Administrator expected, string? username, bool succeeded, DateTimeOffset now,
+            CancellationToken cancellationToken = default)
+        {
+            if (!string.Equals(username, expected.Username, StringComparison.Ordinal)) return Task.FromResult(true);
+            if (Account.HasNoValue || !ReferenceEquals(Account.Value, expected) || !expected.Failures.CanAttempt(now))
+                return Task.FromResult(false);
+            Account = Administrator.Create(expected.Username, expected.PasswordHash, expected.RequiresPasswordReplacement,
+                succeeded ? SignInFailures.None : expected.Failures.RecordFailure(now)).Value;
+            return Task.FromResult(true);
+        }
+
         public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
             CancellationToken cancellationToken = default)
         {

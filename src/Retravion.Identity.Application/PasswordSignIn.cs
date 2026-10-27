@@ -25,7 +25,10 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
     public async Task<Result<string>> Authenticate(string? username, string? password,
         CancellationToken cancellationToken = default)
     {
-        var state = await FindOrAdmit(username, cancellationToken);
+        // Every submitted username incurs the same initial persistence read, including
+        // locally delayed/locked and overflow names. Do not expose existence via a cache hit.
+        var loaded = await store.Load(cancellationToken);
+        var state = FindOrAdmit(username, loaded);
         if (state is null)
             return Result.Failure<string>(FailureMessage);
 
@@ -35,11 +38,7 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
             if (!state.Failures.CanAttempt(clock.GetUtcNow()))
                 return Result.Failure<string>(FailureMessage);
 
-            var result = await VerifyCredentials(username, password, cancellationToken);
-            state.Failures = result.IsSuccess
-                ? SignInFailures.None
-                : state.Failures.RecordFailure(clock.GetUtcNow());
-            return result;
+            return await VerifyCredentials(username, password, state, loaded, cancellationToken);
         }
         finally
         {
@@ -47,7 +46,7 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
         }
     }
 
-    private async Task<Attempts?> FindOrAdmit(string? username, CancellationToken cancellationToken)
+    private Attempts? FindOrAdmit(string? username, Result<Maybe<Administrator>> loaded)
     {
         // Fixed-size keys bound retained memory even for very long submitted usernames.
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(username ?? string.Empty)));
@@ -65,25 +64,45 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
 
         // Never evict failures to admit new names. Keep one additional slot for the
         // stored administrator so an unknown-username flood cannot consume it.
-        var loaded = await store.Load(cancellationToken);
         return loaded.IsSuccess && loaded.Value.HasValue &&
             string.Equals(username, loaded.Value.Value.Username, StringComparison.Ordinal)
                 ? reservedAdministratorAttempts
                 : null;
     }
 
-    private async Task<Result<string>> VerifyCredentials(string? username, string? password,
-        CancellationToken cancellationToken)
+    private async Task<Result<string>> VerifyCredentials(string? username, string? password, Attempts state,
+        Result<Maybe<Administrator>> loaded, CancellationToken cancellationToken)
     {
-        var loaded = await store.Load(cancellationToken);
-        if (loaded.IsFailure || loaded.Value.HasNoValue)
-            return Result.Failure<string>(FailureMessage);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (loaded.IsFailure || loaded.Value.HasNoValue)
+            {
+                state.Failures = state.Failures.RecordFailure(clock.GetUtcNow());
+                return Result.Failure<string>(FailureMessage);
+            }
 
-        var administrator = loaded.Value.Value;
-        // Verify even when the username differs; do not expose which credential failed.
-        var passwordMatches = hasher.Verify(password ?? string.Empty, administrator.PasswordHash);
-        return Result.Success(administrator.Username)
-            .Ensure(_ => password is not null && passwordMatches &&
-                string.Equals(username, administrator.Username, StringComparison.Ordinal), FailureMessage);
+            var administrator = loaded.Value.Value;
+            var usernameMatches = string.Equals(username, administrator.Username, StringComparison.Ordinal);
+            // With one stored account, reject every submitted name identically while its
+            // persisted restriction applies, including on a host with no local history.
+            if (!administrator.Failures.CanAttempt(clock.GetUtcNow()))
+                return Result.Failure<string>(FailureMessage);
+
+            // Verify even when the username differs; do not expose which credential failed.
+            var passwordMatches = hasher.Verify(password ?? string.Empty, administrator.PasswordHash);
+            var result = Result.Success(administrator.Username)
+                .Ensure(_ => usernameMatches && password is not null && passwordMatches, FailureMessage);
+            // Unknown names get a non-mutating write roundtrip, not a faster credential-failure path.
+            var recorded = await store.TryRecordSignIn(administrator, username, result.IsSuccess,
+                clock.GetUtcNow(), cancellationToken);
+            if (!usernameMatches)
+                state.Failures = state.Failures.RecordFailure(clock.GetUtcNow());
+            if (recorded) return result;
+
+            // Another host changed credentials or failures. Reassess its committed state;
+            // never overwrite a newly committed delay or lockout with a stale success.
+            loaded = await store.Load(cancellationToken);
+        }
     }
 }

@@ -139,6 +139,9 @@ public sealed class AdministratorInitializationTests
             Task.FromResult(Invalid
                 ? Result.Failure<Maybe<Administrator>>("The persisted administrator is invalid.")
                 : Result.Success(Account));
+        public Task<bool> TryRecordSignIn(Administrator expected, string? username, bool succeeded, DateTimeOffset now,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
 

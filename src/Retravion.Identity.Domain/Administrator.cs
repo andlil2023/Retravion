@@ -9,12 +9,15 @@ public sealed class Administrator
     public string PasswordHash { get; }
 
     public bool RequiresPasswordReplacement { get; }
+    public SignInFailures Failures { get; }
 
-    private Administrator(string username, string passwordHash, bool requiresPasswordReplacement)
+    private Administrator(string username, string passwordHash, bool requiresPasswordReplacement,
+        SignInFailures failures)
     {
         Username = username;
         PasswordHash = passwordHash;
         RequiresPasswordReplacement = requiresPasswordReplacement;
+        Failures = failures;
     }
 
     public Result<Administrator> ReplacePassword(string? password, string? passwordHash) =>
@@ -23,14 +26,14 @@ public sealed class Administrator
             .Bind(() => PasswordPolicy.Validate(password))
             .Ensure(() => !string.Equals(PasswordHash, passwordHash, StringComparison.Ordinal),
                 "The replacement password hash must differ from the current hash.")
-            .Bind(() => Create(Username, passwordHash, requiresPasswordReplacement: false));
+            .Bind(() => Create(Username, passwordHash, requiresPasswordReplacement: false, failures: Failures));
 
     public static Result<Administrator> Create(string? username, string? passwordHash,
-        bool requiresPasswordReplacement = true) =>
+        bool requiresPasswordReplacement = true, SignInFailures? failures = null) =>
         Result.Success()
             .Ensure(() => !string.IsNullOrWhiteSpace(username) && !username.Contains('\0'),
                 "An administrator username without null characters is required.")
             .Ensure(() => !string.IsNullOrWhiteSpace(passwordHash) && !passwordHash.Contains('\0'),
                 "An administrator password hash is required.")
-            .Map(() => new Administrator(username!, passwordHash!, requiresPasswordReplacement));
+            .Map(() => new Administrator(username!, passwordHash!, requiresPasswordReplacement, failures ?? SignInFailures.None));
 }

@@ -173,6 +173,78 @@ public sealed class LoginTests
         }
     }
 
+    [Theory]
+    [InlineData("specific-admin")]
+    [InlineData("unknown")]
+    public async Task TenthFailureBlocksOtherBrowsersWithoutRevealingAccountExistence(string username)
+    {
+        var clock = new Clock();
+        var observer = new IdentityObserver();
+        await using var factory = CreateFactory().WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                services.AddSingleton<TimeProvider>(clock);
+                services.AddSingleton<IStartupFilter>(observer);
+            }));
+        using var first = CreateClient(factory);
+        using var second = CreateClient(factory);
+        var token = await GetToken(first);
+        for (var i = 0; i < 10; i++)
+        {
+            using var failure = await Submit(first, token, username, "wrong");
+            Assert.Equal(HttpStatusCode.Redirect, failure.StatusCode);
+            Assert.Equal("/?failed=true", failure.Headers.Location?.OriginalString);
+            clock.Advance(TimeSpan.FromSeconds(5));
+        }
+
+        var secondToken = await GetToken(second);
+        foreach (var wait in new[] { TimeSpan.Zero, TimeSpan.FromSeconds(10), TimeSpan.FromDays(365) })
+        {
+            clock.Advance(wait);
+            using var blocked = await Submit(second, secondToken, username, "ValidPass123!");
+            Assert.Equal(HttpStatusCode.Redirect, blocked.StatusCode);
+            Assert.Equal("/?failed=true", blocked.Headers.Location?.OriginalString);
+            var html = await second.GetStringAsync("/?failed=true");
+            Assert.Contains(PasswordSignIn.FailureMessage, html);
+            Assert.DoesNotContain(username, html);
+            Assert.False(observer.User?.Identity?.IsAuthenticated);
+        }
+    }
+
+    [Fact]
+    public async Task LockoutLeavesExistingSessionsActiveUntilNormalInactivityExpiration()
+    {
+        var clock = new Clock();
+        var store = new StartupAdministratorStore
+        {
+            Account = Administrator.Create("specific-admin", new Pbkdf2PasswordHasher().Hash("ValidPass123!"),
+                requiresPasswordReplacement: false).Value
+        };
+        await using var factory = new AdministratorWebFactory(store).WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddSingleton<TimeProvider>(clock)));
+        using var existing = CreateClient(factory);
+        using var attacker = CreateClient(factory);
+        using var login = await Submit(existing, await GetToken(existing), "specific-admin", "ValidPass123!");
+        Assert.Equal("/home", login.Headers.Location?.OriginalString);
+        var token = await GetToken(attacker);
+        for (var i = 0; i < 10; i++)
+        {
+            using var failure = await Submit(attacker, token, "specific-admin", "wrong");
+            Assert.Equal("/?failed=true", failure.Headers.Location?.OriginalString);
+            clock.Advance(TimeSpan.FromSeconds(5));
+        }
+        Assert.True(store.Account.Value.Failures.IsLocked);
+        using var home = await existing.GetAsync("/home");
+        Assert.Equal(HttpStatusCode.OK, home.StatusCode);
+        clock.Advance(TimeSpan.FromMinutes(30).Subtract(TimeSpan.FromTicks(1)));
+        using var stillActive = await existing.GetAsync("/home");
+        Assert.Equal(HttpStatusCode.OK, stillActive.StatusCode);
+        clock.Advance(TimeSpan.FromMinutes(30));
+        using var expired = await existing.GetAsync("/home");
+        Assert.Equal(HttpStatusCode.Redirect, expired.StatusCode);
+        Assert.Equal("/", expired.Headers.Location?.OriginalString);
+    }
+
     private sealed class Clock : TimeProvider
     {
         private DateTimeOffset now = DateTimeOffset.UnixEpoch;
@@ -188,6 +260,10 @@ public sealed class LoginTests
             Loads++;
             return Task.FromResult(Result.Success<Maybe<Administrator>>(Loads <= 2 ? initial : replaced));
         }
+        public Task<bool> TryRecordSignIn(Administrator expected, string? username, bool succeeded, DateTimeOffset now,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(!string.Equals(username, expected.Username, StringComparison.Ordinal) ||
+                ReferenceEquals(initial, expected) && succeeded && expected.Failures.CanAttempt(now));
         public Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
