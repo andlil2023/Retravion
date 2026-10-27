@@ -51,6 +51,17 @@ public sealed class PostgresAdministratorTests
             var winner = int.Parse(original.Username["supplied-".Length..]);
             Assert.True(hasher.Verify($"ValidPass{winner}123!", original.PasswordHash));
             Assert.DoesNotContain("ValidPass", original.PasswordHash);
+            Assert.True(original.RequiresPasswordReplacement);
+
+            // Simulate the pre-replacement schema: migration must restrict the existing account,
+            // preserve credentials, and remain idempotent on later loads.
+            await using (var legacy = new NpgsqlCommand(
+                "ALTER TABLE retravion_identity.administrator DROP COLUMN requires_password_replacement", connection))
+                await legacy.ExecuteNonQueryAsync();
+            var migrated = (await new PostgresAdministratorStore(connectionString).Load()).Value.Value;
+            Assert.True(migrated.RequiresPasswordReplacement);
+            Assert.Equal(original.Username, migrated.Username);
+            Assert.Equal(original.PasswordHash, migrated.PasswordHash);
             await using (var count = new NpgsqlCommand("SELECT count(*) FROM retravion_identity.administrator", connection))
                 Assert.Equal(1L, await count.ExecuteScalarAsync());
 
@@ -72,6 +83,32 @@ public sealed class PostgresAdministratorTests
                 Assert.Equal(original.PasswordHash, persisted.PasswordHash);
                 Assert.False(hasher.Verify("Replacement123!", persisted.PasswordHash));
             }
+
+            var replacement = new PasswordReplacement(store, hasher);
+            Assert.True((await replacement.Replace(original.Username, $"ValidPass{winner}123!", "short")).IsFailure);
+            Assert.True((await replacement.Replace(original.Username, $"ValidPass{winner}123!", $"ValidPass{winner}123!")).IsFailure);
+            Assert.Equal(original.PasswordHash, (await store.Load()).Value.Value.PasswordHash);
+
+            // Competing completions from the same snapshot: exactly one wins, without overwriting it.
+            var first = original.ReplacePassword("ChangedPass123!", hasher.Hash("ChangedPass123!")).Value;
+            var second = original.ReplacePassword("OtherChanged123!", hasher.Hash("OtherChanged123!")).Value;
+            var completions = await Task.WhenAll(
+                store.ReplacePassword(original, first),
+                new PostgresAdministratorStore(connectionString).ReplacePassword(original, second));
+            Assert.Single(completions, result => result.IsSuccess);
+            Assert.Single(completions, result => result.IsFailure);
+            var completed = completions[0].IsSuccess ? first : second;
+            var changedPassword = completions[0].IsSuccess ? "ChangedPass123!" : "OtherChanged123!";
+            var restarted = new PostgresAdministratorStore(connectionString);
+            Assert.True((await new AdministratorInitializer(restarted, hasher).Initialize(null, null)).IsSuccess);
+            var signIn = new PasswordSignIn(restarted, hasher);
+            Assert.True((await signIn.Authenticate(original.Username, changedPassword)).IsSuccess);
+            Assert.True((await signIn.Authenticate(original.Username, $"ValidPass{winner}123!")).IsFailure);
+            var persistedReplacement = (await restarted.Load()).Value.Value;
+            Assert.False(persistedReplacement.RequiresPasswordReplacement);
+            Assert.Equal(completed.PasswordHash, persistedReplacement.PasswordHash);
+            Assert.True((await restarted.ReplacePassword(original, second)).IsFailure);
+            Assert.True((await replacement.Replace(original.Username, changedPassword, "ThirdPassword123!")).IsFailure);
 
             // The schema, not only the application, prevents a second singleton identity.
             await using (var invalidInsert = new NpgsqlCommand("""

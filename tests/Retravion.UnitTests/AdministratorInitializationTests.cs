@@ -43,6 +43,7 @@ public sealed class AdministratorInitializationTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(" admin ", store.Account.Value.Username);
+        Assert.True(store.Account.Value.RequiresPasswordReplacement);
         Assert.NotEqual(password, store.Account.Value.PasswordHash);
         Assert.True(hasher.Verify(password, store.Account.Value.PasswordHash));
         Assert.False(hasher.Verify(password.Trim(), store.Account.Value.PasswordHash));
@@ -138,6 +139,9 @@ public sealed class AdministratorInitializationTests
             Task.FromResult(Invalid
                 ? Result.Failure<Maybe<Administrator>>("The persisted administrator is invalid.")
                 : Result.Success(Account));
+        public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default)
         {
             Writes++;
