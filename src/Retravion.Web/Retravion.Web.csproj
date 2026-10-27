@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
+    <PackageReference Include="MudBlazor" />
     <ProjectReference Include="../Retravion.Application/Retravion.Application.csproj" />
     <ProjectReference Include="../Retravion.Infrastructure/Retravion.Infrastructure.csproj" />
     <InternalsVisibleTo Include="Retravion.IntegrationTests" />
