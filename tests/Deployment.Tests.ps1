@@ -62,11 +62,12 @@ function podman {
                 $global:LASTEXITCODE = if ($script:ResourcesExist) { 0 } else { 1 }
             } elseif ($arguments[1] -eq 'inspect') {
                 $label = if ($script:Owned) { '1' } else { '0' }
-                return "[{`"Labels`":{`"com.retravion.review`":`"$label`"},`"Config`":{`"Labels`":{`"com.retravion.review`":`"$label`"}}}]"
+                return "[{`"Labels`":{`"com.retravion.review`":`"$label`"},`"Config`":{`"Labels`":{`"com.retravion.review`":`"$label`"}},`"State`":{`"Running`":false}}]"
             }
         }
         'image' { $global:LASTEXITCODE = if ($script:ImagesCached) { 0 } else { 1 } }
         'build' { if ($script:FailBuild) { $global:LASTEXITCODE = 125; return 'mock build failure' } }
+        'run' { if ($script:FailRecovery -and $arguments -contains '--recover-initial-administrator') { $global:LASTEXITCODE = 1; return 'sensitive provider output' } }
         'exec' { if ($script:FailDatabase) { $global:LASTEXITCODE = 1 } }
     }
 }
@@ -78,11 +79,49 @@ function Reset-Fixture {
     $script:Owned = $true
     $script:ImagesCached = $true
     $script:FailBuild = $false
+    $script:FailRecovery = $false
     $script:FailDatabase = $false
     $script:ResetDatabase = $false
     $script:UpdateImages = $false
 }
 function Count-Calls([string] $Pattern) { return @($script:Calls | Where-Object { $_ -like $Pattern }).Count }
+
+Reset-Fixture
+$script:ResourcesExist = $true
+$script:Answer = 'RECOVER'
+Invoke-ReviewRecovery
+Assert-True ((Count-Calls 'build|*') -eq 1) 'Recovery builds the command image'
+Assert-True ($script:Calls.FindIndex([Predicate[string]] { param($call) $call -like 'build|*' }) -lt $script:Calls.FindIndex([Predicate[string]] { param($call) $call -eq 'stop|retravion-review-app' })) 'Recovery builds before stopping the application'
+Assert-True ((Count-Calls 'stop|retravion-review-app') -eq 1) 'Recovery stops the application'
+Assert-True ((Count-Calls 'run|*--recover-initial-administrator') -eq 1) 'Recovery invokes one-off command'
+Assert-True ((Count-Calls 'start|retravion-review-app') -eq 0) 'Old image container is never restarted'
+Assert-True ((Count-Calls 'rm|retravion-review-app') -eq 1) 'Recovery removes the old image container'
+Assert-True ((Count-Calls 'run|-d|--name|retravion-review-app|*localhost/retravion-review:local') -eq 1) 'Recovery recreates the application from the newly built image'
+Assert-True ($script:Calls.FindIndex([Predicate[string]] { param($call) $call -like 'run|*--recover-initial-administrator' }) -lt $script:Calls.FindIndex([Predicate[string]] { param($call) $call -eq 'rm|retravion-review-app' })) 'Recovery succeeds before replacing the old container'
+Assert-True ((Count-Calls "*$($config.INITIAL_ADMIN_PASSWORD)*") -eq 0) 'Recovery password absent from arguments'
+
+Reset-Fixture
+$script:ResourcesExist = $true
+$script:Answer = 'RECOVER'
+$script:FailBuild = $true
+Assert-Throws { Invoke-ReviewRecovery } 'build'
+Assert-True ((Count-Calls 'stop|*') -eq 0) 'Failed recovery image build leaves application running'
+Assert-True ((Count-Calls 'run|*') -eq 0) 'Failed build cannot run an outdated image'
+
+Reset-Fixture
+$script:ResourcesExist = $true
+$script:Answer = 'RECOVER'
+$script:FailRecovery = $true
+Assert-Throws { Invoke-ReviewRecovery } 'Administrator recovery failed'
+Assert-True ((Count-Calls 'start|retravion-review-app') -eq 0) 'Failed recovery leaves application stopped'
+Assert-True ((Count-Calls 'rm|retravion-review-app') -eq 0) 'Failed recovery preserves the stopped container'
+Assert-True ((Count-Calls 'run|-d|--name|retravion-review-app|*') -eq 0) 'Failed recovery does not create a new application'
+
+Reset-Fixture
+$script:ResourcesExist = $true
+$script:Answer = 'no'
+Assert-Throws { Invoke-ReviewRecovery } 'Recovery cancelled'
+Assert-True ((Count-Calls 'stop|*') -eq 0) 'Declined recovery leaves application running'
 
 Reset-Fixture
 $oldPassword = [Environment]::GetEnvironmentVariable('POSTGRES_PASSWORD', 'Process')

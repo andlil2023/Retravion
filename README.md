@@ -96,8 +96,33 @@ connection. Image cache availability is not a guarantee of a fully offline build
 Configuration passed to the app uses `ConnectionStrings__DefaultConnection`,
 `InitialAdmin__Username`, and `InitialAdmin__Password`. Initial provisioning stores only
 a salted one-way password hash. Once provisioned, absent/changed initial credentials
-are ignored; editing `.env` is not a recovery mechanism. No credentials are baked into the app image. Podman users
+are ignored on ordinary startup; editing `.env` alone does not reset credentials. No credentials are baked into the app image. Podman users
 can inspect container environment values: this setup is for a trusted local machine.
+
+### Recover the initial administrator
+
+Recovery is an offline operation for an authorized IT administrator with administrative
+access to this hosting environment. This procedure supports the single-application-container
+review deployment only. Before proceeding, stop every other application instance using this
+database and prevent concurrent deployment or startup until recovery finishes. The script
+cannot detect independently hosted instances; running any would leave their sessions active.
+Do not use this procedure for a multi-instance deployment.
+
+Set `INITIAL_ADMIN_PASSWORD` in the private `.env` to the intended recovery password, then run:
+
+```powershell
+.\deploy.ps1 -RecoverAdministrator
+```
+
+Confirm by typing `RECOVER`. The script first builds the recovery-capable image from this
+checkout; a build failure leaves the application running. It then stops the managed application,
+ending its sessions, runs recovery without exposing the password in command arguments, and recreates
+the application from the newly built image on success. A recovery failure leaves the application
+stopped; correct the configuration before retrying. If recreation or readiness fails after recovery,
+inspect the container and rerun the normal deployment; recovery has already changed the password. Recovery clears the administrator lockout and requires authentication followed by a
+password replacement. Keep `.env` private and replace its recovery password securely afterward.
+The internal `--recover-initial-administrator` application command must only be run while all
+application hosts using the database are stopped; running it directly does not stop them.
 
 ### Stop and troubleshoot
 
