@@ -9,8 +9,16 @@ Retravion documents and traces the lifecycle of software products. Only features
 - Stack: .NET 10, Blazor, PostgreSQL, and MudBlazor (D-001/D-003 in `docs/decisions.md`).
 - Domain-driven design and Vertical Slice Architecture, with explicit domain boundaries (D-002).
 - Prefer modern C#, records, and immutable values where appropriate.
-- Railway-oriented result handling where it improves clarity; avoid unnecessary abstraction.
+- Prefer functional-first implementation: pure decisions and immutable data, with explicit effects and result-based expected failures; avoid unnecessary abstraction.
 - Establish application-level UI patterns through reviewed implementations.
+
+## Functional-First Implementation
+
+- Prefer deterministic functions with explicit inputs and outputs for decisions and transformations. Pass values such as the current time into the logic rather than reading external state within it.
+- Prefer immutable data and new values over shared mutable state. Keep domain behavior and invariants in the domain model.
+- Isolate effects such as persistence, cryptography, clocks, and UI interactions in explicit orchestration or infrastructure boundaries. The application necessarily performs effects; make their ordering and failure handling visible.
+- Return expected failures as values using the conventions below. Preserve cancellation and unexpected faults rather than silently converting every exception to a normal failure.
+- Prefer composition when it improves readability and testability; do not sacrifice clarity for compactness. Imperative flow, local mutation, synchronization, and exceptions are appropriate when required by framework contracts, security, resource management, or demonstrable clarity.
 
 ## Expected Failures and Legitimate Absence
 

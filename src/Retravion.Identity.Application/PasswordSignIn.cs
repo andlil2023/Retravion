@@ -70,6 +70,10 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
                 : null;
     }
 
+    internal static Result<string> CredentialDecision(string username, bool usernameMatches, bool passwordSupplied,
+        bool passwordMatches) => Result.Success(username)
+        .Ensure(_ => usernameMatches && passwordSupplied && passwordMatches, FailureMessage);
+
     private async Task<Result<string>> VerifyCredentials(string? username, string? password, Attempts state,
         Result<Maybe<Administrator>> loaded, CancellationToken cancellationToken)
     {
@@ -91,8 +95,7 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
 
             // Verify even when the username differs; do not expose which credential failed.
             var passwordMatches = hasher.Verify(password ?? string.Empty, administrator.PasswordHash);
-            var result = Result.Success(administrator.Username)
-                .Ensure(_ => usernameMatches && password is not null && passwordMatches, FailureMessage);
+            var result = CredentialDecision(administrator.Username, usernameMatches, password is not null, passwordMatches);
             // Unknown names get a non-mutating write roundtrip, not a faster credential-failure path.
             var recorded = await store.TryRecordSignIn(administrator, username, result.IsSuccess,
                 clock.GetUtcNow(), cancellationToken);
