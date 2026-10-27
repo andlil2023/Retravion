@@ -1,15 +1,16 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Retravion.Identity.Application;
+using Retravion.Web.Features.Identity.PasswordReplacement;
 
 namespace Retravion.Web.Features.Identity.Login;
 
 internal static class LoginEndpoint
 {
     internal static void MapLogin(this WebApplication app) => app.MapPost("/identity/login", async (
-        HttpContext context, IAntiforgery antiforgery, PasswordSignIn signIn) =>
+        HttpContext context, IAntiforgery antiforgery, PasswordSignIn signIn, IAdministratorStore store,
+        IPasswordHasher hasher) =>
     {
         try
         {
@@ -29,13 +30,17 @@ internal static class LoginEndpoint
             return Results.LocalRedirect("/?failed=true");
         }
 
-        var identity = new ClaimsIdentity(new[]
+        var loaded = await store.Load(context.RequestAborted);
+        if (loaded.IsFailure || loaded.Value.HasNoValue ||
+            !string.Equals(loaded.Value.Value.Username, result.Value, StringComparison.Ordinal) ||
+            !hasher.Verify(form["password"].ToString(), loaded.Value.Value.PasswordHash))
         {
-            new Claim(ClaimTypes.NameIdentifier, result.Value),
-            new Claim(ClaimTypes.Name, result.Value)
-        }, CookieAuthenticationDefaults.AuthenticationScheme);
-        await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
-            new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = false });
-        return Results.LocalRedirect("/home");
+            await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return Results.LocalRedirect("/?failed=true");
+        }
+
+        var restricted = loaded.Value.Value.RequiresPasswordReplacement;
+        await PasswordReplacementEndpoint.SignIn(context, result.Value, restricted);
+        return Results.LocalRedirect(restricted ? "/password-replacement" : "/home");
     });
 }

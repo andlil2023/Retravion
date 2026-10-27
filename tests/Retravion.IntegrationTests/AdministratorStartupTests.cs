@@ -97,7 +97,14 @@ internal sealed class StartupAdministratorStore : IAdministratorStore
     }
 
     public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        CancellationToken cancellationToken = default)
+    {
+        if (Account.HasNoValue || !ReferenceEquals(Account.Value, expected))
+            return Task.FromResult(Result.Failure("Stale account"));
+        Account = replacement;
+        Writes++;
+        return Task.FromResult(Result.Success());
+    }
 
     public Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default)
     {
