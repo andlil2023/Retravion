@@ -9,12 +9,132 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Retravion.Identity.Application;
+using Retravion.Application.AuditTrail;
 using Xunit;
 
 namespace Retravion.IntegrationTests;
 
 public sealed class LoginTests
 {
+    [Fact]
+    public async Task DecisionsAreAuditedWithoutCredentialsOrInventedIdentities()
+    {
+        var audit = new AuditDouble();
+        await using var factory = WithAudit(audit);
+        using var client = CreateClient(factory);
+        var token = await GetToken(client);
+        using var failure = await Submit(client, token, "unknown-user", "secret-password");
+        using var success = await Submit(client, token, "specific-admin", "ValidPass123!");
+        Assert.Equal("/?failed=true", failure.Headers.Location?.OriginalString);
+        Assert.Equal("/password-replacement", success.Headers.Location?.OriginalString);
+        Assert.Equal(2, audit.Events.Count);
+        var failed = audit.Events[0];
+        Assert.Equal("identity.login", failed.Action);
+        Assert.Equal(AuditActionOutcome.Failure, failed.Outcome);
+        Assert.IsType<AuditActor.Unknown>(failed.Actor);
+        Assert.IsType<AuditTarget.Unknown>(failed.Target);
+        var passed = audit.Events[1];
+        Assert.Equal("identity.login", passed.Action);
+        Assert.Equal(AuditActionOutcome.Success, passed.Outcome);
+        Assert.Equal("specific-admin", Assert.IsType<AuditActor.Identified>(passed.Actor).Identifier);
+        Assert.IsType<AuditTarget.Unknown>(passed.Target);
+        Assert.DoesNotContain("secret-password", string.Join(" ", audit.Events));
+        Assert.DoesNotContain("ValidPass123!", string.Join(" ", audit.Events));
+        Assert.DoesNotContain("unknown-user", string.Join(" ", audit.Events));
+    }
+
+    [Fact]
+    public async Task SessionIsGrantedOnlyAfterAuditConfirmation()
+    {
+        var completion = new TaskCompletionSource<AuditSubmissionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var audit = new AuditDouble { Submit = (_, _) => completion.Task };
+        await using var factory = WithAudit(audit);
+        using var client = CreateClient(factory);
+        var request = Submit(client, await GetToken(client), "specific-admin", "ValidPass123!");
+        await audit.Entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.False(request.IsCompleted);
+        completion.SetResult(AuditSubmissionResult.Success);
+        using var response = await request;
+        Assert.Equal("/password-replacement", response.Headers.Location?.OriginalString);
+        Assert.Contains(response.Headers.GetValues("Set-Cookie"), value => value.StartsWith("Retravion.Identity="));
+    }
+
+    [Fact]
+    public async Task PasswordReplacementDuringAuditConfirmationCannotGrantAStaleSession()
+    {
+        var completion = new TaskCompletionSource<AuditSubmissionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var audit = new AuditDouble { Submit = (_, _) => completion.Task };
+        var store = new StartupAdministratorStore();
+        await using var factory = new AdministratorWebFactory(store, "specific-admin", "ValidPass123!")
+            .WithWebHostBuilder(builder => builder.ConfigureServices(services => services.AddSingleton<IAuditSubmission>(audit)));
+        using var client = CreateClient(factory);
+        var request = Submit(client, await GetToken(client), "specific-admin", "ValidPass123!");
+        await audit.Entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var account = store.Account.Value;
+        store.Account = account.ReplacePassword("Replacement123!", new Pbkdf2PasswordHasher().Hash("Replacement123!")).Value;
+        completion.SetResult(AuditSubmissionResult.Success);
+        using var response = await request;
+        Assert.Equal("/?failed=true", response.Headers.Location?.OriginalString);
+        using var home = await client.GetAsync("/home");
+        Assert.NotEqual(HttpStatusCode.OK, home.StatusCode);
+        Assert.Equal(AuditActionOutcome.Success, Assert.Single(audit.Events).Outcome);
+    }
+
+    [Theory]
+    [InlineData("failure")]
+    [InlineData("exception")]
+    [InlineData("cancellation")]
+    [InlineData("timeout")]
+    public async Task UnconfirmedAuditNeverGrantsSession(string mode)
+    {
+        var audit = new AuditDouble { Submit = (_, _) => mode switch
+        {
+            "failure" => Task.FromResult(AuditSubmissionResult.Failure),
+            "exception" => Task.FromException<AuditSubmissionResult>(new Exception("secret-provider-details")),
+            "cancellation" => Task.FromCanceled<AuditSubmissionResult>(new CancellationToken(true)),
+            _ => new TaskCompletionSource<AuditSubmissionResult>().Task
+        }};
+        await using var factory = WithAudit(audit);
+        using var client = CreateClient(factory);
+        using var response = await Submit(client, await GetToken(client), "specific-admin", "ValidPass123!");
+        Assert.Equal("/?failed=true", response.Headers.Location?.OriginalString);
+        using var home = await client.GetAsync("/home");
+        Assert.NotEqual(HttpStatusCode.OK, home.StatusCode);
+        Assert.Single(audit.Events);
+    }
+
+    [Fact]
+    public async Task AntiforgeryAndRetryRestrictionsAreAuditedAtTheCorrectBoundary()
+    {
+        var audit = new AuditDouble();
+        await using var factory = WithAudit(audit);
+        using var client = CreateClient(factory);
+        var token = await GetToken(client);
+        using var invalid = await Submit(client, "invalid-token", "specific-admin", "ValidPass123!");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Empty(audit.Events);
+        for (var i = 0; i < 3; i++)
+        {
+            using var failure = await Submit(client, token, "specific-admin", "wrong");
+            Assert.Equal("/?failed=true", failure.Headers.Location?.OriginalString);
+        }
+        using var blocked = await Submit(client, token, "specific-admin", "ValidPass123!");
+        Assert.Equal("/?failed=true", blocked.Headers.Location?.OriginalString);
+        Assert.Equal(4, audit.Events.Count);
+        Assert.All(audit.Events, item => Assert.Equal(AuditActionOutcome.Failure, item.Outcome));
+    }
+
+    [Fact]
+    public async Task FailedAuthenticationRemainsDeniedWhenAuditFails()
+    {
+        var audit = new AuditDouble { Submit = (_, _) => Task.FromResult(AuditSubmissionResult.Failure) };
+        await using var factory = WithAudit(audit);
+        using var client = CreateClient(factory);
+        using var response = await Submit(client, await GetToken(client), "specific-admin", "wrong");
+        Assert.Equal("/?failed=true", response.Headers.Location?.OriginalString);
+        Assert.Equal(AuditActionOutcome.Failure, Assert.Single(audit.Events).Outcome);
+    }
+
     [Fact]
     public async Task MatchingCredentialsEstablishTheSpecificIdentityOnTheNextRequest()
     {
@@ -101,16 +221,19 @@ public sealed class LoginTests
         var initial = Administrator.Create("specific-admin", hasher.Hash("ValidPass123!")).Value;
         var replaced = initial.ReplacePassword("Replacement123!", hasher.Hash("Replacement123!")).Value;
         var store = new ConcurrentReplacementStore(initial, replaced);
+        var audit = new AuditDouble();
         var observer = new IdentityObserver();
         await using var factory = CreateFactory().WithWebHostBuilder(builder =>
             builder.ConfigureServices(services =>
             {
                 services.AddSingleton<IAdministratorStore>(store);
+                services.AddSingleton<IAuditSubmission>(audit);
                 services.AddSingleton<IStartupFilter>(observer);
             }));
         using var client = CreateClient(factory);
         using var response = await Submit(client, await GetToken(client), "specific-admin", "ValidPass123!");
 
+        Assert.Equal(AuditActionOutcome.Failure, Assert.Single(audit.Events).Outcome);
         Assert.Equal(3, store.Loads); // Startup, credential verification, then access decision.
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Equal("/?failed=true", response.Headers.Location?.OriginalString);
@@ -243,6 +366,24 @@ public sealed class LoginTests
         using var expired = await existing.GetAsync("/home");
         Assert.Equal(HttpStatusCode.Redirect, expired.StatusCode);
         Assert.Equal("/", expired.Headers.Location?.OriginalString);
+    }
+
+    private static WebApplicationFactory<Program> WithAudit(AuditDouble audit) =>
+        CreateFactory().WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddSingleton<IAuditSubmission>(audit)));
+
+    private sealed class AuditDouble : IAuditSubmission
+    {
+        public List<AuditInformation> Events { get; } = [];
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Func<AuditInformation, CancellationToken, Task<AuditSubmissionResult>> Submit { get; init; } =
+            (_, _) => Task.FromResult(AuditSubmissionResult.Success);
+        public Task<AuditSubmissionResult> SubmitAsync(AuditInformation information, CancellationToken cancellationToken = default)
+        {
+            Events.Add(information);
+            Entered.TrySetResult();
+            return Submit(information, cancellationToken);
+        }
     }
 
     private sealed class Clock : TimeProvider
