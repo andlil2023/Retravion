@@ -14,18 +14,11 @@ public sealed class Administrator
         PasswordHash = passwordHash;
     }
 
-    public static Result<Administrator> Create(string? username, string? passwordHash)
-    {
-        if (string.IsNullOrWhiteSpace(username) || username.Contains('\0'))
-        {
-            return Result.Failure<Administrator>("An administrator username without null characters is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(passwordHash) || passwordHash.Contains('\0'))
-        {
-            return Result.Failure<Administrator>("An administrator password hash is required.");
-        }
-
-        return Result.Success(new Administrator(username, passwordHash));
-    }
+    public static Result<Administrator> Create(string? username, string? passwordHash) =>
+        Result.Success()
+            .Ensure(() => !string.IsNullOrWhiteSpace(username) && !username.Contains('\0'),
+                "An administrator username without null characters is required.")
+            .Ensure(() => !string.IsNullOrWhiteSpace(passwordHash) && !passwordHash.Contains('\0'),
+                "An administrator password hash is required.")
+            .Map(() => new Administrator(username!, passwordHash!));
 }

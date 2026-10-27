@@ -36,10 +36,10 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
             }
             else
             {
-                var administrator = Administrator.Create(reader.GetString(0), reader.GetString(1));
-                result = administrator.IsFailure
-                    ? Result.Failure<Maybe<Administrator>>("The persisted administrator is invalid.")
-                    : Result.Success(Maybe<Administrator>.From(administrator.Value));
+                result = Administrator.Create(reader.GetString(0), reader.GetString(1))
+                    .Match(
+                        administrator => Result.Success(Maybe<Administrator>.From(administrator)),
+                        _ => Result.Failure<Maybe<Administrator>>("The persisted administrator is invalid."));
             }
         }
 

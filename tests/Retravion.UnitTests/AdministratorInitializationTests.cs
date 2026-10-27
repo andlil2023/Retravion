@@ -71,8 +71,26 @@ public sealed class AdministratorInitializationTests
         var hasher = new CountingHasher();
         var result = await new AdministratorInitializer(store, hasher).Initialize("admin", "ValidPass123!");
         Assert.True(result.IsFailure);
+        Assert.Equal("The persisted administrator is invalid.", result.Error);
         Assert.Equal(0, hasher.Calls);
         Assert.Equal(0, store.Writes);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("bad\0hash")]
+    public async Task InvalidHashedAccountShortCircuitsPersistence(string hash)
+    {
+        var store = new MemoryStore();
+        var hasher = new CountingHasher(hash);
+
+        var result = await new AdministratorInitializer(store, hasher).Initialize("admin", "ValidPass123!");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("An administrator password hash is required.", result.Error);
+        Assert.Equal(1, hasher.Calls);
+        Assert.Equal(0, store.Writes);
+        Assert.True(store.Account.HasNoValue);
     }
 
     [Theory]
@@ -85,10 +103,29 @@ public sealed class AdministratorInitializationTests
     public void DomainRejectsInvalidRequiredState(string? username, string? hash) =>
         Assert.True(Administrator.Create(username, hash).IsFailure);
 
-    private sealed class CountingHasher : IPasswordHasher
+    [Fact]
+    public void DomainValidationReportsFirstFailureWithoutDisclosingInput()
+    {
+        var result = Administrator.Create("private\0user", "private\0hash");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("An administrator username without null characters is required.", result.Error);
+    }
+
+    [Fact]
+    public void DomainConstructionPreservesValidatedValues()
+    {
+        var result = Administrator.Create(" admin ", " opaque-hash ");
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(" admin ", result.Value.Username);
+        Assert.Equal(" opaque-hash ", result.Value.PasswordHash);
+    }
+
+    private sealed class CountingHasher(string hash = "opaque-hash") : IPasswordHasher
     {
         public int Calls { get; private set; }
-        public string Hash(string password) { Calls++; return "opaque-hash"; }
+        public string Hash(string password) { Calls++; return hash; }
         public bool Verify(string password, string? encodedHash) => throw new NotSupportedException();
     }
 
