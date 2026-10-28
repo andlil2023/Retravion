@@ -1,3 +1,5 @@
 # UN-AUDIT-01 — Traceability for Regulatory Compliance
 
-**Need:** As an RA/QA user or regulatory auditor, I need to trace activities performed in the application, so that I can assess and demonstrate regulatory compliance.
+**Need:** As a regulatory inspector, I need relevant application activity to be traceable, so that I can assess it during an inspection.
+
+Direct inspector access to Retravion is not assumed; an administrator may present the information.
