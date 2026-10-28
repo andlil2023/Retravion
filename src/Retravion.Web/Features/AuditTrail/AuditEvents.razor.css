@@ -1,0 +1,82 @@
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.filter-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    color: var(--mud-palette-text-primary);
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.filter-toggle:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 4px;
+}
+
+.filter-intro {
+    margin: 0.5rem 0 1.5rem;
+    color: var(--mud-palette-text-secondary);
+}
+
+.filter-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-width: 60rem;
+    gap: 1rem;
+}
+
+.filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.filter-field > label,
+.filter-field > span {
+    color: var(--mud-palette-text-secondary);
+    font-size: 0.875rem;
+}
+
+.date-field input {
+    width: 100%;
+    min-width: 0;
+    height: 40px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--mud-palette-lines-inputs);
+    border-radius: var(--mud-default-borderradius);
+    color: var(--mud-palette-text-primary);
+    background: transparent;
+    font: inherit;
+    color-scheme: light dark;
+}
+
+.date-field input:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 1px;
+}
+
+.filter-actions,
+.audit-results {
+    margin-top: 1rem;
+}
+
+@media (max-width: 750px) {
+    .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 480px) {
+    .filter-grid { grid-template-columns: minmax(0, 1fr); }
+}

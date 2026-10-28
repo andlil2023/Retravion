@@ -1,0 +1,123 @@
+@page "/administration/audit"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Administrator")]
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Web
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Sections
+@using Retravion.Application.AuditTrail
+@using Retravion.Web.Components
+@inject AuditOperations Operations
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Audit activity · Retravion</PageTitle>
+<SectionContent SectionName="account-page-header"><PageHeader Title="Audit activity" /></SectionContent>
+
+<MudPaper Class="pa-4 audit-filters" Elevation="0">
+    <div class="filter-bar">
+        <button type="button" class="filter-toggle" aria-expanded="@(_filtersOpen ? "true" : "false")" aria-controls="audit-filter-controls" @onclick="ToggleFilters">
+            <span>Filters @(_appliedFilterCount > 0 ? $"({_appliedFilterCount} active)" : "")</span>
+            <span aria-hidden="true">@(_filtersOpen ? "−" : "+")</span>
+        </button>
+        <MudButton OnClick="ClearFilters" Variant="Variant.Outlined" Color="Color.Primary">Clear filters</MudButton>
+    </div>
+    <div id="audit-filter-controls" hidden="@(!_filtersOpen)">
+    <p class="filter-intro">Dates and times are UTC. Text filters match exactly.</p>
+    <div class="filter-grid">
+        <div class="filter-field date-field"><label for="audit-from">From (UTC)</label><input id="audit-from" type="datetime-local" step="any" value="@_from" @onchange="e => _from = e.Value?.ToString() ?? string.Empty" /></div>
+        <div class="filter-field date-field"><label for="audit-to">To (UTC)</label><input id="audit-to" type="datetime-local" step="any" value="@_to" @onchange="e => _to = e.Value?.ToString() ?? string.Empty" /></div>
+        <div class="filter-field"><span id="actor-label">Actor</span>
+            <MudSelect T="string" @bind-Value="_actorKind" aria-labelledby="actor-label" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("all")">All</MudSelectItem><MudSelectItem Value="@("identified")">Identified</MudSelectItem><MudSelectItem Value="@("unknown")">Unknown</MudSelectItem>
+            </MudSelect>
+        </div>
+        <div class="filter-field"><span id="action-label">Action</span><MudTextField @bind-Value="_action" aria-labelledby="action-label" Variant="Variant.Outlined" Margin="Margin.Dense" /></div>
+        <div class="filter-field"><span id="outcome-label">Outcome</span>
+            <MudSelect T="string" @bind-Value="_outcome" aria-labelledby="outcome-label" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("all")">All</MudSelectItem><MudSelectItem Value="@("success")">Success</MudSelectItem><MudSelectItem Value="@("failure")">Failure</MudSelectItem>
+            </MudSelect>
+        </div>
+        <div class="filter-field"><span id="target-label">Target</span>
+            <MudSelect T="string" @bind-Value="_targetKind" aria-labelledby="target-label" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem Value="@("all")">All</MudSelectItem><MudSelectItem Value="@("identified")">Identified</MudSelectItem><MudSelectItem Value="@("unknown")">Unknown</MudSelectItem><MudSelectItem Value="@("not-applicable")">Not applicable</MudSelectItem>
+            </MudSelect>
+        </div>
+        @if (_actorKind == "identified") { <div class="filter-field"><span id="actor-id-label">Actor identifier</span><MudTextField @bind-Value="_actor" aria-labelledby="actor-id-label" Variant="Variant.Outlined" Margin="Margin.Dense" /></div> }
+        @if (_targetKind == "identified") { <div class="filter-field"><span id="target-id-label">Target identifier</span><MudTextField @bind-Value="_target" aria-labelledby="target-id-label" Variant="Variant.Outlined" Margin="Margin.Dense" /></div> }
+    </div>
+    </div>
+</MudPaper>
+@if (_filtersOpen)
+{
+    <div class="filter-actions"><MudButton OnClick="Apply" Variant="Variant.Filled" Color="Color.Primary">Apply filters</MudButton></div>
+}
+<div class="audit-results">
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+else if (_events is null) { <p role="status">Loading audit activity…</p> }
+else
+{
+    <MudTable Items="_events" Dense="true" Hover="true" Elevation="0" aria-label="Audit activity">
+        <HeaderContent><MudTh>Actor</MudTh><MudTh>Time (UTC)</MudTh><MudTh>Action</MudTh><MudTh>Target</MudTh><MudTh>Outcome</MudTh></HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Actor">@(context.Actor is AuditActor.Identified actor ? $"Identified: {actor.Identifier}" : "Unknown")</MudTd>
+            <MudTd DataLabel="Time (UTC)"><time datetime="@context.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)" title="@context.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)">@context.OccurredAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</time></MudTd>
+            <MudTd DataLabel="Action">@context.Action</MudTd>
+            <MudTd DataLabel="Target">@(context.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</MudTd>
+            <MudTd DataLabel="Outcome">@context.Outcome</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><p>No audit events found.</p></NoRecordsContent>
+    </MudTable>
+}
+</div>
+
+@code {
+    private string _from = "", _to = "", _actorKind = "all", _actor = "", _action = "", _outcome = "all", _targetKind = "all", _target = "";
+    private string? _error;
+    private IReadOnlyList<AuditInformation>? _events;
+    private bool _filtersOpen;
+    private int _appliedFilterCount;
+
+    private void ToggleFilters() => _filtersOpen = !_filtersOpen;
+
+    private async Task ClearFilters()
+    {
+        var wasOpen = _filtersOpen;
+        _from = _to = _actor = _action = _target = "";
+        _actorKind = _outcome = _targetKind = "all";
+        await Apply();
+        _filtersOpen = wasOpen;
+    }
+
+    protected override Task OnInitializedAsync() => Apply();
+
+    private async Task Apply()
+    {
+        _error = null;
+        _events = null;
+        if (!TryUtc(_from, out var from) || !TryUtc(_to, out var to) || (from.HasValue && to.HasValue && from > to))
+        { _error = "Enter a valid UTC range with the start no later than the end."; return; }
+        if ((_actorKind == "identified" && string.IsNullOrWhiteSpace(_actor)) || (_targetKind == "identified" && string.IsNullOrWhiteSpace(_target)))
+        { _error = "Enter an identifier for each identified filter."; return; }
+        AuditActor? actor = _actorKind switch { "identified" => new AuditActor.Identified(_actor), "unknown" => new AuditActor.Unknown(), _ => null };
+        AuditTarget? target = _targetKind switch { "identified" => new AuditTarget.Identified(_target), "unknown" => new AuditTarget.Unknown(), "not-applicable" => new AuditTarget.NotApplicable(), _ => null };
+        AuditActionOutcome? outcome = _outcome switch { "success" => AuditActionOutcome.Success, "failure" => AuditActionOutcome.Failure, _ => null };
+        _events = await Operations.Find((await Authentication.GetAuthenticationStateAsync()).User,
+            new AuditFilter(from, to, actor, string.IsNullOrWhiteSpace(_action) ? null : _action, outcome, target));
+        if (_events is null) _error = "Access denied.";
+        else
+        {
+            _appliedFilterCount = (from.HasValue ? 1 : 0) + (to.HasValue ? 1 : 0) + (actor is not null ? 1 : 0)
+                + (!string.IsNullOrWhiteSpace(_action) ? 1 : 0) + (outcome.HasValue ? 1 : 0) + (target is not null ? 1 : 0);
+            _filtersOpen = false;
+        }
+    }
+
+    private static bool TryUtc(string value, out DateTimeOffset? instant)
+    {
+        instant = null;
+        if (string.IsNullOrEmpty(value)) return true;
+        if (!DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)) return false;
+        instant = new DateTimeOffset(DateTime.SpecifyKind(parsed, DateTimeKind.Utc));
+        return true;
+    }
+}
