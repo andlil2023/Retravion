@@ -14,7 +14,7 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
     private const int MaximumTrackedUsernames = 1024;
     private readonly Dictionary<string, Attempts> attempts = new(StringComparer.Ordinal);
     private readonly object admissionGate = new();
-    private readonly Attempts reservedAdministratorAttempts = new();
+    private readonly Attempts reservedAccountAttempts = new();
 
     private sealed class Attempts
     {
@@ -27,16 +27,16 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
     {
         // Every submitted username incurs the same initial persistence read, including
         // locally delayed/locked and overflow names. Do not expose existence via a cache hit.
-        var loaded = await store.Load(cancellationToken);
+        var loaded = await store.LoadForSignIn(username, cancellationToken);
         var state = FindOrAdmit(username, loaded);
         if (state is null)
-            return Result.Failure<string>(FailureMessage);
+            return await RejectWithEquivalentWork(password, loaded, cancellationToken);
 
         await state.Gate.WaitAsync(cancellationToken);
         try
         {
             if (!state.Failures.CanAttempt(clock.GetUtcNow()))
-                return Result.Failure<string>(FailureMessage);
+                return await RejectWithEquivalentWork(password, loaded, cancellationToken);
 
             return await VerifyCredentials(username, password, state, loaded, cancellationToken);
         }
@@ -46,10 +46,25 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
         }
     }
 
+    private async Task<Result<string>> RejectWithEquivalentWork(string? password,
+        Result<Maybe<Administrator>> loaded, CancellationToken cancellationToken)
+    {
+        if (loaded.IsSuccess && loaded.Value.HasValue)
+        {
+            var snapshot = loaded.Value.Value;
+            // Rejection must not reveal persisted lockout (or local admission/retry state).
+            // A null username cannot match a valid account, so this performs the same
+            // verification and non-mutating write roundtrip as an unknown-name failure.
+            _ = hasher.Verify(password ?? string.Empty, snapshot.PasswordHash);
+            await store.TryRecordSignIn(snapshot, null, false, clock.GetUtcNow(), cancellationToken);
+        }
+        return Result.Failure<string>(FailureMessage);
+    }
+
     private Attempts? FindOrAdmit(string? username, Result<Maybe<Administrator>> loaded)
     {
         // Fixed-size keys bound retained memory even for very long submitted usernames.
-        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(username ?? string.Empty)));
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes((username ?? string.Empty).ToUpperInvariant())));
         lock (admissionGate)
         {
             if (attempts.TryGetValue(key, out var existing))
@@ -62,11 +77,11 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
             }
         }
 
-        // Never evict failures to admit new names. Keep one additional slot for the
-        // stored administrator so an unknown-username flood cannot consume it.
+        // Known accounts rely on persisted restrictions. The overflow gate holds no failures,
+        // so unknown-name floods cannot consume their retry capacity.
         return loaded.IsSuccess && loaded.Value.HasValue &&
-            string.Equals(username, loaded.Value.Value.Username, StringComparison.Ordinal)
-                ? reservedAdministratorAttempts
+            string.Equals(username, loaded.Value.Value.Username, StringComparison.OrdinalIgnoreCase)
+                ? reservedAccountAttempts
                 : null;
     }
 
@@ -87,11 +102,10 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
             }
 
             var administrator = loaded.Value.Value;
-            var usernameMatches = string.Equals(username, administrator.Username, StringComparison.Ordinal);
-            // With one stored account, reject every submitted name identically while its
-            // persisted restriction applies, including on a host with no local history.
-            if (!administrator.Failures.CanAttempt(clock.GetUtcNow()))
-                return Result.Failure<string>(FailureMessage);
+            var usernameMatches = string.Equals(username, administrator.Username, StringComparison.OrdinalIgnoreCase);
+            // Restrictions belong to the selected account, never to the dummy snapshot.
+            if (usernameMatches && !administrator.Failures.CanAttempt(clock.GetUtcNow()))
+                return await RejectWithEquivalentWork(password, loaded, cancellationToken);
 
             // Verify even when the username differs; do not expose which credential failed.
             var passwordMatches = hasher.Verify(password ?? string.Empty, administrator.PasswordHash);
@@ -105,7 +119,7 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
 
             // Another host changed credentials or failures. Reassess its committed state;
             // never overwrite a newly committed delay or lockout with a stale success.
-            loaded = await store.Load(cancellationToken);
+            loaded = await store.LoadForSignIn(username, cancellationToken);
         }
     }
 }

@@ -87,6 +87,30 @@ public sealed class InactivityExpirationTests
         Assert.Null(await store.RetrieveAsync(active));
     }
 
+    [Fact]
+    public async Task SessionTimersRemainOneShotAndClockSupportsPeriodicPopoverTimers()
+    {
+        var time = new ManualTime();
+        using var store = new SessionTicketStore(time);
+        await store.StoreAsync(Ticket(time));
+        Assert.Single(time.TimerPeriods);
+        Assert.All(time.TimerPeriods, period => Assert.Equal(Timeout.InfiniteTimeSpan, period));
+        var ticks = 0;
+        using var periodic = time.CreateTimer(_ => ticks++, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        time.Advance(TimeSpan.FromSeconds(3));
+        Assert.Equal(3, ticks);
+        Assert.True(periodic.Change(Timeout.InfiniteTimeSpan, TimeSpan.FromSeconds(1)));
+        time.Advance(TimeSpan.FromSeconds(3));
+        Assert.Equal(3, ticks);
+        Assert.True(periodic.Change(TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan));
+        time.Advance(TimeSpan.FromSeconds(3));
+        Assert.Equal(4, ticks);
+        periodic.Dispose();
+        time.Advance(TimeSpan.FromSeconds(3));
+        Assert.Equal(4, ticks);
+        Assert.False(periodic.Change(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1)));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -398,13 +422,14 @@ public sealed class InactivityExpirationTests
     }
 #pragma warning restore BL0006
 
-    // A deterministic clock and one-shot timers: no sleeps or external fake-time package.
+    // Deterministic session and MudBlazor popover timers: no sleeps or external fake-time package.
     private sealed class ManualTime : TimeProvider
     {
         private DateTimeOffset _now = new(2035, 1, 1, 0, 0, 0, TimeSpan.Zero);
         private readonly List<ManualTimer> _timers = new();
         private readonly object _gate = new();
         public override DateTimeOffset GetUtcNow() { lock (_gate) return _now; }
+        internal TimeSpan[] TimerPeriods { get { lock (_gate) return _timers.Select(timer => timer.Period).ToArray(); } }
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
             lock (_gate)
@@ -426,7 +451,7 @@ public sealed class InactivityExpirationTests
                     timer = _timers.Where(timer => timer.Due <= target).OrderBy(timer => timer.Due).FirstOrDefault();
                     if (timer is null) { _now = target; return; }
                     _now = timer.Due!.Value;
-                    timer.Due = null;
+                    timer.Due = timer.Period > TimeSpan.Zero ? _now + timer.Period : null;
                 }
                 timer.Fire();
             }
@@ -434,13 +459,16 @@ public sealed class InactivityExpirationTests
         private sealed class ManualTimer(ManualTime clock, TimerCallback callback, object? state) : ITimer
         {
             internal DateTimeOffset? Due { get; set; }
+            internal TimeSpan Period { get; private set; } = Timeout.InfiniteTimeSpan;
             private bool _disposed;
             public bool Change(TimeSpan dueTime, TimeSpan period)
             {
-                Assert.Equal(Timeout.InfiniteTimeSpan, period);
+                ArgumentOutOfRangeException.ThrowIfLessThan(dueTime, Timeout.InfiniteTimeSpan);
+                ArgumentOutOfRangeException.ThrowIfLessThan(period, Timeout.InfiniteTimeSpan);
                 lock (clock._gate)
                 {
                     if (_disposed) return false;
+                    Period = period;
                     Due = dueTime == Timeout.InfiniteTimeSpan ? null : clock._now + dueTime;
                     return true;
                 }

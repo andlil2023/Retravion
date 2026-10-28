@@ -113,9 +113,10 @@ public sealed class PostgresAdministratorTests
             Assert.True((await restarted.ReplacePassword(original, second)).IsFailure);
             Assert.True((await replacement.Replace(original.Username, changedPassword, "ThirdPassword123!")).IsFailure);
 
-            // The schema, not only the application, prevents a second singleton identity.
+            // The initial-account marker still rejects FALSE; additional accounts use NULL.
             await using (var invalidInsert = new NpgsqlCommand("""
-                INSERT INTO retravion_identity.administrator VALUES (FALSE, 'another', 'hash')
+                INSERT INTO retravion_identity.administrator (singleton, username, password_hash, display_name, normalized_username)
+                VALUES (FALSE, 'another', 'hash', 'Another', 'ANOTHER')
                 """, connection))
             {
                 var error = await Assert.ThrowsAsync<PostgresException>(() => invalidInsert.ExecuteNonQueryAsync());

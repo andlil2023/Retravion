@@ -129,7 +129,7 @@ public sealed class AdministratorRecoveryTests
         public bool Verify(string password, string? encodedHash) => Hasher.Verify(password, encodedHash);
     }
 
-    private sealed class Store : IAdministratorStore
+    private sealed class Store : ITestAdministratorStore
     {
         public Maybe<Administrator> Account { get; set; }
         public Administrator? Concurrent { get; init; }

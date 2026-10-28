@@ -1,0 +1,58 @@
+@page "/administration/users"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Administrator")]
+@using Retravion.Identity.Application
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Sections
+@using Retravion.Web.Components
+@inject UserOperations Operations
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Users · Retravion</PageTitle>
+<SectionContent SectionName="account-page-header">
+    <PageHeader Title="Users">
+        <Actions><MudButton Href="/administration/users/create" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.PersonAdd">Create user</MudButton></Actions>
+    </PageHeader>
+</SectionContent>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+}
+else if (_accounts is null)
+{
+    <p role="status">Loading users…</p>
+}
+else
+{
+    <div class="users-list">
+    <MudTable Items="_accounts" Dense="true" Hover="true" Elevation="0" aria-label="Users">
+        <HeaderContent><MudTh>Username</MudTh><MudTh>Display name</MudTh><MudTh>Account type</MudTh><MudTh>Password change</MudTh></HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Username"><MudLink Class="user-link" Href="@($"/administration/users/details/{Uri.EscapeDataString(context.Username)}")">@context.Username</MudLink></MudTd>
+            <MudTd DataLabel="Display name">@context.DisplayName</MudTd>
+            <MudTd DataLabel="Account type">@context.AccountType</MudTd>
+            <MudTd DataLabel="Password change">
+                @if (context.RequiresPasswordReplacement)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">Required</MudChip>
+                }
+                else
+                {
+                    <span>Not required</span>
+                }
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent><p>No users found.</p></NoRecordsContent>
+    </MudTable>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<AccountSummary>? _accounts;
+    private string? _error;
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Operations.List((await Authentication.GetAuthenticationStateAsync()).User);
+        if (result.IsFailure) _error = result.Error;
+        else _accounts = result.Value;
+    }
+}

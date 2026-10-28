@@ -58,12 +58,21 @@ public sealed class PasswordReplacementTests
     }
 
     [Fact]
+    public async Task CapitalizationVariantsReplaceTheSameAccountPassword()
+    {
+        var store = new Store();
+        Assert.True((await new PasswordReplacement(store, Hasher).Replace("ADMIN", Initial, Replacement)).IsSuccess);
+        Assert.Equal("admin", store.Account.Value.Username);
+        Assert.True(Hasher.Verify(Replacement, store.Account.Value.PasswordHash));
+        Assert.Equal(1, store.Writes);
+    }
+
+    [Fact]
     public async Task MalformedUnicodeNeverHashesOrWrites() =>
         await InvalidOrReusedPasswordNeverHashesOrWrites("InvalidPass123!" + (char)0xD800);
 
     [Theory]
     [InlineData("other", "InitialPass123!")]
-    [InlineData("Admin", "InitialPass123!")]
     [InlineData("admin", "wrong")]
     [InlineData(null, "InitialPass123!")]
     [InlineData("admin", null)]
@@ -155,7 +164,7 @@ public sealed class PasswordReplacementTests
         public bool Verify(string password, string? encodedHash) => Hasher.Verify(password, encodedHash);
     }
 
-    private sealed class Store : IAdministratorStore
+    private sealed class Store : ITestAdministratorStore
     {
         public Maybe<Administrator> Account { get; set; } = Administrator.Create("admin", Hasher.Hash(Initial)).Value;
         public bool Invalid { get; init; }

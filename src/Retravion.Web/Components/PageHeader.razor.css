@@ -1,0 +1,29 @@
+.page-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.75rem;
+    min-width: 0;
+}
+
+h1 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.page-actions {
+    margin-left: auto;
+}
+
+.page-header ::deep .mud-button-root {
+    min-height: 36px;
+}
+
+@media (pointer: coarse) {
+    .page-header ::deep .mud-button-root {
+        min-height: 44px;
+    }
+}

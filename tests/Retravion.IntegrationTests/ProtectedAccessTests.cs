@@ -69,10 +69,11 @@ public sealed class ProtectedAccessTests
 
         var html = await client.GetStringAsync("/home");
         Assert.Contains("<title>Home · Retravion</title>", html);
-        Assert.Contains("<h1>Overview</h1>", html);
+        Assert.Matches("<h1[^>]*>Overview</h1>", html);
         Assert.Contains("aria-label=\"Main navigation\"", html);
         Assert.Contains("Products", html);
-        Assert.Contains("aria-label=\"Back to overview\"", html);
+        Assert.DoesNotContain("aria-label=\"Back to overview\"", html);
+        Assert.Single(Regex.Matches(html, "<h1\\b"));
         Assert.Contains("aria-label=\"Page actions\"", html);
         Assert.Contains("aria-label=\"Use dark theme\"", html);
         Assert.Matches("<main[^>]*id=\"page-content\"[^>]*>\\s*</main>", html);

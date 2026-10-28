@@ -43,7 +43,6 @@ public sealed class PasswordSignInTests
     [InlineData(" Admin ", "wrong")]
     [InlineData(" Admin ", "ValidPass123!")]
     [InlineData("Admin", " ValidPass123! ")]
-    [InlineData(" admin ", " ValidPass123! ")]
     [InlineData(null, " ValidPass123! ")]
     [InlineData(" Admin ", null)]
     [InlineData("", "")]
@@ -89,16 +88,16 @@ public sealed class PasswordSignInTests
             (await signIn.Authenticate(username, " ValidPass123! ")).Error);
         clock.Advance(TimeSpan.FromMilliseconds(4999));
         Assert.True((await signIn.Authenticate(username, "wrong")).IsFailure);
-        Assert.Equal(3, hasher.Verifications);
+        Assert.Equal(5, hasher.Verifications);
 
         clock.Advance(TimeSpan.FromMilliseconds(1));
         Assert.True((await signIn.Authenticate(username, "wrong")).IsFailure);
-        Assert.Equal(4, hasher.Verifications);
+        Assert.Equal(6, hasher.Verifications);
         Assert.True((await signIn.Authenticate(username, "wrong")).IsFailure);
-        Assert.Equal(4, hasher.Verifications);
+        Assert.Equal(7, hasher.Verifications);
         clock.Advance(TimeSpan.FromSeconds(5));
         Assert.True((await signIn.Authenticate(username, "wrong")).IsFailure);
-        Assert.Equal(5, hasher.Verifications);
+        Assert.Equal(8, hasher.Verifications);
     }
 
     [Theory]
@@ -131,11 +130,11 @@ public sealed class PasswordSignInTests
             .Select(_ => signIn.Authenticate("unknown", "wrong")));
         Assert.All(results, result => Assert.Equal(PasswordSignIn.FailureMessage, result.Error));
         Assert.Equal(20, store.Loads);
-        Assert.Equal(3, hasher.Verifications);
-        Assert.Equal(3, store.Recordings);
+        Assert.Equal(20, hasher.Verifications);
+        Assert.Equal(20, store.Recordings);
         Assert.True((await signIn.Authenticate(Account.Username, " ValidPass123! ")).IsSuccess);
         Assert.Equal(21, store.Loads);
-        Assert.Equal(4, hasher.Verifications);
+        Assert.Equal(21, hasher.Verifications);
     }
 
     [Fact]
@@ -150,32 +149,32 @@ public sealed class PasswordSignInTests
         var results = await Task.WhenAll(Enumerable.Range(0, 1500)
             .Select(i => signIn.Authenticate($"unknown-{i}-" + new string('x', 2000), "wrong")));
         Assert.All(results, result => Assert.Equal(PasswordSignIn.FailureMessage, result.Error));
-        // Three initial checks plus one per remaining admitted username, not per submission.
-        Assert.Equal(1026, hasher.Verifications);
+        // Rejections still perform equivalent credential work, including overflow names.
+        Assert.Equal(1503, hasher.Verifications);
         Assert.Equal(PasswordSignIn.FailureMessage,
             (await signIn.Authenticate("another-untracked-name", "wrong")).Error);
         Assert.True((await signIn.Authenticate("restricted-unknown", "wrong")).IsFailure);
-        Assert.Equal(1026, hasher.Verifications);
+        Assert.Equal(1505, hasher.Verifications);
 
         // The administrator still gets the full retry policy after unknown capacity is exhausted.
         for (var i = 0; i < 3; i++)
             Assert.True((await signIn.Authenticate(Account.Username, "wrong")).IsFailure);
         Assert.True((await signIn.Authenticate(Account.Username, " ValidPass123! ")).IsFailure);
-        Assert.Equal(1029, hasher.Verifications);
+        Assert.Equal(1509, hasher.Verifications);
         clock.Advance(TimeSpan.FromSeconds(5));
         Assert.True((await signIn.Authenticate(Account.Username, " ValidPass123! ")).IsSuccess);
         Assert.True((await signIn.Authenticate(Account.Username, " ValidPass123! ")).IsSuccess);
-        Assert.Equal(1031, hasher.Verifications);
+        Assert.Equal(1511, hasher.Verifications);
         Assert.True((await signIn.Authenticate("restricted-unknown", "wrong")).IsFailure);
-        Assert.Equal(1032, hasher.Verifications);
+        Assert.Equal(1512, hasher.Verifications);
         Assert.True((await signIn.Authenticate("restricted-unknown", "wrong")).IsFailure);
-        Assert.Equal(1032, hasher.Verifications);
+        Assert.Equal(1513, hasher.Verifications);
     }
 
     [Theory]
     [InlineData(" Admin ")]
     [InlineData("unknown")]
-    public async Task TenthFailurePermanentlyBlocksBothPasswordsWithoutFurtherVerification(string username)
+    public async Task TenthFailurePermanentlyBlocksBothPasswordsWhileKeepingRejectionWorkEquivalent(string username)
     {
         var clock = new Clock();
         var hasher = new CountingHasher();
@@ -194,13 +193,13 @@ public sealed class PasswordSignInTests
                 (await signIn.Authenticate(username, " ValidPass123! ")).Error);
             Assert.Equal(PasswordSignIn.FailureMessage, (await signIn.Authenticate(username, "wrong")).Error);
         }
-        Assert.Equal(10, hasher.Verifications);
+        Assert.Equal(16, hasher.Verifications);
         if (username == Account.Username)
         {
             Assert.True((await store.Load()).Value.Value.Failures.IsLocked);
             Assert.Equal(PasswordSignIn.FailureMessage,
                 (await new PasswordSignIn(store, hasher, clock).Authenticate(username, " ValidPass123! ")).Error);
-            Assert.Equal(10, hasher.Verifications);
+            Assert.Equal(17, hasher.Verifications);
         }
         else
         {
@@ -221,7 +220,7 @@ public sealed class PasswordSignInTests
             {
                 Assert.True((await new PasswordSignIn(store, hasher, clock)
                     .Authenticate(Account.Username, " ValidPass123! ")).IsFailure);
-                Assert.Equal(i + 1, hasher.Verifications);
+                Assert.Equal(2 * i, hasher.Verifications);
             }
             clock.Advance(TimeSpan.FromSeconds(5));
         }
@@ -258,14 +257,16 @@ public sealed class PasswordSignInTests
             Assert.Equal(knownHasher.Verifications, unknownHasher.Verifications);
             if (i < failures - 1) clock.Advance(TimeSpan.FromSeconds(5));
         }
+        var rejected = 0;
         foreach (var password in new[] { "wrong", " ValidPass123! " })
         {
+            rejected++;
             Assert.Equal(PasswordSignIn.FailureMessage, (await known.Authenticate(Account.Username, password)).Error);
             Assert.Equal(PasswordSignIn.FailureMessage, (await unknown.Authenticate("unknown", password)).Error);
             Assert.Equal(knownStore.Loads, unknownStore.Loads);
-            Assert.Equal(failures, knownStore.Recordings);
+            Assert.Equal(failures + rejected, knownStore.Recordings);
             Assert.Equal(knownStore.Recordings, unknownStore.Recordings);
-            Assert.Equal(failures, knownHasher.Verifications);
+            Assert.Equal(failures + rejected, knownHasher.Verifications);
             Assert.Equal(knownHasher.Verifications, unknownHasher.Verifications);
         }
         Assert.Equal(failures + 2, knownStore.Loads);
@@ -275,7 +276,7 @@ public sealed class PasswordSignInTests
     [Theory]
     [InlineData(3)]
     [InlineData(10)]
-    public async Task FreshHostsRejectPersistedRestrictionsWithIdenticalWorkForEveryUsername(int count)
+    public async Task FreshHostsApplyPersistedRestrictionsOnlyToTheMatchingUsername(int count)
     {
         var clock = new Clock();
         var failures = SignInFailures.Restore(count,
@@ -290,8 +291,8 @@ public sealed class PasswordSignInTests
             var signIn = new PasswordSignIn(store, hasher, clock);
             Assert.Equal(PasswordSignIn.FailureMessage, (await signIn.Authenticate(username, password)).Error);
             Assert.Equal(1, store.Loads);
-            Assert.Equal(0, hasher.Verifications);
-            Assert.Equal(0, store.Recordings);
+            Assert.Equal(1, hasher.Verifications);
+            Assert.Equal(1, store.Recordings);
             Assert.Equal(failures, (await store.Load()).Value.Value.Failures);
             clock.Advance(count == 10 ? TimeSpan.FromDays(365) : TimeSpan.Zero);
         }
@@ -364,7 +365,7 @@ public sealed class PasswordSignInTests
         public void Advance(TimeSpan duration) => now += duration;
     }
 
-    private sealed class Store(Maybe<Administrator> account, bool invalid = false, bool fault = false) : IAdministratorStore
+    private sealed class Store(Maybe<Administrator> account, bool invalid = false, bool fault = false) : ITestAdministratorStore
     {
         private int loads;
         private int recordings;

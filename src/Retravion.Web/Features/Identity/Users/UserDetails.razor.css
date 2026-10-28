@@ -1,0 +1,44 @@
+.account-details {
+    max-width: 40rem;
+}
+
+h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+dl {
+    margin: 1.5rem 0 0;
+}
+
+.identity-row {
+    display: grid;
+    grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem 1.5rem;
+    padding: 1rem 0;
+    border-top: 1px solid var(--mud-palette-divider);
+}
+
+.identity-row:last-child {
+    padding-bottom: 0;
+}
+
+dt {
+    color: var(--mud-palette-text-secondary);
+    font-size: 0.875rem;
+}
+
+dd {
+    margin: 0;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+    .identity-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

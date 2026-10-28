@@ -32,7 +32,7 @@ internal static class LoginEndpoint
             return Results.LocalRedirect("/?failed=true");
         }
 
-        var loaded = await store.Load(context.RequestAborted);
+        var loaded = await store.LoadForSignIn(result.Value, context.RequestAborted);
         if (loaded.IsFailure || loaded.Value.HasNoValue ||
             !string.Equals(loaded.Value.Value.Username, result.Value, StringComparison.Ordinal) ||
             !hasher.Verify(form["password"].ToString(), loaded.Value.Value.PasswordHash))
@@ -50,7 +50,7 @@ internal static class LoginEndpoint
         }
 
         // Confirmation may take several seconds; do not issue a session from a stale credential snapshot.
-        loaded = await store.Load(context.RequestAborted);
+        loaded = await store.LoadForSignIn(result.Value, context.RequestAborted);
         if (loaded.IsFailure || loaded.Value.HasNoValue ||
             !string.Equals(loaded.Value.Value.Username, result.Value, StringComparison.Ordinal) ||
             !hasher.Verify(form["password"].ToString(), loaded.Value.Value.PasswordHash) ||
@@ -61,7 +61,7 @@ internal static class LoginEndpoint
         }
 
         var restricted = loaded.Value.Value.RequiresPasswordReplacement;
-        await PasswordReplacementEndpoint.SignIn(context, result.Value, restricted);
+        await PasswordReplacementEndpoint.SignIn(context, loaded.Value.Value, restricted);
         return Results.LocalRedirect(restricted ? "/password-replacement" : "/home");
     });
 

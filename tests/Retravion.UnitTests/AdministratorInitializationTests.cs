@@ -130,7 +130,7 @@ public sealed class AdministratorInitializationTests
         public bool Verify(string password, string? encodedHash) => throw new NotSupportedException();
     }
 
-    private sealed class MemoryStore : IAdministratorStore
+    private sealed class MemoryStore : ITestAdministratorStore
     {
         public Maybe<Administrator> Account { get; set; }
         public bool Invalid { get; init; }
