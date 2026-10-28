@@ -5,6 +5,7 @@
 - [UN-AUTH-001 — Controlled Access to the Application](../user-needs/UN-AUTH-001%20-%20Controlled%20Access%20to%20the%20Application.md)
 - [UN-AUTH-002 — Recover Administrator Access](../user-needs/UN-AUTH-002%20-%20Recover%20Administrator%20Access.md)
 - [UN-AUTH-003 — Create User Accounts](../user-needs/UN-AUTH-003%20-%20Create%20User%20Accounts.md)
+- [UN-AUTH-004 — Control Account Availability](../user-needs/UN-AUTH-004%20-%20Control%20Account%20Availability.md)
 
 ## System Requirements
 
@@ -43,6 +44,14 @@
 **Acceptance criteria:**
 - Non-administrators cannot create accounts.
 - A newly created user must replace their temporary password before accessing protected functionality.
+
+### REQ-SYS-AUTH-005 — Control Account Availability
+
+**Type:** System requirement
+
+**Parent need:** UN-AUTH-004
+
+**Requirement:** The system shall allow administrators to inactivate and reactivate user accounts so that access can be withdrawn or restored.
 
 ### Verification Approach
 
@@ -252,12 +261,30 @@ These system requirements may be verified through their child software requireme
 - It is stored according to REQ-SW-AUTH-003 and cannot subsequently be retrieved.
 - The user must replace it before accessing protected functionality, following REQ-SW-AUTH-005.
 
+### REQ-SW-AUTH-014 — Inactivate and Reactivate Accounts
+
+**Type:** Software requirement
+
+**Parent need:** UN-AUTH-004
+
+**Parent requirement:** REQ-SYS-AUTH-005
+
+**Requirement:** The software shall allow only administrators to inactivate and reactivate user accounts, and shall prevent inactive accounts from signing in.
+
+**Acceptance criteria:**
+- Inactivation prevents subsequent sign-in but does not require immediate termination of existing sessions.
+- Reactivation removes the inactivity restriction; other authentication restrictions still apply.
+- Non-administrators cannot change account availability.
+- An administrator cannot inactivate their own account.
+
 ## Traceability Notes
 
 REQ-SW-AUTH-003–REQ-SW-AUTH-005 support initial authentication setup, administrator recovery, and creation of additional accounts. They remain single requirements with multiple traceability links rather than duplicated requirements.
 
 REQ-SW-AUTH-007 protects authentication under UN-AUTH-001. Its reference to recovery connects it to REQ-SW-AUTH-008; that dependency does not make lockout itself a recovery requirement.
 
+REQ-SW-AUTH-014 implements account availability under UN-AUTH-004 and REQ-SYS-AUTH-005. Reactivation removes only the inactivity restriction; it does not bypass the failed-sign-in lockout in REQ-SW-AUTH-007 or other authentication restrictions.
+
 ## Scope
 
-Creating additional ordinary and administrator accounts is included. Role-specific permissions beyond the ordinary/administrator account distinction, audit-trail recording, and recovery mechanisms for additional accounts remain outside this increment. The recovery command or script and password-hashing technology remain implementation decisions.
+Creating additional ordinary and administrator accounts, and administrator-controlled account inactivation and reactivation, are included. Role-specific permissions beyond the ordinary/administrator account distinction, audit-trail recording, and recovery mechanisms for additional accounts remain outside this increment. The recovery command or script and password-hashing technology remain implementation decisions.
