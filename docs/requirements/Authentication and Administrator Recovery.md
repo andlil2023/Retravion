@@ -6,6 +6,7 @@
 - [UN-AUTH-002 — Recover Administrator Access](../user-needs/UN-AUTH-002%20-%20Recover%20Administrator%20Access.md)
 - [UN-AUTH-003 — Create User Accounts](../user-needs/UN-AUTH-003%20-%20Create%20User%20Accounts.md)
 - [UN-AUTH-004 — Control Account Availability](../user-needs/UN-AUTH-004%20-%20Control%20Account%20Availability.md)
+- [UN-AUTH-005 — Restore User Access](../user-needs/UN-AUTH-005%20-%20Restore%20User%20Access.md)
 
 ## System Requirements
 
@@ -53,6 +54,14 @@
 
 **Requirement:** The system shall allow administrators to inactivate and reactivate user accounts so that access can be withdrawn or restored.
 
+### REQ-SYS-AUTH-006 — Restore User Access
+
+**Type:** System requirement
+
+**Parent need:** UN-AUTH-005
+
+**Requirement:** The system shall allow administrators to restore a user’s access when the user cannot sign in.
+
 ### Verification Approach
 
 These system requirements may be verified through their child software requirements, provided the combined verification covers each parent’s full obligation. A dedicated system-level test is not automatically required.
@@ -91,23 +100,23 @@ These system requirements may be verified through their child software requireme
 
 **Type:** Software requirement
 
-**Parent needs:** UN-AUTH-001, UN-AUTH-002, UN-AUTH-003
+**Parent needs:** UN-AUTH-001, UN-AUTH-002, UN-AUTH-003, UN-AUTH-005
 
-**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003, REQ-SYS-AUTH-004
+**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003, REQ-SYS-AUTH-004, REQ-SYS-AUTH-006
 
 **Requirement:** The software shall store application-managed passwords only as salted, one-way hashes, not as plaintext or reversibly encrypted values.
 
 **Acceptance criteria:**
-- This applies to initial passwords (including generated temporary passwords for newly created accounts), changed passwords, and recovery-reset passwords.
+- This applies to initial passwords (including generated temporary passwords for newly created accounts), changed passwords, and passwords reset through hosting-level administrator recovery or administrator-issued user password resets.
 - The `.env` provisioning source is outside the application’s hashed credential store; importing its password does not permit storing a plaintext copy in that store.
 
 ### REQ-SW-AUTH-004 — Enforce Password Rules
 
 **Type:** Software requirement
 
-**Parent needs:** UN-AUTH-001, UN-AUTH-002, UN-AUTH-003
+**Parent needs:** UN-AUTH-001, UN-AUTH-002, UN-AUTH-003, UN-AUTH-005
 
-**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003, REQ-SYS-AUTH-004
+**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003, REQ-SYS-AUTH-004, REQ-SYS-AUTH-006
 
 **Requirement:** The software shall accept passwords only when they contain 10–30 Unicode scalar values inclusive and include at least three of these four categories: ASCII lowercase letters (`a–z`), ASCII uppercase letters (`A–Z`), ASCII digits (`0–9`), and Unicode punctuation or symbol characters.
 
@@ -116,29 +125,29 @@ These system requirements may be verified through their child software requireme
 - Whitespace and other characters contribute to length but not to a category.
 - Validate the original input without trimming or normalization.
 - Reject null, empty, out-of-range, and insufficient-category inputs.
-- These rules apply to initial configuration, generated temporary passwords for newly created accounts, password changes, and recovery passwords.
+- These rules apply to initial configuration, generated temporary passwords for newly created accounts, password changes, hosting-level administrator recovery passwords, and administrator-issued temporary reset passwords.
 
 ### REQ-SW-AUTH-005 — Require Initial Password Replacement
 
 **Type:** Software requirement
 
-**Parent needs:** UN-AUTH-001, UN-AUTH-002, UN-AUTH-003
+**Parent needs:** UN-AUTH-001, UN-AUTH-002, UN-AUTH-003, UN-AUTH-005
 
-**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003, REQ-SYS-AUTH-004
+**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003, REQ-SYS-AUTH-004, REQ-SYS-AUTH-006
 
-**Requirement:** Following initial setup, administrator recovery, or creation of an additional account, the software shall require the user to replace the initial password after successfully authenticating and before accessing protected functionality.
+**Requirement:** Following initial setup, hosting-level administrator recovery, creation of an additional account, or an administrator-issued user password reset, the software shall require the user to replace the initial or temporary password after successfully authenticating and before accessing protected functionality.
 
 **Acceptance criteria:**
 - Before authentication, only login is accessible.
 - After authentication, access remains limited to completing the required password change.
-- The replacement password satisfies REQ-SW-AUTH-004 and differs from the initial password.
+- The replacement password satisfies REQ-SW-AUTH-004 and differs from the initial or temporary password.
 - The replacement form retains the current-password field and includes labeled, masked new-password and confirm-new-password fields that support new-password autofill.
 - The new password and confirmation are both required and must match exactly, case-sensitively, without trimming or Unicode normalization. This validation is enforced server-side, including direct submissions that bypass the form.
 - Missing, empty, or mismatched new-password/confirmation values prevent replacement and display a clear, accessible validation message. The stored password remains unchanged and access remains limited to completing the required password change.
 - Password values are not echoed in validation responses or URLs.
-- Confirmation is required after initial setup, administrator recovery, and creation of an additional account.
+- Confirmation is required after initial setup, hosting-level administrator recovery, creation of an additional account, and an administrator-issued user password reset.
 - Successful completion routes the user to the home page with the access assigned to their account; administrator accounts have full administrator access.
-- Subsequent sign-ins do not require this initial-password change again unless recovery resets the account.
+- Subsequent sign-ins do not require this initial-password change again unless hosting-level administrator recovery or an administrator-issued user password reset resets the account.
 
 ### REQ-SW-AUTH-006 — Delay Repeated Failed Sign-ins
 
@@ -167,6 +176,7 @@ These system requirements may be verified through their child software requireme
 
 **Acceptance criteria:**
 - Lockout replaces the previously discussed ten-second delay.
+- Authorized recovery includes hosting-level recovery under REQ-SW-AUTH-008 and administrator-issued password reset under REQ-SW-AUTH-015.
 - Existing authenticated sessions remain active and subject to their normal expiration rules.
 - Outward responses do not reveal whether the username identifies an existing account.
 
@@ -277,14 +287,36 @@ These system requirements may be verified through their child software requireme
 - Non-administrators cannot change account availability.
 - An administrator cannot inactivate their own account.
 
+### REQ-SW-AUTH-015 — Reset a User’s Password
+
+**Type:** Software requirement
+
+**Parent need:** UN-AUTH-005
+
+**Parent requirement:** REQ-SYS-AUTH-006
+
+**Requirement:** The software shall allow only administrators to reset a user’s password by issuing a new, securely generated temporary password.
+
+**Acceptance criteria:**
+- Before reset, the administrator is warned that existing sessions will end and unsaved work may be lost.
+- The temporary password satisfies REQ-SW-AUTH-004, is generated using cryptographically secure randomness, and is displayed to the administrator once.
+- The password is stored according to REQ-SW-AUTH-003 and cannot subsequently be retrieved.
+- Successful reset immediately invalidates the previous password and all active sessions for that account.
+- The user must replace the temporary password before accessing protected functionality, following REQ-SW-AUTH-005.
+- Reset does not reactivate an inactive account.
+- Successful reset clears any lockout caused by repeated failed sign-in attempts.
+- An administrator cannot use this reset operation on their own account.
+
 ## Traceability Notes
 
-REQ-SW-AUTH-003–REQ-SW-AUTH-005 support initial authentication setup, administrator recovery, and creation of additional accounts. They remain single requirements with multiple traceability links rather than duplicated requirements.
+REQ-SW-AUTH-003–REQ-SW-AUTH-005 support initial authentication setup, hosting-level administrator recovery, creation of additional accounts, and administrator-issued user password resets. They remain single requirements with multiple traceability links rather than duplicated requirements.
 
-REQ-SW-AUTH-007 protects authentication under UN-AUTH-001. Its reference to recovery connects it to REQ-SW-AUTH-008; that dependency does not make lockout itself a recovery requirement.
+REQ-SW-AUTH-007 protects authentication under UN-AUTH-001. Its reference to recovery connects it to REQ-SW-AUTH-008 and REQ-SW-AUTH-015; those dependencies do not make lockout itself a recovery requirement.
 
 REQ-SW-AUTH-014 implements account availability under UN-AUTH-004 and REQ-SYS-AUTH-005. Reactivation removes only the inactivity restriction; it does not bypass the failed-sign-in lockout in REQ-SW-AUTH-007 or other authentication restrictions.
 
+REQ-SW-AUTH-015 restores access under UN-AUTH-005 and REQ-SYS-AUTH-006. It is separate from hosting-level recovery of the initial administrator under REQ-SW-AUTH-008, which remains unchanged. Administrator-issued reset clears failed-sign-in lockout but does not reactivate inactive accounts; self-reset through this operation is prohibited.
+
 ## Scope
 
-Creating additional ordinary and administrator accounts, and administrator-controlled account inactivation and reactivation, are included. Role-specific permissions beyond the ordinary/administrator account distinction, audit-trail recording, and recovery mechanisms for additional accounts remain outside this increment. The recovery command or script and password-hashing technology remain implementation decisions.
+Creating additional ordinary and administrator accounts, administrator-controlled account inactivation and reactivation, and administrator-issued password resets for other users are included. Role-specific permissions beyond the ordinary/administrator account distinction and audit-trail recording remain outside this increment. The hosting-level recovery command or script and password-hashing technology remain implementation decisions.
