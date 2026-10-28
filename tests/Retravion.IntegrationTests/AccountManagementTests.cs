@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Retravion.Application.AuditTrail;
 using Retravion.Identity.Application;
 using Retravion.Identity.Domain;
 using Retravion.Identity.Infrastructure;
@@ -309,6 +310,60 @@ public sealed partial class AccountManagementTests
         Assert.Equal(writes, store.Writes);
         Assert.True(store.Account.Value.IsActive);
         Assert.True((await store.LoadForSignIn("ordinary")).Value.Value.IsActive);
+    }
+
+    [Fact]
+    public async Task AuditViewShowsEventsToAdministratorsAndDeniesOrdinaryAndAnonymousRequests()
+    {
+        var query = new AuditQueryDouble();
+        await using var baseFactory = new AdministratorWebFactory(new StartupAdministratorStore(), "admin", Initial);
+        await using var factory = baseFactory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddSingleton<IAuditQuery>(query)));
+        using var anonymous = Client(factory);
+        using (var denied = await anonymous.GetAsync("/administration/audit"))
+            Assert.Equal("/", denied.Headers.Location?.OriginalString);
+        Assert.Equal(0, query.Calls);
+        using var admin = Client(factory);
+        await Login(admin, "admin", Initial);
+        await Replace(admin, Initial, Replacement);
+        var page = await admin.GetStringAsync("/administration/audit");
+        Assert.Contains("audit-test-action", page);
+        Assert.Contains("Identified: audit-actor", page);
+        Assert.Contains("Not applicable", page);
+        Assert.Contains("Time (UTC)", page);
+        Assert.Contains(">1970-01-01 00:00:00</time>", page);
+        Assert.Contains("1970-01-01T00:00:00.0000000+00:00", WebUtility.HtmlDecode(page));
+        Assert.Contains("Success", page);
+        Assert.Contains("class=\"filter-grid\"", page);
+        Assert.Contains("for=\"audit-from\"", page);
+        Assert.Contains("for=\"audit-to\"", page);
+        Assert.Contains("aria-expanded=\"false\"", page);
+        Assert.Contains("id=\"audit-filter-controls\" hidden", page);
+        Assert.DoesNotContain("Apply filters", page);
+        Assert.Matches("<button[^>]*mud-button-outlined[^>]*>[\\s\\S]*?Clear filters[\\s\\S]*?</button>", page);
+        Assert.Contains("mud-input-outlined", page);
+        using var created = await Create(admin, "ordinary", "Ordinary", AccountType.Ordinary);
+        var password = (await created.Content.ReadFromJsonAsync<CreatedAccount>())!.TemporaryPassword;
+        using var ordinary = Client(factory);
+        await Login(ordinary, "ordinary", password);
+        await Replace(ordinary, password, Replacement);
+        var calls = query.Calls;
+        using var forbidden = await ordinary.GetAsync("/administration/audit");
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.DoesNotContain("audit-test-action", await forbidden.Content.ReadAsStringAsync());
+        Assert.Equal(calls, query.Calls);
+    }
+
+    private sealed class AuditQueryDouble : IAuditQuery
+    {
+        public int Calls { get; private set; }
+        public Task<IReadOnlyList<AuditInformation>> FindAsync(AuditFilter filter, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            IReadOnlyList<AuditInformation> events = [new(new AuditActor.Identified("audit-actor"),
+                DateTimeOffset.UnixEpoch, "audit-test-action", new AuditTarget.NotApplicable(), AuditActionOutcome.Success)];
+            return Task.FromResult(events);
+        }
     }
 
     private static void AssertAvailabilityActionBelowCard(string html, string action)

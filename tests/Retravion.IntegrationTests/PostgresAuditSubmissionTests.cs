@@ -293,6 +293,36 @@ public sealed class PostgresAuditSubmissionTests
         await AssertRows(database.ConnectionString, [existing, durable]);
     }
 
+    [PostgresFact]
+    public async Task AuditQueryFiltersIndividuallyTogetherAndIncludesExactBoundaries()
+    {
+        await using var database = await TestDatabase.Create();
+        var query = new PostgresAuditQuery(database.ConnectionString);
+        Assert.Empty(await query.FindAsync(new AuditFilter()));
+        var submission = new PostgresAuditSubmission(database.ConnectionString);
+        var time = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero).AddTicks(123);
+        AuditInformation[] events =
+        [
+            new(new AuditActor.Identified("alice"), time, "edit", new AuditTarget.Identified("item"), AuditActionOutcome.Success),
+            new(new AuditActor.Unknown(), time.AddTicks(1), "edit", new AuditTarget.Unknown(), AuditActionOutcome.Failure),
+            new(new AuditActor.Identified("bob"), time.AddTicks(2), "delete", new AuditTarget.NotApplicable(), AuditActionOutcome.Success),
+            new(new AuditActor.Identified("alice"), time.AddTicks(3), "edit", new AuditTarget.Identified("item"), AuditActionOutcome.Failure)
+        ];
+        foreach (var item in events) Assert.Equal(AuditSubmissionResult.Success, await submission.SubmitAsync(item));
+        async Task Check(AuditFilter filter, params AuditInformation[] expected) =>
+            Assert.Equal(expected, (await query.FindAsync(filter)).OrderBy(x => x.OccurredAt));
+        await Check(new AuditFilter(From: time.AddTicks(1), To: time.AddTicks(2)), events[1], events[2]);
+        await Check(new AuditFilter(Actor: new AuditActor.Identified("alice")), events[0], events[3]);
+        await Check(new AuditFilter(Actor: new AuditActor.Unknown()), events[1]);
+        await Check(new AuditFilter(Action: "delete"), events[2]);
+        await Check(new AuditFilter(Outcome: AuditActionOutcome.Failure), events[1], events[3]);
+        await Check(new AuditFilter(Target: new AuditTarget.Identified("item")), events[0], events[3]);
+        await Check(new AuditFilter(Target: new AuditTarget.Unknown()), events[1]);
+        await Check(new AuditFilter(Target: new AuditTarget.NotApplicable()), events[2]);
+        await Check(new AuditFilter(time, time, new AuditActor.Identified("alice"), "edit", AuditActionOutcome.Success, new AuditTarget.Identified("item")), events[0]);
+        await Check(new AuditFilter(Action: "edit' OR true --"));
+    }
+
     private static AuditInformation Information(string action) => new(new AuditActor.Unknown(),
         DateTimeOffset.UtcNow, action, new AuditTarget.NotApplicable(), AuditActionOutcome.Success);
 

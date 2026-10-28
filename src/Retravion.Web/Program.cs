@@ -13,6 +13,7 @@ using Retravion.Identity.Infrastructure;
 using Retravion.Web.Components;
 using Retravion.Application.AuditTrail;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Web.Features.AuditTrail;
 
 var recoveryMode = args.Length == 1 && args[0] == "--recover-initial-administrator";
 var builder = WebApplication.CreateBuilder(recoveryMode ? [] : args);
@@ -71,6 +72,10 @@ builder.Services.AddSingleton<IAccountAuditTransaction>(_ => new PostgresAccount
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddSingleton<AdministratorInitializer>();
 builder.Services.AddSingleton<AdministratorRecovery>();
+builder.Services.AddScoped<AuditOperations>();
+builder.Services.AddSingleton<IAuditQuery>(_ => new PostgresAuditQuery(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddSingleton<IAuditSubmission>(_ => new PostgresAuditSubmission(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
