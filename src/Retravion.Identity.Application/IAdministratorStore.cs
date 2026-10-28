@@ -5,8 +5,17 @@ namespace Retravion.Identity.Application;
 
 public interface IAdministratorStore
 {
-    /// <summary>Loads the singleton; invalid persisted state is an explicit failure.</summary>
+    /// <summary>Loads the initial administrator; invalid persisted state is an explicit failure.</summary>
     Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default);
+
+    /// <summary>Loads the named account case-insensitively, or the initial account as a dummy credential
+    /// snapshot for unknown names. Callers must compare usernames before granting access.</summary>
+    Task<Result<Maybe<Administrator>>> LoadForSignIn(string? username, CancellationToken cancellationToken = default);
+
+    Task<Result<IReadOnlyList<Administrator>>> List(CancellationToken cancellationToken = default);
+
+    /// <summary>Atomically creates an additional account, rejecting duplicate usernames.</summary>
+    Task<Result> CreateAccount(Administrator account, CancellationToken cancellationToken = default);
 
     /// <summary>Atomically inserts only when absent; never updates an existing administrator.</summary>
     Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default);

@@ -10,14 +10,14 @@ public sealed class PasswordReplacement(IAdministratorStore store, IPasswordHash
     public async Task<Result> Replace(string? username, string? currentPassword, string? newPassword,
         CancellationToken cancellationToken = default)
     {
-        var loaded = await store.Load(cancellationToken);
+        var loaded = await store.LoadForSignIn(username, cancellationToken);
         if (loaded.IsFailure || loaded.Value.HasNoValue)
             return Result.Failure(PasswordSignIn.FailureMessage);
 
         var administrator = loaded.Value.Value;
         var matches = hasher.Verify(currentPassword ?? string.Empty, administrator.PasswordHash);
         if (currentPassword is null || !matches ||
-            !string.Equals(username, administrator.Username, StringComparison.Ordinal))
+            !string.Equals(username, administrator.Username, StringComparison.OrdinalIgnoreCase))
             return Result.Failure(PasswordSignIn.FailureMessage);
 
         return await Result.Success()

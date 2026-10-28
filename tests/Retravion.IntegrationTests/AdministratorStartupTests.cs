@@ -97,7 +97,32 @@ internal sealed class SuccessfulAuditSubmission : IAuditSubmission
 internal sealed class StartupAdministratorStore : IAdministratorStore
 {
     public Maybe<Administrator> Account { get; set; }
+    private readonly Dictionary<string, Administrator> additional = new(StringComparer.OrdinalIgnoreCase);
     public int Writes { get; private set; }
+
+    public async Task<Result<Maybe<Administrator>>> LoadForSignIn(string? username, CancellationToken cancellationToken = default)
+    {
+        var initial = await Load(cancellationToken);
+        lock (this) return additional.TryGetValue(username ?? "", out var account)
+            ? Result.Success(Maybe<Administrator>.From(account)) : initial;
+    }
+
+    public Task<Result<IReadOnlyList<Administrator>>> List(CancellationToken cancellationToken = default)
+    {
+        lock (this) return Task.FromResult(Result.Success<IReadOnlyList<Administrator>>(
+            (Account.HasValue ? new[] { Account.Value } : []).Concat(additional.Values).ToArray()));
+    }
+
+    public Task<Result> CreateAccount(Administrator account, CancellationToken cancellationToken = default)
+    {
+        lock (this)
+        {
+            if ((Account.HasValue && string.Equals(Account.Value.Username, account.Username, StringComparison.OrdinalIgnoreCase)) ||
+                !additional.TryAdd(account.Username, account)) return Task.FromResult(Result.Failure("That username is already in use."));
+            Writes++;
+            return Task.FromResult(Result.Success());
+        }
+    }
     public bool Fail { get; init; }
     public Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default)
     {
@@ -108,13 +133,15 @@ internal sealed class StartupAdministratorStore : IAdministratorStore
     public Task<bool> TryRecordSignIn(Administrator expected, string? username, bool succeeded, DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
-        if (!string.Equals(username, expected.Username, StringComparison.Ordinal)) return Task.FromResult(true);
+        if (!string.Equals(username, expected.Username, StringComparison.OrdinalIgnoreCase)) return Task.FromResult(true);
         lock (this)
         {
-            if (Account.HasNoValue || !ReferenceEquals(Account.Value, expected) || !expected.Failures.CanAttempt(now))
+            var current = expected.IsInitialAdministrator ? Account : additional.GetValueOrDefault(expected.Username);
+            if (current.HasNoValue || !ReferenceEquals(current.Value, expected) || !expected.Failures.CanAttempt(now))
                 return Task.FromResult(false);
-            Account = Administrator.Create(expected.Username, expected.PasswordHash, expected.RequiresPasswordReplacement,
-                succeeded ? SignInFailures.None : expected.Failures.RecordFailure(now)).Value;
+            var updated = expected.RecordSignIn(succeeded, now);
+            if (expected.IsInitialAdministrator) Account = updated;
+            else additional[expected.Username] = updated;
             return Task.FromResult(true);
         }
     }
@@ -125,11 +152,16 @@ internal sealed class StartupAdministratorStore : IAdministratorStore
     public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
         CancellationToken cancellationToken = default)
     {
-        if (Account.HasNoValue || !ReferenceEquals(Account.Value, expected))
-            return Task.FromResult(Result.Failure("Stale account"));
-        Account = replacement;
-        Writes++;
-        return Task.FromResult(Result.Success());
+        lock (this)
+        {
+            var current = expected.IsInitialAdministrator ? Account : additional.GetValueOrDefault(expected.Username);
+            if (current.HasNoValue || !ReferenceEquals(current.Value, expected))
+                return Task.FromResult(Result.Failure("Stale account"));
+            if (expected.IsInitialAdministrator) Account = replacement;
+            else additional[expected.Username] = replacement;
+            Writes++;
+            return Task.FromResult(Result.Success());
+        }
     }
 
     public Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default)

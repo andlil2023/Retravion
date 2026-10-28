@@ -1,0 +1,57 @@
+@page "/administration/users/details/{Username}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Administrator")]
+@using Retravion.Identity.Application
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Sections
+@using Retravion.Web.Components
+@inject UserOperations Operations
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>User details · Retravion</PageTitle>
+<SectionContent SectionName="account-page-header">
+    <PageHeader Title="User details" BackHref="/administration/users" />
+</SectionContent>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+}
+else if (_account is not null)
+{
+    <section class="account-details" aria-labelledby="account-heading">
+        <MudPaper Class="pa-4" Elevation="0">
+            <h2 id="account-heading">@_account.DisplayName</h2>
+            <dl>
+                <div class="identity-row">
+                    <dt>Username</dt>
+                    <dd>@_account.Username</dd>
+                </div>
+                <div class="identity-row">
+                    <dt>Display name</dt>
+                    <dd>@_account.DisplayName</dd>
+                </div>
+                <div class="identity-row">
+                    <dt>Account type</dt>
+                    <dd><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">@_account.AccountType</MudChip></dd>
+                </div>
+            </dl>
+        </MudPaper>
+    </section>
+}
+
+@code {
+    [Parameter] public string Username { get; set; } = "";
+    private AccountSummary? _account;
+    private string? _error;
+    protected override async Task OnParametersSetAsync()
+    {
+        _account = null;
+        _error = null;
+        var result = await Operations.List((await Authentication.GetAuthenticationStateAsync()).User);
+        if (result.IsFailure) _error = result.Error;
+        else
+        {
+            _account = result.Value.FirstOrDefault(account => string.Equals(account.Username, Username, StringComparison.OrdinalIgnoreCase));
+            if (_account is null) _error = "User not found.";
+        }
+    }
+}

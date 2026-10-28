@@ -121,7 +121,8 @@ public sealed class WebSmokeTests
             .Select(match => match.Groups[1].Value)
             .ToArray();
 
-        Assert.Equal(4, assets.Length);
+        Assert.Equal(5, assets.Length);
+        Assert.Contains(assets, asset => Regex.IsMatch(asset, "^Retravion\\.Web(?:\\.[^/]+)?\\.styles\\.css$"));
         foreach (var asset in assets)
         {
             using var response = await client.GetAsync(asset);

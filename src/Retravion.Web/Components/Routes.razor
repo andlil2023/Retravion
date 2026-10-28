@@ -15,7 +15,9 @@
             @* Guard before constructing either the page or its layout, including circuit navigation.
                New application pages are protected even without an authorization attribute. *@
             <AuthorizeView Policy="@(routeData.PageType == typeof(ReplacementPage)
-                ? "PasswordReplacementRequired" : "CompletedPasswordReplacement")">
+                ? "PasswordReplacementRequired"
+                : routeData.PageType.Namespace == "Retravion.Web.Features.Identity.Users"
+                    ? "Administrator" : "CompletedPasswordReplacement")">
                 <Authorized>
                     <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
                 </Authorized>

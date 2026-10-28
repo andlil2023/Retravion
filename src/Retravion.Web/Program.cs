@@ -1,4 +1,5 @@
 using System.Data.Common;
+using Retravion.Web.Features.Identity.Users;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -34,7 +35,10 @@ builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("CompletedPasswordReplacement", policy => policy
         .RequireAuthenticatedUser()
-        .RequireRole("Administrator")
+        .RequireRole("Administrator", "User")
+        .RequireAssertion(context => !context.User.HasClaim(PasswordReplacementEndpoint.RestrictedClaim, "true")));
+    options.AddPolicy("Administrator", policy => policy
+        .RequireAuthenticatedUser().RequireRole("Administrator")
         .RequireAssertion(context => !context.User.HasClaim(PasswordReplacementEndpoint.RestrictedClaim, "true")));
     options.AddPolicy("PasswordReplacementRequired", policy => policy
         .RequireAuthenticatedUser()
@@ -59,6 +63,8 @@ builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 builder.Services.AddSingleton<IAdministratorStore>(_ => new PostgresAdministratorStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<AccountCreation>();
+builder.Services.AddScoped<UserOperations>();
 builder.Services.AddSingleton<AdministratorInitializer>();
 builder.Services.AddSingleton<AdministratorRecovery>();
 builder.Services.AddSingleton<IAuditSubmission>(_ => new PostgresAuditSubmission(
@@ -146,7 +152,8 @@ app.Use(async (context, next) =>
             context.Response.Redirect("/password-replacement");
             return;
         }
-        if (!context.User.IsInRole("Administrator"))
+        if ((!context.User.IsInRole("Administrator") && !context.User.IsInRole("User")) ||
+            (path.StartsWithSegments("/administration") && !context.User.IsInRole("Administrator")))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -159,6 +166,7 @@ app.UseAntiforgery();
 app.MapLogin();
 app.MapLogout();
 app.MapPasswordReplacement();
+app.MapUsers();
 app.MapStaticAssets().AllowAnonymous();
 // SessionTicketStore expires and revokes circuit principals. A transport-level
 // ticket deadline would disconnect active users at their original sign-in expiry.

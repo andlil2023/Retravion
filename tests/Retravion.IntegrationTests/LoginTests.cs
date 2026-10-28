@@ -395,6 +395,9 @@ public sealed class LoginTests
 
     private sealed class ConcurrentReplacementStore(Administrator initial, Administrator replaced) : IAdministratorStore
     {
+        public Task<Result<Maybe<Administrator>>> LoadForSignIn(string? username, CancellationToken cancellationToken = default) => Load(cancellationToken);
+        public Task<Result<IReadOnlyList<Administrator>>> List(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result> CreateAccount(Administrator account, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public int Loads { get; private set; }
         public Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default)
         {

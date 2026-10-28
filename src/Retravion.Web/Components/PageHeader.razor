@@ -1,0 +1,14 @@
+<div class="page-header">
+    @if (BackHref is not null)
+    {
+        <MudButton Href="@BackHref" Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.ArrowBack">Users</MudButton>
+    }
+    <h1>@Title</h1>
+    <div class="page-actions" aria-label="Page actions">@Actions</div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? BackHref { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

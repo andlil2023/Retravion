@@ -1,0 +1,11 @@
+.users-list ::deep .user-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+}
+
+@media (pointer: coarse) {
+    .users-list ::deep .user-link {
+        min-height: 44px;
+    }
+}

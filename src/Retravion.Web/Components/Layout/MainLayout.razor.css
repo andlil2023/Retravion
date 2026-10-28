@@ -1,0 +1,49 @@
+.sidebar {
+    overflow-y: auto;
+}
+
+.sidebar > * {
+    flex-shrink: 0;
+}
+
+.sidebar-bottom {
+    margin-top: auto;
+    padding-top: 3rem;
+}
+
+.sidebar-bottom .navigation-caption {
+    margin-top: 0;
+}
+
+.page-toolbar {
+    min-height: 56px;
+    gap: 0.5rem;
+    padding: 4px 20px;
+}
+
+.page-header-slot {
+    flex: 1;
+    min-width: 0;
+}
+
+.page-toolbar ::deep .theme-toggle,
+.page-toolbar ::deep .navigation-toggle {
+    flex-shrink: 0;
+    min-width: 44px;
+    min-height: 44px;
+}
+
+.page-content {
+    padding: 20px;
+}
+
+@media (max-width: 760px) {
+    .page-toolbar {
+        padding-right: 12px;
+        padding-left: 12px;
+    }
+
+    .page-content {
+        padding: 16px;
+    }
+}

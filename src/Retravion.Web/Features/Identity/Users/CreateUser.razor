@@ -1,0 +1,71 @@
+@page "/administration/users/create"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Administrator")]
+@using Retravion.Identity.Application
+@using Retravion.Identity.Domain
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Sections
+@using Retravion.Web.Components
+@inject UserOperations Operations
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Create user · Retravion</PageTitle>
+<SectionContent SectionName="account-page-header">
+    <PageHeader Title="Create user" BackHref="/administration/users" />
+</SectionContent>
+@if (_created is not null)
+{
+    <OneTimePasswordResult Password="@_created.TemporaryPassword" OnDismiss="Dismiss" />
+}
+else
+{
+    <MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
+        <form id="create-user-form" @onsubmit="Create" @onsubmit:preventDefault aria-label="Create user">
+            <MudTextField @bind-Value="_username" Label="Username" HelperText="3–50 ASCII letters, digits, periods, underscores or hyphens." Required="true" />
+            <MudTextField @bind-Value="_displayName" Label="Display name" HelperText="1–100 Unicode characters. Surrounding whitespace is removed." Required="true" />
+            <MudSelect T="AccountType" @bind-Value="_type" Label="Account type">
+                <MudSelectItem Value="AccountType.Ordinary">Ordinary</MudSelectItem>
+                <MudSelectItem Value="AccountType.Administrator">Administrator</MudSelectItem>
+            </MudSelect>
+            <p>A secure temporary password will be shown once after creation.</p>
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" role="alert" Class="my-4">@_error</MudAlert>
+            }
+        </form>
+    </MudPaper>
+    <div class="mt-4">
+        <MudButton ButtonType="ButtonType.Submit" form="create-user-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" Style="min-height:44px" StartIcon="@Icons.Material.Outlined.PersonAdd">Create user</MudButton>
+    </div>
+}
+
+@code {
+    private string _username = "";
+    private string _displayName = "";
+    private AccountType _type;
+    private bool _busy;
+    private string? _error;
+    private CreatedAccount? _created;
+
+    private async Task Create()
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await Operations.Create((await Authentication.GetAuthenticationStateAsync()).User,
+                _username, _displayName, _type);
+            if (result.IsFailure) _error = result.Error;
+            else _created = result.Value;
+        }
+        finally { _busy = false; }
+    }
+
+    private void Dismiss()
+    {
+        var username = _created!.Account.Username;
+        _created = null;
+        Navigation.NavigateTo($"/administration/users/details/{Uri.EscapeDataString(username)}");
+    }
+}
