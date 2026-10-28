@@ -190,6 +190,7 @@ public sealed class AccountManagementTests
             var submit = Assert.Single(Regex.Matches(html, "<button(?=[^>]*type=\"submit\")(?=[^>]*form=\"create-user-form\")[^>]*>[\\s\\S]*?</button>").Cast<Match>());
             Assert.True(submit.Index > form.Index + form.Length, "The creation action must follow the form card, not appear in the toolbar.");
             Assert.Contains("Create user", submit.Value);
+            AssertFilledPrimaryButton(submit.Value);
         }
         else if (!hasBackLink)
         {
@@ -220,6 +221,127 @@ public sealed class AccountManagementTests
         Assert.True((await signIn.Authenticate("FIRST", first.TemporaryPassword)).IsSuccess);
         Assert.Equal(SignInFailures.None, (await store.LoadForSignIn("first")).Value.Value.Failures);
     }
+
+    [Theory]
+    [InlineData(AccountType.Ordinary)]
+    [InlineData(AccountType.Administrator)]
+    public async Task AvailabilityControlsBlockSignInAndRestoreOnlyAvailability(AccountType type)
+    {
+        var store = new StartupAdministratorStore();
+        await using var factory = new AdministratorWebFactory(store, "admin", Initial);
+        using var admin = Client(factory);
+        await Login(admin, "admin", Initial);
+        await Replace(admin, Initial, Replacement);
+        using var created = await Create(admin, "target", "Target", type);
+        var password = (await created.Content.ReadFromJsonAsync<CreatedAccount>())!.TemporaryPassword;
+        using var target = Client(factory);
+        await Login(target, "target", password);
+        await Replace(target, password, Replacement);
+        using (var result = await Availability(admin, "target", false)) Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.False((await store.LoadForSignIn("target")).Value.Value.IsActive);
+        var details = await admin.GetStringAsync("/administration/users/details/target");
+        Assert.Contains("Inactive", details);
+        AssertAvailabilityActionBelowCard(details, "Reactivate");
+        Assert.Matches("data-label=\"Availability\"[^>]*>Inactive</td>", await admin.GetStringAsync("/administration/users"));
+        using var retry = Client(factory);
+        await Login(retry, "target", Replacement, "/?failed=true");
+        using (var result = await Availability(admin, "target", true)) Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        await Login(retry, "TARGET", Replacement, "/home");
+        details = await admin.GetStringAsync("/administration/users/details/target");
+        AssertAvailabilityActionBelowCard(details, "Inactivate");
+        Assert.Matches("<dt[^>]*>Availability</dt>\\s*<dd[^>]*>Active</dd>", details);
+
+        // TC-AUTH-031: reactivation does not clear lockout or mandatory replacement.
+        using var pendingCreated = await Create(admin, "pending", "Pending", type);
+        var pendingPassword = (await pendingCreated.Content.ReadFromJsonAsync<CreatedAccount>())!.TemporaryPassword;
+        using (var result = await Availability(admin, "pending", false)) Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        using (var result = await Availability(admin, "pending", true)) Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        using var pending = Client(factory);
+        await Login(pending, "pending", pendingPassword);
+        using (var denied = await pending.GetAsync("/home")) Assert.Equal("/password-replacement", denied.Headers.Location?.OriginalString);
+        var clock = new Clock();
+        var signIn = new PasswordSignIn(store, new Pbkdf2PasswordHasher(), clock);
+        for (var i = 0; i < 10; i++)
+        {
+            Assert.True((await signIn.Authenticate("target", "wrong")).IsFailure);
+            clock.Now = clock.Now.AddSeconds(5);
+        }
+        var locked = (await store.LoadForSignIn("target")).Value.Value;
+        Assert.True(locked.Failures.IsLocked);
+        using (var result = await Availability(admin, "target", false)) Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        using (var result = await Availability(admin, "target", true)) Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal(locked.Failures, (await store.LoadForSignIn("target")).Value.Value.Failures);
+        await Login(retry, "target", Replacement, "/?failed=true");
+    }
+
+    [Fact]
+    public async Task AvailabilityRejectsUnauthorizedSelfInvalidAndUnprotectedRequestsWithoutEffects()
+    {
+        var store = new StartupAdministratorStore();
+        await using var factory = new AdministratorWebFactory(store, "admin", Initial);
+        using var anonymous = Client(factory);
+        using (var result = await Availability(anonymous, "admin", false)) Assert.Equal("/", result.Headers.Location?.OriginalString);
+        using var admin = Client(factory);
+        await Login(admin, "admin", Initial);
+        await Replace(admin, Initial, Replacement);
+        var snapshot = store.Account.Value;
+        using (var result = await Availability(admin, "ADMIN", false)) Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Same(snapshot, store.Account.Value);
+        var selfPage = await admin.GetStringAsync("/administration/users/details/admin");
+        Assert.Contains("You cannot inactivate your own account.", selfPage);
+        AssertAvailabilityActionBelowCard(selfPage, "Inactivate");
+        Assert.Matches("<button[^>]*disabled[^>]*>[\\s\\S]*?Inactivate", selfPage);
+        using var created = await Create(admin, "ordinary", "Ordinary", AccountType.Ordinary);
+        var password = (await created.Content.ReadFromJsonAsync<CreatedAccount>())!.TemporaryPassword;
+        using var ordinary = Client(factory);
+        await Login(ordinary, "ordinary", password);
+        await Replace(ordinary, password, Replacement);
+        var writes = store.Writes;
+        foreach (var active in new[] { false, true })
+        {
+            using var denied = await Availability(ordinary, "admin", active);
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        }
+        using (var missing = await Availability(admin, "missing", false)) Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        using (var noToken = await admin.PostAsync("/administration/accounts/ordinary/availability",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["active"] = "false" })))
+            Assert.Equal(HttpStatusCode.BadRequest, noToken.StatusCode);
+        Assert.Equal(writes, store.Writes);
+        Assert.True(store.Account.Value.IsActive);
+        Assert.True((await store.LoadForSignIn("ordinary")).Value.Value.IsActive);
+    }
+
+    private static void AssertAvailabilityActionBelowCard(string html, string action)
+    {
+        var header = Regex.Match(html, "<header\\b[^>]*class=\"page-toolbar\"[^>]*>[\\s\\S]*?</header>");
+        Assert.True(header.Success);
+        Assert.DoesNotContain("Inactivate", header.Value);
+        Assert.DoesNotContain("Reactivate", header.Value);
+        var section = Regex.Match(html, "<section\\b[^>]*aria-labelledby=\"account-heading\"[^>]*>[\\s\\S]*?</section>");
+        Assert.True(section.Success);
+        var card = Regex.Match(section.Value, "<div\\b(?=[^>]*id=\"account-details-card\")[^>]*>[\\s\\S]*?</dl>[\\s\\S]*?</div>");
+        Assert.True(card.Success, "The details card must be identifiable separately from its actions.");
+        var button = Assert.Single(Regex.Matches(section.Value, "<button\\b[^>]*>[\\s\\S]*?</button>").Cast<Match>(),
+            match => Regex.Replace(match.Value, "<[^>]+>", "").Trim() == action);
+        AssertFilledPrimaryButton(button.Value);
+        Assert.True(button.Index >= card.Index + card.Length,
+            "The availability action must follow the details card, not appear inside it or in the toolbar.");
+    }
+
+    private static void AssertFilledPrimaryButton(string html)
+    {
+        var button = Regex.Match(html, "^<button\\b[^>]*>");
+        Assert.True(button.Success);
+        Assert.Contains("mud-button-filled", button.Value);
+        Assert.Contains("mud-button-filled-primary", button.Value);
+        Assert.DoesNotContain("mud-button-outlined", button.Value);
+    }
+
+    private static async Task<HttpResponseMessage> Availability(HttpClient client, string username, bool active) =>
+        await client.PostAsync($"/administration/accounts/{username}/availability", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["active"] = active.ToString(), ["__RequestVerificationToken"] = Token(await client.GetStringAsync("/"))
+        }));
 
     private static async Task AssertPasswordChangeStatus(HttpClient admin, string username, bool required)
     {

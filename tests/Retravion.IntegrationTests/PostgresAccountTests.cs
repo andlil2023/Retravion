@@ -49,6 +49,7 @@ public sealed class PostgresAccountTests
             Assert.Equal("Legacy.Admin", migrated.DisplayName);
             Assert.Equal(hash, migrated.PasswordHash);
             Assert.False(migrated.RequiresPasswordReplacement);
+            Assert.True(migrated.IsActive);
             Assert.True(migrated.IsInitialAdministrator);
             Assert.Equal(AccountType.Administrator, migrated.AccountType);
             Assert.Equal(3, migrated.Failures.Count);
@@ -98,6 +99,67 @@ public sealed class PostgresAccountTests
                 Assert.DoesNotContain(ordinary.TemporaryPassword, reader.GetString(0));
                 Assert.DoesNotContain(admin.TemporaryPassword, reader.GetString(0));
             }
+        }
+        finally
+        {
+            await using var drop = new NpgsqlCommand($"DROP DATABASE {database} WITH (FORCE)", server);
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
+    [PostgresFact]
+    public async Task AvailabilityPersistsAcrossStoresRejectsStaleSignInAndPreservesConcurrentCredentialState()
+    {
+        var serverConnection = Environment.GetEnvironmentVariable("RETRAVION_TEST_POSTGRES")!;
+        var database = $"retravion_availability_{Guid.NewGuid():N}";
+        await using var server = new NpgsqlConnection(serverConnection);
+        await server.OpenAsync();
+        await using (var create = new NpgsqlCommand($"CREATE DATABASE {database}", server)) await create.ExecuteNonQueryAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(serverConnection) { Database = database, Pooling = false }.ConnectionString;
+        try
+        {
+            var store = new PostgresAdministratorStore(connectionString);
+            var other = new PostgresAdministratorStore(connectionString);
+            var hasher = new Pbkdf2PasswordHasher();
+            Assert.True((await new AdministratorInitializer(store, hasher).Initialize("actor", "InitialPass123!")).IsSuccess);
+            foreach (var type in new[] { AccountType.Ordinary, AccountType.Administrator })
+            {
+                var name = $"target-{type}";
+                var created = (await new AccountCreation(store, hasher).Create(name, "Target", type)).Value;
+                var original = (await store.LoadForSignIn(name)).Value.Value;
+                // A password replacement committed after the availability read must not be overwritten.
+                var replacement = original.ReplacePassword("Replacement123!", hasher.Hash("Replacement123!")).Value;
+                Assert.True((await other.ReplacePassword(original, replacement)).IsSuccess);
+                Assert.True((await store.ChangeAvailability(original, original.Inactivate("actor").Value)).IsSuccess);
+                Assert.False(await other.TryRecordSignIn(original, name, true, DateTimeOffset.UtcNow));
+                Assert.True((await other.ChangeAvailability(original, original.Inactivate("actor").Value)).IsFailure);
+                var inactive = (await other.LoadForSignIn(name)).Value.Value;
+                Assert.False(inactive.IsActive);
+                Assert.Equal(replacement.PasswordHash, inactive.PasswordHash);
+                Assert.False(inactive.RequiresPasswordReplacement);
+                Assert.True((await new PasswordSignIn(other, hasher).Authenticate(name, "Replacement123!")).IsFailure);
+                Assert.True((await AccountAvailability.Change(store, "actor", name, true)).IsSuccess);
+                Assert.True((await new PasswordSignIn(other, hasher).Authenticate(name, "Replacement123!")).IsSuccess);
+                // Locked and mandatory-replacement snapshots survive availability-only writes.
+                var pending = (await new AccountCreation(store, hasher).Create($"pending-{type}", "Pending", type)).Value;
+                var clock = new Clock();
+                var signIn = new PasswordSignIn(store, hasher, clock);
+                for (var i = 0; i < 10; i++)
+                {
+                    Assert.True((await signIn.Authenticate(pending.Account.Username, "wrong")).IsFailure);
+                    clock.Now = clock.Now.AddSeconds(5);
+                }
+                var locked = (await store.LoadForSignIn(pending.Account.Username)).Value.Value;
+                Assert.True(locked.Failures.IsLocked);
+                Assert.True((await AccountAvailability.Change(store, "actor", locked.Username, false)).IsSuccess);
+                Assert.True((await AccountAvailability.Change(other, "actor", locked.Username, true)).IsSuccess);
+                var reactivated = (await other.LoadForSignIn(locked.Username)).Value.Value;
+                Assert.Equal(locked.Failures, reactivated.Failures);
+                Assert.True(reactivated.RequiresPasswordReplacement);
+                Assert.True((await new PasswordSignIn(other, hasher).Authenticate(locked.Username, pending.TemporaryPassword)).IsFailure);
+            }
+            Assert.True((await AccountAvailability.Change(store, "ACTOR", "actor", false)).IsFailure);
+            Assert.True((await other.Load()).Value.Value.IsActive);
         }
         finally
         {

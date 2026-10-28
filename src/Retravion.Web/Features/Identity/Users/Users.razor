@@ -25,11 +25,12 @@ else
 {
     <div class="users-list">
     <MudTable Items="_accounts" Dense="true" Hover="true" Elevation="0" aria-label="Users">
-        <HeaderContent><MudTh>Username</MudTh><MudTh>Display name</MudTh><MudTh>Account type</MudTh><MudTh>Password change</MudTh></HeaderContent>
+        <HeaderContent><MudTh>Username</MudTh><MudTh>Display name</MudTh><MudTh>Account type</MudTh><MudTh>Availability</MudTh><MudTh>Password change</MudTh></HeaderContent>
         <RowTemplate>
             <MudTd DataLabel="Username"><MudLink Class="user-link" Href="@($"/administration/users/details/{Uri.EscapeDataString(context.Username)}")">@context.Username</MudLink></MudTd>
             <MudTd DataLabel="Display name">@context.DisplayName</MudTd>
             <MudTd DataLabel="Account type">@context.AccountType</MudTd>
+            <MudTd DataLabel="Availability">@(context.IsActive ? "Active" : "Inactive")</MudTd>
             <MudTd DataLabel="Password change">
                 @if (context.RequiresPasswordReplacement)
                 {

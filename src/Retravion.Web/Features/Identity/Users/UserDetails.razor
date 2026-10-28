@@ -6,11 +6,16 @@
 @using Retravion.Web.Components
 @inject UserOperations Operations
 @inject AuthenticationStateProvider Authentication
+@inject IDialogService Dialogs
 
 <PageTitle>User details · Retravion</PageTitle>
 <SectionContent SectionName="account-page-header">
     <PageHeader Title="User details" BackHref="/administration/users" />
 </SectionContent>
+@if (_feedback is not null)
+{
+    <MudAlert Severity="@(_failed ? Severity.Error : Severity.Success)" role="status">@_feedback</MudAlert>
+}
 @if (_error is not null)
 {
     <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
@@ -18,7 +23,7 @@
 else if (_account is not null)
 {
     <section class="account-details" aria-labelledby="account-heading">
-        <MudPaper Class="pa-4" Elevation="0">
+        <MudPaper id="account-details-card" Class="pa-4" Elevation="0">
             <h2 id="account-heading">@_account.DisplayName</h2>
             <dl>
                 <div class="identity-row">
@@ -33,8 +38,22 @@ else if (_account is not null)
                     <dt>Account type</dt>
                     <dd><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-0">@_account.AccountType</MudChip></dd>
                 </div>
+                <div class="identity-row">
+                    <dt>Availability</dt>
+                    <dd>@(_account.IsActive ? "Active" : "Inactive")</dd>
+                </div>
             </dl>
+            @if (_isSelf)
+            {
+                <p>You cannot inactivate your own account.</p>
+            }
         </MudPaper>
+        <div class="mt-4">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px"
+                       Disabled="@(_busy || (_account.IsActive && _isSelf))" OnClick="ConfirmAvailability">
+                @(_account.IsActive ? "Inactivate" : "Reactivate")
+            </MudButton>
+        </div>
     </section>
 }
 
@@ -42,11 +61,41 @@ else if (_account is not null)
     [Parameter] public string Username { get; set; } = "";
     private AccountSummary? _account;
     private string? _error;
+    private string? _feedback;
+    private bool _failed;
+    private bool _isSelf;
+    private bool _busy;
+
+    private async Task ConfirmAvailability()
+    {
+        if (_account is null || _busy) return;
+        _busy = true;
+        _feedback = null;
+        try
+        {
+            var target = _account;
+            var action = target.IsActive ? "Inactivate" : "Reactivate";
+            var confirmed = await Dialogs.ShowMessageBoxAsync($"{action} user?",
+                $"{action} {target.DisplayName} ({target.Username})? " +
+                (target.IsActive ? "Subsequent sign-in will be blocked." : "Other authentication restrictions will still apply."),
+                yesText: action, cancelText: "Cancel");
+            if (confirmed != true) return;
+            var result = await Operations.ChangeAvailability((await Authentication.GetAuthenticationStateAsync()).User,
+                target.Username, !target.IsActive);
+            _failed = result.IsFailure;
+            _feedback = result.IsFailure ? result.Error : $"{target.Username} is now {(target.IsActive ? "inactive" : "active")}.";
+            await OnParametersSetAsync();
+        }
+        finally { _busy = false; }
+    }
     protected override async Task OnParametersSetAsync()
     {
         _account = null;
         _error = null;
-        var result = await Operations.List((await Authentication.GetAuthenticationStateAsync()).User);
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        _isSelf = string.Equals(actor.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, Username,
+            StringComparison.OrdinalIgnoreCase);
+        var result = await Operations.List(actor);
         if (result.IsFailure) _error = result.Error;
         else
         {
