@@ -5,10 +5,10 @@ using Retravion.Identity.Domain;
 namespace Retravion.Identity.Application;
 
 public sealed record AccountSummary(string Username, string DisplayName, AccountType AccountType,
-    bool RequiresPasswordReplacement)
+    bool RequiresPasswordReplacement, bool IsActive = true)
 {
     public static AccountSummary From(Administrator account) =>
-        new(account.Username, account.DisplayName, account.AccountType, account.RequiresPasswordReplacement);
+        new(account.Username, account.DisplayName, account.AccountType, account.RequiresPasswordReplacement, account.IsActive);
 }
 
 public sealed record CreatedAccount(AccountSummary Account, string TemporaryPassword);

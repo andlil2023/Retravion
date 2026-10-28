@@ -137,7 +137,7 @@ internal sealed class StartupAdministratorStore : IAdministratorStore
         lock (this)
         {
             var current = expected.IsInitialAdministrator ? Account : additional.GetValueOrDefault(expected.Username);
-            if (current.HasNoValue || !ReferenceEquals(current.Value, expected) || !expected.Failures.CanAttempt(now))
+            if (current.HasNoValue || !ReferenceEquals(current.Value, expected) || !expected.IsActive || !expected.Failures.CanAttempt(now))
                 return Task.FromResult(false);
             var updated = expected.RecordSignIn(succeeded, now);
             if (expected.IsInitialAdministrator) Account = updated;
@@ -145,6 +145,9 @@ internal sealed class StartupAdministratorStore : IAdministratorStore
             return Task.FromResult(true);
         }
     }
+
+    public Task<Result> ChangeAvailability(Administrator expected, Administrator replacement,
+        CancellationToken cancellationToken = default) => ReplacePassword(expected, replacement, cancellationToken);
 
     public Task<Result> RecoverPassword(Administrator expected, Administrator replacement,
         CancellationToken cancellationToken = default) => throw new NotSupportedException();

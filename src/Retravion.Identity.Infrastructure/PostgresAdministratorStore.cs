@@ -8,7 +8,7 @@ namespace Retravion.Identity.Infrastructure;
 /// <summary>Identity account storage. The original table name and initial-account marker are retained.</summary>
 public sealed class PostgresAdministratorStore(string connectionString) : IAdministratorStore
 {
-    private const string Columns = "username, password_hash, requires_password_replacement, failed_sign_ins, retry_at, display_name, account_type, singleton IS TRUE";
+    private const string Columns = "username, password_hash, requires_password_replacement, failed_sign_ins, retry_at, display_name, account_type, singleton IS TRUE, is_active";
 
     public async Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default)
     {
@@ -53,7 +53,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
     private static Result<Administrator> Map(NpgsqlDataReader reader) =>
         SignInFailures.Restore(reader.GetInt32(3), reader.GetFieldValue<DateTimeOffset>(4))
             .Bind(failures => Administrator.Restore(reader.GetString(0), reader.GetString(5),
-                (AccountType)reader.GetInt32(6), reader.GetBoolean(7), reader.GetString(1), reader.GetBoolean(2), failures))
+                (AccountType)reader.GetInt32(6), reader.GetBoolean(7), reader.GetString(1), reader.GetBoolean(2), failures, reader.GetBoolean(8)))
             .MapError(_ => "The persisted administrator is invalid.");
 
     private async Task InitializeSchema(CancellationToken cancellationToken)
@@ -70,6 +70,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
                 password_hash text NOT NULL CHECK (length(btrim(password_hash)) > 0)
             );
             ALTER TABLE retravion_identity.administrator
+                ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT TRUE,
                 ADD COLUMN IF NOT EXISTS requires_password_replacement boolean NOT NULL DEFAULT TRUE,
                 ADD COLUMN IF NOT EXISTS failed_sign_ins integer NOT NULL DEFAULT 0 CHECK (failed_sign_ins BETWEEN 0 AND 10),
                 ADD COLUMN IF NOT EXISTS retry_at timestamp with time zone NOT NULL DEFAULT '-infinity',
@@ -112,7 +113,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
 
     public async Task<Result> CreateAccount(Administrator account, CancellationToken cancellationToken = default)
     {
-        if (account.IsInitialAdministrator || !account.RequiresPasswordReplacement || account.Failures != SignInFailures.None)
+        if (!account.IsActive || account.IsInitialAdministrator || !account.RequiresPasswordReplacement || account.Failures != SignInFailures.None)
             return Result.Failure("Invalid new account state.");
         return await Insert(account, cancellationToken) == 1
             ? Result.Success() : Result.Failure("That username is already in use.");
@@ -124,8 +125,8 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
         await connection.OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             INSERT INTO retravion_identity.administrator
-                (singleton, username, password_hash, requires_password_replacement, failed_sign_ins, retry_at, display_name, account_type, normalized_username)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING
+                (singleton, username, password_hash, requires_password_replacement, failed_sign_ins, retry_at, display_name, account_type, normalized_username, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING
             """, connection);
         command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Boolean,
             Value = account.IsInitialAdministrator ? true : DBNull.Value });
@@ -137,6 +138,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
         command.Parameters.AddWithValue(account.DisplayName);
         command.Parameters.AddWithValue((int)account.AccountType);
         command.Parameters.AddWithValue(account.Username.ToUpperInvariant());
+        command.Parameters.AddWithValue(account.IsActive);
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -144,14 +146,14 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
         CancellationToken cancellationToken = default)
     {
         var matches = string.Equals(username, expected.Username, StringComparison.OrdinalIgnoreCase);
-        if (matches && !expected.Failures.CanAttempt(now)) return false;
+        if (matches && (!expected.IsActive || !expected.Failures.CanAttempt(now))) return false;
         var failures = !matches ? expected.Failures : succeeded ? SignInFailures.None : expected.Failures.RecordFailure(now);
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             UPDATE retravion_identity.administrator SET failed_sign_ins = $1, retry_at = $2
             WHERE username = $3 AND password_hash = $4 AND requires_password_replacement = $5
-                AND failed_sign_ins = $6 AND retry_at = $7 AND $8
+                AND failed_sign_ins = $6 AND retry_at = $7 AND $8 AND is_active
             """, connection);
         command.Parameters.AddWithValue(failures.Count);
         command.Parameters.AddWithValue(failures.RetryAt);
@@ -165,6 +167,27 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
         return !matches || affected == 1;
     }
 
+    public async Task<Result> ChangeAvailability(Administrator expected, Administrator replacement,
+        CancellationToken cancellationToken = default)
+    {
+        if (expected.Username != replacement.Username || expected.IsActive == replacement.IsActive ||
+            expected.PasswordHash != replacement.PasswordHash || expected.DisplayName != replacement.DisplayName ||
+            expected.AccountType != replacement.AccountType || expected.IsInitialAdministrator != replacement.IsInitialAdministrator ||
+            expected.RequiresPasswordReplacement != replacement.RequiresPasswordReplacement || expected.Failures != replacement.Failures)
+            return Result.Failure("Invalid availability transition.");
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE retravion_identity.administrator SET is_active = $1
+            WHERE username = $2 AND is_active = $3
+            """, connection);
+        command.Parameters.AddWithValue(replacement.IsActive);
+        command.Parameters.AddWithValue(expected.Username);
+        command.Parameters.AddWithValue(expected.IsActive);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1
+            ? Result.Success() : Result.Failure("The account changed; refresh and try again.");
+    }
+
     public Task<Result> RecoverPassword(Administrator expected, Administrator replacement, CancellationToken cancellationToken = default) =>
         ChangePassword(expected, replacement, true, cancellationToken);
 
@@ -175,7 +198,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
     {
         if (expected.Username != replacement.Username || expected.DisplayName != replacement.DisplayName ||
             expected.AccountType != replacement.AccountType || expected.IsInitialAdministrator != replacement.IsInitialAdministrator ||
-            expected.PasswordHash == replacement.PasswordHash ||
+            expected.IsActive != replacement.IsActive || expected.PasswordHash == replacement.PasswordHash ||
             (recovery ? !expected.IsInitialAdministrator || !replacement.RequiresPasswordReplacement || replacement.Failures != SignInFailures.None
                 : !expected.RequiresPasswordReplacement || replacement.RequiresPasswordReplacement || expected.Failures != replacement.Failures))
             return Result.Failure("Invalid password transition.");
@@ -187,6 +210,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
                 failed_sign_ins = CASE WHEN $3 THEN 0 ELSE failed_sign_ins END,
                 retry_at = CASE WHEN $3 THEN '-infinity'::timestamptz ELSE retry_at END
             WHERE username = $4 AND password_hash = $5 AND requires_password_replacement = $6
+                AND is_active = $9
                 AND (NOT $3 OR (singleton IS TRUE AND failed_sign_ins = $7 AND retry_at = $8))
             """, connection);
         command.Parameters.AddWithValue(replacement.PasswordHash);
@@ -197,6 +221,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
         command.Parameters.AddWithValue(expected.RequiresPasswordReplacement);
         command.Parameters.AddWithValue(expected.Failures.Count);
         command.Parameters.AddWithValue(expected.Failures.RetryAt);
+        command.Parameters.AddWithValue(expected.IsActive);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1
             ? Result.Success() : Result.Failure("The account changed; authenticate again.");
     }

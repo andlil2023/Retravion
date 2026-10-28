@@ -17,6 +17,11 @@ public interface IAdministratorStore
     /// <summary>Atomically creates an additional account, rejecting duplicate usernames.</summary>
     Task<Result> CreateAccount(Administrator account, CancellationToken cancellationToken = default);
 
+    /// <summary>Changes only availability if the persisted availability still matches the expected state.
+    /// Concurrent credential and failure changes are preserved; an absent account is never inserted.</summary>
+    Task<Result> ChangeAvailability(Administrator expected, Administrator replacement,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Atomically inserts only when absent; never updates an existing administrator.</summary>
     Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default);
 

@@ -104,7 +104,7 @@ public sealed class PasswordSignIn(IAdministratorStore store, IPasswordHasher ha
             var administrator = loaded.Value.Value;
             var usernameMatches = string.Equals(username, administrator.Username, StringComparison.OrdinalIgnoreCase);
             // Restrictions belong to the selected account, never to the dummy snapshot.
-            if (usernameMatches && !administrator.Failures.CanAttempt(clock.GetUtcNow()))
+            if (usernameMatches && (!administrator.IsActive || !administrator.Failures.CanAttempt(clock.GetUtcNow())))
                 return await RejectWithEquivalentWork(password, loaded, cancellationToken);
 
             // Verify even when the username differs; do not expose which credential failed.

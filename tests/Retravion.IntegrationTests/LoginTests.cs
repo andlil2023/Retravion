@@ -242,6 +242,28 @@ public sealed class LoginTests
         Assert.False(observer.User?.IsInRole("Administrator"));
     }
 
+    [Fact]
+    public async Task InactivationDuringAuditConfirmationCannotIssueASession()
+    {
+        var store = new StartupAdministratorStore();
+        var audit = new AuditDouble
+        {
+            Submit = (_, _) =>
+            {
+                store.Account = store.Account.Value.Inactivate("another-admin").Value;
+                return Task.FromResult(AuditSubmissionResult.Success);
+            }
+        };
+        await using var factory = new AdministratorWebFactory(store, "specific-admin", "ValidPass123!")
+            .WithWebHostBuilder(builder => builder.ConfigureServices(services => services.AddSingleton<IAuditSubmission>(audit)));
+        using var client = CreateClient(factory);
+        using var response = await Submit(client, await GetToken(client), "specific-admin", "ValidPass123!");
+        Assert.Equal("/?failed=true", response.Headers.Location?.OriginalString);
+        Assert.False(store.Account.Value.IsActive);
+        using var protectedResponse = await client.GetAsync("/home");
+        Assert.Equal("/", protectedResponse.Headers.Location?.OriginalString);
+    }
+
     [Theory]
     [InlineData("specific-admin")]
     [InlineData("unknown")]
@@ -398,6 +420,7 @@ public sealed class LoginTests
         public Task<Result<Maybe<Administrator>>> LoadForSignIn(string? username, CancellationToken cancellationToken = default) => Load(cancellationToken);
         public Task<Result<IReadOnlyList<Administrator>>> List(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> CreateAccount(Administrator account, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result> ChangeAvailability(Administrator expected, Administrator replacement, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public int Loads { get; private set; }
         public Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default)
         {

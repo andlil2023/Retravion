@@ -23,6 +23,15 @@ internal sealed class UserOperations(IAuthorizationService authorization, Sessio
             (IReadOnlyList<AccountSummary>)accounts.Select(AccountSummary.From).ToArray());
     }
 
+    public async Task<Result> ChangeAvailability(ClaimsPrincipal actor, string username, bool active,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await Allowed(actor)) return Result.Failure("Access denied.");
+        var actorUsername = actor.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(actorUsername)) return Result.Failure("Access denied.");
+        return await AccountAvailability.Change(store, actorUsername, username, active, cancellationToken);
+    }
+
     public async Task<Result<CreatedAccount>> Create(ClaimsPrincipal actor, string? username, string? displayName,
         AccountType type, CancellationToken cancellationToken = default)
     {
@@ -40,6 +49,18 @@ internal static class UserEndpoints
             context.Response.Headers.CacheControl = "no-store";
             var result = await operations.List(context.User, context.RequestAborted);
             return result.IsSuccess ? Results.Ok(result.Value) : Results.BadRequest(new { error = result.Error });
+        }).RequireAuthorization("Administrator");
+
+        app.MapPost("/administration/accounts/{username}/availability", async (string username, HttpContext context,
+            Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, UserOperations operations) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            try { await antiforgery.ValidateRequestAsync(context); }
+            catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException) { return Results.BadRequest(); }
+            var form = await context.Request.ReadFormAsync(context.RequestAborted);
+            if (!bool.TryParse(form["active"], out var active)) return Results.BadRequest();
+            var result = await operations.ChangeAvailability(context.User, username, active, context.RequestAborted);
+            return result.IsSuccess ? Results.Ok() : Results.BadRequest(new { error = result.Error });
         }).RequireAuthorization("Administrator");
 
         app.MapPost("/administration/accounts", async (HttpContext context,

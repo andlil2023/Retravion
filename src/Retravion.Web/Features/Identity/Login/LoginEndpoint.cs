@@ -35,6 +35,7 @@ internal static class LoginEndpoint
         var loaded = await store.LoadForSignIn(result.Value, context.RequestAborted);
         if (loaded.IsFailure || loaded.Value.HasNoValue ||
             !string.Equals(loaded.Value.Value.Username, result.Value, StringComparison.Ordinal) ||
+            !loaded.Value.Value.IsActive || loaded.Value.Value.Failures.IsLocked ||
             !hasher.Verify(form["password"].ToString(), loaded.Value.Value.PasswordHash))
         {
             await SubmitDecision(audit, time, loggerFactory, context.RequestAborted, null);
@@ -53,6 +54,7 @@ internal static class LoginEndpoint
         loaded = await store.LoadForSignIn(result.Value, context.RequestAborted);
         if (loaded.IsFailure || loaded.Value.HasNoValue ||
             !string.Equals(loaded.Value.Value.Username, result.Value, StringComparison.Ordinal) ||
+            !loaded.Value.Value.IsActive || loaded.Value.Value.Failures.IsLocked ||
             !hasher.Verify(form["password"].ToString(), loaded.Value.Value.PasswordHash) ||
             context.RequestAborted.IsCancellationRequested)
         {
