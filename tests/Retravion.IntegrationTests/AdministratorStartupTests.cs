@@ -9,6 +9,7 @@ using Retravion.Application.AuditTrail;
 using Retravion.Identity.Application;
 using Retravion.Identity.Domain;
 using Retravion.Identity.Infrastructure;
+using Retravion.Web.Features.Identity.Users;
 using Xunit;
 
 namespace Retravion.IntegrationTests;
@@ -82,10 +83,19 @@ internal sealed class AdministratorWebFactory(
         {
             services.RemoveAll<IAdministratorStore>();
             services.AddSingleton<IAdministratorStore>(store);
+            services.RemoveAll<IAccountAuditTransaction>();
+            services.AddSingleton<IAccountAuditTransaction, InMemoryAccountAuditTransaction>();
             services.RemoveAll<IAuditSubmission>();
             services.AddSingleton<IAuditSubmission, SuccessfulAuditSubmission>();
         });
     }
+}
+
+// Existing web tests use an in-memory Identity store; real atomicity is tested against PostgreSQL.
+internal sealed class InMemoryAccountAuditTransaction(IAdministratorStore store) : IAccountAuditTransaction
+{
+    public async Task<AccountTransactionResult<T>> Execute<T>(Func<IAdministratorStore, Task<Result<T>>> change,
+        AuditInformation success, CancellationToken cancellationToken) => new(await change(store));
 }
 
 internal sealed class SuccessfulAuditSubmission : IAuditSubmission

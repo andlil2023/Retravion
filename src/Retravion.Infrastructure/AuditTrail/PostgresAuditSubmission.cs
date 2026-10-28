@@ -18,6 +18,28 @@ public sealed class PostgresAuditSubmission(string connectionString) : IAuditSub
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await SubmitInTransactionAsync(connection, transaction, information, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return AuditSubmissionResult.Success;
+        }
+        // Availability/resource/concurrency failures and denied writes are expected storage failures.
+        // Programming/schema/configuration faults are not silently turned into an expected result.
+        catch (NpgsqlException exception) when (!cancellationToken.IsCancellationRequested &&
+            (exception.IsTransient || exception is PostgresException
+            {
+                SqlState: PostgresErrorCodes.InsufficientPrivilege or PostgresErrorCodes.ReadOnlySqlTransaction
+            }))
+        {
+            // A lost commit acknowledgement can leave a committed record; never retry.
+            return AuditSubmissionResult.Failure;
+        }
+    }
+
+    /// <summary>Writes an event in the caller-owned transaction; does not commit or handle failures.</summary>
+    public static async Task SubmitInTransactionAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        AuditInformation information, CancellationToken cancellationToken = default)
+    {
+            ArgumentNullException.ThrowIfNull(information);
             // Serialize first-use DDL across instances. This lock is distinct from Identity's.
             // Force durable commit even if the connection/database defaults disable it.
             await using (var setup = new NpgsqlCommand("""
@@ -67,20 +89,5 @@ public sealed class PostgresAuditSubmission(string connectionString) : IAuditSub
                 information.Target is AuditTarget.Identified target ? target.Identifier : DBNull.Value);
             command.Parameters.AddWithValue(information.Outcome == AuditActionOutcome.Success ? "success" : "failure");
             await command.ExecuteNonQueryAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            return AuditSubmissionResult.Success;
-        }
-        // Availability/resource/concurrency failures and denied writes are expected storage failures.
-        // Programming/schema/configuration faults are not silently turned into an expected result.
-        catch (NpgsqlException exception) when (!cancellationToken.IsCancellationRequested &&
-            (exception.IsTransient || exception is PostgresException
-            {
-                SqlState: PostgresErrorCodes.InsufficientPrivilege or PostgresErrorCodes.ReadOnlySqlTransaction
-            }))
-        {
-            // The result intentionally contains no database/connection details. A lost commit
-            // acknowledgement can leave a committed record; this implementation never retries.
-            return AuditSubmissionResult.Failure;
-        }
     }
 }

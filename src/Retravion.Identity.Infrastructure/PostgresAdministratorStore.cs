@@ -9,6 +9,29 @@ namespace Retravion.Identity.Infrastructure;
 public sealed class PostgresAdministratorStore(string connectionString) : IAdministratorStore
 {
     private const string Columns = "username, password_hash, requires_password_replacement, failed_sign_ins, retry_at, display_name, account_type, singleton IS TRUE, is_active";
+    private readonly NpgsqlConnection? _transactionConnection;
+
+    /// <summary>Uses an already open connection for a bounded account-administration transaction.
+    /// The caller owns the connection and transaction and must not use this store concurrently.</summary>
+    public PostgresAdministratorStore(NpgsqlConnection transactionConnection) : this(transactionConnection.ConnectionString)
+    {
+        _transactionConnection = transactionConnection;
+    }
+
+    private async Task<ConnectionLease> OpenConnection(CancellationToken cancellationToken)
+    {
+        if (_transactionConnection is not null) return new ConnectionLease(_transactionConnection, false);
+        var connection = new NpgsqlConnection(connectionString);
+        try { await connection.OpenAsync(cancellationToken); }
+        catch { await connection.DisposeAsync(); throw; }
+        return new ConnectionLease(connection, true);
+    }
+
+    private sealed class ConnectionLease(NpgsqlConnection connection, bool owned) : IAsyncDisposable
+    {
+        public NpgsqlConnection Connection { get; } = connection;
+        public ValueTask DisposeAsync() => owned ? Connection.DisposeAsync() : ValueTask.CompletedTask;
+    }
 
     public async Task<Result<Maybe<Administrator>>> Load(CancellationToken cancellationToken = default)
     {
@@ -21,8 +44,8 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
 
     private async Task<Result<Maybe<Administrator>>> ReadOne(string? username, CancellationToken cancellationToken)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var lease = await OpenConnection(cancellationToken);
+        var connection = lease.Connection;
         await using var command = new NpgsqlCommand($"""
             SELECT {Columns} FROM retravion_identity.administrator
             WHERE normalized_username = $1 OR singleton IS TRUE
@@ -121,8 +144,8 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
 
     private async Task<int> Insert(Administrator account, CancellationToken cancellationToken)
     {
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var lease = await OpenConnection(cancellationToken);
+        var connection = lease.Connection;
         await using var command = new NpgsqlCommand("""
             INSERT INTO retravion_identity.administrator
                 (singleton, username, password_hash, requires_password_replacement, failed_sign_ins, retry_at, display_name, account_type, normalized_username, is_active)
@@ -175,8 +198,8 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
             expected.AccountType != replacement.AccountType || expected.IsInitialAdministrator != replacement.IsInitialAdministrator ||
             expected.RequiresPasswordReplacement != replacement.RequiresPasswordReplacement || expected.Failures != replacement.Failures)
             return Result.Failure("Invalid availability transition.");
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var lease = await OpenConnection(cancellationToken);
+        var connection = lease.Connection;
         await using var command = new NpgsqlCommand("""
             UPDATE retravion_identity.administrator SET is_active = $1
             WHERE username = $2 AND is_active = $3
@@ -206,8 +229,8 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
             (recovery ? (!administratorReset && !expected.IsInitialAdministrator) || !replacement.RequiresPasswordReplacement || replacement.Failures != SignInFailures.None
                 : !expected.RequiresPasswordReplacement || replacement.RequiresPasswordReplacement || expected.Failures != replacement.Failures))
             return Result.Failure("Invalid password transition.");
-        await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var lease = await OpenConnection(cancellationToken);
+        var connection = lease.Connection;
         await using var command = new NpgsqlCommand("""
             UPDATE retravion_identity.administrator
             SET password_hash = $1, requires_password_replacement = $2,

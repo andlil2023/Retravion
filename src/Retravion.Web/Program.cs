@@ -65,6 +65,10 @@ builder.Services.AddSingleton<IAdministratorStore>(_ => new PostgresAdministrato
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddSingleton<AccountCreation>();
 builder.Services.AddScoped<UserOperations>();
+builder.Services.AddScoped<AccountAudit>();
+builder.Services.AddSingleton<IAccountAuditTransaction>(_ => new PostgresAccountAuditTransaction(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddSingleton<AdministratorInitializer>();
 builder.Services.AddSingleton<AdministratorRecovery>();
 builder.Services.AddSingleton<IAuditSubmission>(_ => new PostgresAuditSubmission(
@@ -144,17 +148,20 @@ app.Use(async (context, next) =>
     {
         if (!authenticated)
         {
+            await context.RequestServices.GetRequiredService<AccountAudit>().RejectedRequest(context);
             context.Response.Redirect("/");
             return;
         }
         if (restricted)
         {
+            await context.RequestServices.GetRequiredService<AccountAudit>().RejectedRequest(context);
             context.Response.Redirect("/password-replacement");
             return;
         }
         if ((!context.User.IsInRole("Administrator") && !context.User.IsInRole("User")) ||
             (path.StartsWithSegments("/administration") && !context.User.IsInRole("Administrator")))
         {
+            await context.RequestServices.GetRequiredService<AccountAudit>().RejectedRequest(context);
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
         }
@@ -173,3 +180,42 @@ app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 app.Run();
+
+// The composition root is the only Web location that depends on persistence types.
+internal sealed class PostgresAccountAuditTransaction(string connectionString,
+    Func<Npgsql.NpgsqlTransaction, CancellationToken, Task>? commit = null) : IAccountAuditTransaction
+{
+    public async Task<AccountTransactionResult<T>> Execute<T>(
+        Func<IAdministratorStore, Task<CSharpFunctionalExtensions.Result<T>>> change,
+        AuditInformation success, CancellationToken cancellationToken)
+    {
+        var commitStarted = false;
+        try
+        {
+            await using var connection = new Npgsql.NpgsqlConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            var result = await change(new PostgresAdministratorStore(connection));
+            if (result.IsFailure) return new(result);
+            await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction, success, cancellationToken);
+            // Once commit is sent, an exception or cancellation may mean it committed.
+            commitStarted = true;
+            if (commit is null) await transaction.CommitAsync(cancellationToken);
+            else await commit(transaction, cancellationToken);
+            return new(result);
+        }
+        catch (Exception) when (commitStarted)
+        {
+            return new(CSharpFunctionalExtensions.Result.Failure<T>(
+                "The account change outcome could not be confirmed. Refresh and check the account."), true);
+        }
+        catch (Npgsql.NpgsqlException exception) when (!cancellationToken.IsCancellationRequested &&
+            (exception.IsTransient || exception is Npgsql.PostgresException
+            {
+                SqlState: Npgsql.PostgresErrorCodes.InsufficientPrivilege or Npgsql.PostgresErrorCodes.ReadOnlySqlTransaction
+            }))
+        {
+            return new(CSharpFunctionalExtensions.Result.Failure<T>("The account change could not be completed."));
+        }
+    }
+}

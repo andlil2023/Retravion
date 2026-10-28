@@ -1,15 +1,94 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Retravion.Application.AuditTrail;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Identity.Application;
+using Retravion.Identity.Domain;
+using Retravion.Identity.Infrastructure;
 using Xunit;
 
 namespace Retravion.IntegrationTests;
 
 public sealed class PostgresAuditSubmissionTests
 {
+    [PostgresFact]
+    public async Task AccountAdministrationHttpSuccessesPersistExpectedEventsAndAccountState()
+    {
+        await using var database = await TestDatabase.Create();
+        await using var host = CreateHost(database.ConnectionString, provision: true);
+        using var client = host.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false, BaseAddress = new Uri("https://localhost")
+        });
+        static string Token(string html) => WebUtility.HtmlDecode(Regex.Match(html,
+            "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value);
+        async Task<HttpResponseMessage> Post(string path, Dictionary<string, string> values, string tokenPage = "/")
+        {
+            values["__RequestVerificationToken"] = Token(await client.GetStringAsync(tokenPage));
+            return await client.PostAsync(path, new FormUrlEncodedContent(values));
+        }
+        using (var login = await Post("/identity/login", new() { ["username"] = "audit-test-admin", ["password"] = "AuditTest123!" }))
+            Assert.Equal("/password-replacement", login.Headers.Location?.OriginalString);
+        using (var replacement = await Post("/identity/password-replacement", new()
+        {
+            ["currentPassword"] = "AuditTest123!", ["newPassword"] = "ReplacedTest123!", ["confirmNewPassword"] = "ReplacedTest123!"
+        }, "/password-replacement"))
+            Assert.Equal("/home", replacement.Headers.Location?.OriginalString);
+        var start = DateTimeOffset.UtcNow;
+        using var create = await Post("/administration/accounts", new()
+        {
+            ["username"] = "http-target", ["displayName"] = "HTTP target", ["accountType"] = "Ordinary"
+        });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+        var created = (await create.Content.ReadFromJsonAsync<CreatedAccount>())!;
+        using (var inactive = await Post("/administration/accounts/http-target/availability", new() { ["active"] = "false" }))
+            Assert.Equal(HttpStatusCode.OK, inactive.StatusCode);
+        using (var active = await Post("/administration/accounts/http-target/availability", new() { ["active"] = "true" }))
+            Assert.Equal(HttpStatusCode.OK, active.StatusCode);
+        using var reset = await Post("/administration/accounts/http-target/password-reset", new());
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+        var resetAccount = (await reset.Content.ReadFromJsonAsync<CreatedAccount>())!;
+        var end = DateTimeOffset.UtcNow;
+        var store = new PostgresAdministratorStore(database.ConnectionString);
+        var persisted = (await store.LoadForSignIn("http-target")).Value.Value;
+        Assert.True(persisted.IsActive);
+        Assert.True(persisted.RequiresPasswordReplacement);
+        var hasher = new Pbkdf2PasswordHasher();
+        Assert.True(hasher.Verify(resetAccount.TemporaryPassword, persisted.PasswordHash));
+        Assert.False(hasher.Verify(created.TemporaryPassword, persisted.PasswordHash));
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using var query = new NpgsqlCommand("""
+            SELECT actor_kind, actor_identifier, occurred_at_utc_ticks, action, target_kind, target_identifier, outcome
+            FROM retravion_audit.event WHERE action LIKE 'account.%' ORDER BY id
+            """, connection);
+        await using var reader = await query.ExecuteReaderAsync();
+        foreach (var action in new[] { "account.create", "account.inactivate", "account.reactivate", "account.password-reset" })
+        {
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("identified", reader.GetString(0));
+            Assert.Equal("audit-test-admin", reader.GetString(1));
+            Assert.InRange(reader.GetInt64(2), start.UtcTicks, end.UtcTicks);
+            Assert.Equal(action, reader.GetString(3));
+            Assert.Equal("identified", reader.GetString(4));
+            Assert.Equal("http-target", reader.GetString(5));
+            Assert.Equal("success", reader.GetString(6));
+            foreach (var column in new[] { 0, 1, 3, 4, 5, 6 })
+            {
+                var value = reader.GetString(column);
+                Assert.DoesNotContain(created.TemporaryPassword, value);
+                Assert.DoesNotContain(resetAccount.TemporaryPassword, value);
+                Assert.DoesNotContain(persisted.PasswordHash, value);
+            }
+        }
+        Assert.False(await reader.ReadAsync());
+    }
+
     [PostgresFact]
     public async Task CompositionPersistsAllVariantsAndExactInstantsAcrossWebHostRestarts()
     {
