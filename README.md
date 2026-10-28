@@ -15,8 +15,11 @@ From the repository root:
 ```sh
 dotnet restore Retravion.slnx
 dotnet build Retravion.slnx --configuration Release --no-restore
-dotnet test Retravion.slnx --configuration Release --no-build --no-restore
 ```
+
+For the test step, run the self-contained procedure in
+[PostgreSQL integration tests](#postgresql-integration-tests). It starts a disposable
+Podman container, runs the tests, and then removes that container.
 
 Run the web application:
 
@@ -146,18 +149,52 @@ certificates:
 pwsh -NoProfile -File tests/Deployment.Tests.ps1
 ```
 
-These checks mock external operations. PostgreSQL integration verification can be run
-against a disposable server using a connection with CREATE DATABASE permission:
+These checks mock external operations.
+
+### PostgreSQL integration tests
+
+Local development and agent database tests must use a disposable PostgreSQL Podman
+container, not a locally installed PostgreSQL server. GitHub Actions may use its
+PostgreSQL service container. Run the following from the repository root in PowerShell 7
+with the Podman machine running. The container has an ephemeral test password, an
+IPv4-loopback port selected by Podman, and a user with CREATE DATABASE permission.
+Treat its connection details as sensitive; Podman users can inspect container environment
+values. The test suite creates and drops uniquely named databases in this disposable server.
 
 ```powershell
-$env:RETRAVION_TEST_POSTGRES = 'Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=<test-server-password>'
-dotnet test Retravion.slnx --configuration Release
+$name = "retravion-tests-$([guid]::NewGuid().ToString('N'))"
+$password = [guid]::NewGuid().ToString('N')
+$previousConnection = $env:RETRAVION_TEST_POSTGRES
+$created = $false
+try {
+    podman run -d --rm --name $name -e "POSTGRES_PASSWORD=$password" -p '127.0.0.1::5432' postgres:17 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not start the PostgreSQL test container.' }
+    $created = $true
+    $ready = $false
+    for ($i = 0; $i -lt 60; $i++) {
+        podman exec $name pg_isready -U postgres 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $ready) { throw 'PostgreSQL test container did not become ready.' }
+    $binding = podman port $name 5432/tcp
+    if ($LASTEXITCODE -ne 0 -or -not $binding) { throw 'Could not determine the test port.' }
+    $port = ($binding | Select-Object -First 1).Split(':')[-1]
+    $env:RETRAVION_TEST_POSTGRES = "Host=127.0.0.1;Port=$port;Database=postgres;Username=postgres;Password=$password"
+    dotnet test Retravion.slnx --configuration Release
+    if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
+}
+finally {
+    if ($created) { podman rm -f $name | Out-Null }
+    if ($null -eq $previousConnection) { Remove-Item Env:RETRAVION_TEST_POSTGRES -ErrorAction SilentlyContinue }
+    else { $env:RETRAVION_TEST_POSTGRES = $previousConnection }
+}
 ```
 
-The database test creates and drops its own uniquely named database. Without this
-variable, that test is explicitly skipped; other unit and web-host tests still run.
-It covers invalid provisioning, concurrent startup, singleton enforcement, hashed
-storage, and preservation through new web hosts.
+Cleanup removes only the container created by this run, not the review environment or
+other containers. Do not point `RETRAVION_TEST_POSTGRES` at a non-disposable server;
+tests create and drop databases. Report any skipped or failed tests rather than treating
+an incomplete database run as verification.
 
 A real Windows/Podman smoke test must also
 verify certificate trust, container builds/startup, a second run preserving secrets and
