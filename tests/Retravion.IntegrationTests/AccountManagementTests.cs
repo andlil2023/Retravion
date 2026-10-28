@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Retravion.IntegrationTests;
 
-public sealed class AccountManagementTests
+public sealed partial class AccountManagementTests
 {
     private const string Initial = "InitialPass123!";
     private const string Replacement = "Replacement123!";

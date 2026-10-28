@@ -168,6 +168,57 @@ public sealed class PostgresAccountTests
         }
     }
 
+    [PostgresFact]
+    public async Task ResetPersistsAndRejectsStaleSignInReplacementAndResetWithoutChangingAvailability()
+    {
+        var serverConnection = Environment.GetEnvironmentVariable("RETRAVION_TEST_POSTGRES")!;
+        var database = $"retravion_reset_{Guid.NewGuid():N}";
+        await using var server = new NpgsqlConnection(serverConnection);
+        await server.OpenAsync();
+        await using (var create = new NpgsqlCommand($"CREATE DATABASE {database}", server)) await create.ExecuteNonQueryAsync();
+        var connectionString = new NpgsqlConnectionStringBuilder(serverConnection) { Database = database, Pooling = false }.ConnectionString;
+        try
+        {
+            var store = new PostgresAdministratorStore(connectionString);
+            var other = new PostgresAdministratorStore(connectionString);
+            var hasher = new Pbkdf2PasswordHasher();
+            Assert.True((await new AdministratorInitializer(store, hasher).Initialize("actor", "InitialPass123!")).IsSuccess);
+            foreach (var type in new[] { AccountType.Ordinary, AccountType.Administrator })
+            foreach (var active in new[] { false, true })
+            {
+                var name = $"target-{type}-{active}";
+                var created = (await new AccountCreation(store, hasher).Create(name, "Target", type)).Value;
+                if (!active) Assert.True((await AccountAvailability.Change(store, "actor", name, false)).IsSuccess);
+                var before = (await store.LoadForSignIn(name)).Value.Value;
+                var staleReplacement = before.ReplacePassword("Replacement123!", hasher.Hash("Replacement123!")).Value;
+                var staleReset = before.ResetPassword("actor", "TemporaryPass123!", hasher.Hash("TemporaryPass123!")).Value;
+                var reset = await AccountPasswordReset.Reset(store, hasher, "actor", name);
+                Assert.True(reset.IsSuccess);
+                Assert.False(await other.TryRecordSignIn(before, name, true, DateTimeOffset.UtcNow));
+                Assert.True((await other.ReplacePassword(before, staleReplacement)).IsFailure);
+                Assert.True((await other.ResetPassword(before, staleReset)).IsFailure);
+                var current = (await other.LoadForSignIn(name)).Value.Value;
+                Assert.Equal(active, current.IsActive);
+                Assert.True(current.RequiresPasswordReplacement);
+                Assert.Equal(SignInFailures.None, current.Failures);
+                Assert.True(hasher.Verify(reset.Value.TemporaryPassword, current.PasswordHash));
+                Assert.False(hasher.Verify(created.TemporaryPassword, current.PasswordHash));
+                Assert.True((await other.RecoverPassword(current, staleReset)).IsFailure);
+                // A replacement that wins first makes a previously read reset snapshot stale too.
+                Assert.True((await other.ReplacePassword(current,
+                    current.ReplacePassword("Replacement123!", hasher.Hash("Replacement123!")).Value)).IsSuccess);
+                Assert.True((await store.ResetPassword(current,
+                    current.ResetPassword("actor", "TemporaryPass123!", hasher.Hash("TemporaryPass123!")).Value)).IsFailure);
+            }
+            Assert.True((await new AdministratorRecovery(other, hasher).Recover("RecoveredPass123!")).IsSuccess);
+        }
+        finally
+        {
+            await using var drop = new NpgsqlCommand($"DROP DATABASE {database} WITH (FORCE)", server);
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
     private sealed class Clock : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UnixEpoch;

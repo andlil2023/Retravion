@@ -188,18 +188,22 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
             ? Result.Success() : Result.Failure("The account changed; refresh and try again.");
     }
 
+    public Task<Result> ResetPassword(Administrator expected, Administrator replacement, CancellationToken cancellationToken = default) =>
+        ChangePassword(expected, replacement, true, cancellationToken, administratorReset: true);
+
     public Task<Result> RecoverPassword(Administrator expected, Administrator replacement, CancellationToken cancellationToken = default) =>
         ChangePassword(expected, replacement, true, cancellationToken);
 
     public Task<Result> ReplacePassword(Administrator expected, Administrator replacement, CancellationToken cancellationToken = default) =>
         ChangePassword(expected, replacement, false, cancellationToken);
 
-    private async Task<Result> ChangePassword(Administrator expected, Administrator replacement, bool recovery, CancellationToken cancellationToken)
+    private async Task<Result> ChangePassword(Administrator expected, Administrator replacement, bool recovery, CancellationToken cancellationToken,
+        bool administratorReset = false)
     {
         if (expected.Username != replacement.Username || expected.DisplayName != replacement.DisplayName ||
             expected.AccountType != replacement.AccountType || expected.IsInitialAdministrator != replacement.IsInitialAdministrator ||
             expected.IsActive != replacement.IsActive || expected.PasswordHash == replacement.PasswordHash ||
-            (recovery ? !expected.IsInitialAdministrator || !replacement.RequiresPasswordReplacement || replacement.Failures != SignInFailures.None
+            (recovery ? (!administratorReset && !expected.IsInitialAdministrator) || !replacement.RequiresPasswordReplacement || replacement.Failures != SignInFailures.None
                 : !expected.RequiresPasswordReplacement || replacement.RequiresPasswordReplacement || expected.Failures != replacement.Failures))
             return Result.Failure("Invalid password transition.");
         await using var connection = new NpgsqlConnection(connectionString);
@@ -211,7 +215,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
                 retry_at = CASE WHEN $3 THEN '-infinity'::timestamptz ELSE retry_at END
             WHERE username = $4 AND password_hash = $5 AND requires_password_replacement = $6
                 AND is_active = $9
-                AND (NOT $3 OR (singleton IS TRUE AND failed_sign_ins = $7 AND retry_at = $8))
+                AND (NOT $3 OR $10 OR (singleton IS TRUE AND failed_sign_ins = $7 AND retry_at = $8))
             """, connection);
         command.Parameters.AddWithValue(replacement.PasswordHash);
         command.Parameters.AddWithValue(replacement.RequiresPasswordReplacement);
@@ -222,6 +226,7 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
         command.Parameters.AddWithValue(expected.Failures.Count);
         command.Parameters.AddWithValue(expected.Failures.RetryAt);
         command.Parameters.AddWithValue(expected.IsActive);
+        command.Parameters.AddWithValue(administratorReset);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1
             ? Result.Success() : Result.Failure("The account changed; authenticate again.");
     }

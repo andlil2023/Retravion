@@ -14,6 +14,25 @@ internal sealed class SessionTicketStore(TimeProvider? timeProvider = null) : IT
     private readonly object _gate = new();
     internal event Action? Revoked;
 
+    // One host: serialize credential reset/replacement and final credential validation + ticket issuance.
+    // Audit submission deliberately occurs outside this gate.
+    internal SemaphoreSlim CredentialGate { get; } = new(1, 1);
+
+    internal void RevokeAccount(string username)
+    {
+        lock (_gate)
+        {
+            foreach (var (key, session) in _tickets.ToArray())
+            {
+                var principal = TicketSerializer.Default.Deserialize(session.Ticket)!.Principal;
+                if (!string.Equals(principal.FindFirstValue(ClaimTypes.NameIdentifier), username, StringComparison.OrdinalIgnoreCase)) continue;
+                _tickets.Remove(key);
+                session.Timer?.Dispose();
+            }
+        }
+        Revoked?.Invoke();
+    }
+
     public Task<string> StoreAsync(AuthenticationTicket ticket)
     {
         var key = Guid.NewGuid().ToString("N");

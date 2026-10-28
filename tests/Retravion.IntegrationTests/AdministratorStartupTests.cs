@@ -149,6 +149,9 @@ internal sealed class StartupAdministratorStore : IAdministratorStore
     public Task<Result> ChangeAvailability(Administrator expected, Administrator replacement,
         CancellationToken cancellationToken = default) => ReplacePassword(expected, replacement, cancellationToken);
 
+    public Task<Result> ResetPassword(Administrator expected, Administrator replacement,
+        CancellationToken cancellationToken = default) => ReplacePassword(expected, replacement, cancellationToken);
+
     public Task<Result> RecoverPassword(Administrator expected, Administrator replacement,
         CancellationToken cancellationToken = default) => throw new NotSupportedException();
 

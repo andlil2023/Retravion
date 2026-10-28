@@ -137,8 +137,10 @@ public sealed class LogoutTests
         });
     }
 
-    [Fact]
-    public async Task RevocationDuringPendingCircuitInitializationAndLateRenewalCannotRestoreAccess()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RevocationDuringPendingCircuitInitializationAndLateRenewalCannotRestoreAccess(bool accountReset)
     {
         using var store = new SessionTicketStore();
         var ticket = new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity(new[]
@@ -150,7 +152,8 @@ public sealed class LogoutTests
         using var provider = new SessionAuthenticationStateProvider(store);
         var pending = new TaskCompletionSource<AuthenticationState>(TaskCreationOptions.RunContinuationsAsynchronously);
         provider.SetAuthenticationState(pending.Task);
-        await store.RemoveAsync(key);
+        if (accountReset) store.RevokeAccount("ADMIN");
+        else await store.RemoveAsync(key);
         await store.RenewAsync(key, ticket);
         Assert.Null(await store.RetrieveAsync(key));
         pending.SetResult(new AuthenticationState(principal));

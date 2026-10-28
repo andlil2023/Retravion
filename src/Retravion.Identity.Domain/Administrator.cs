@@ -37,6 +37,12 @@ public sealed class Administrator
                 "The replacement password hash must differ from the current hash.")
             .Bind(() => Restore(Username, DisplayName, AccountType, IsInitialAdministrator, passwordHash, false, Failures, IsActive));
 
+    public Result<Administrator> ResetPassword(string actorUsername, string password, string passwordHash) =>
+        Result.Success()
+            .Ensure(() => !string.Equals(Username, actorUsername, StringComparison.OrdinalIgnoreCase),
+                "You cannot reset your own password.")
+            .Bind(() => RecoverPassword(password, passwordHash));
+
     public Result<Administrator> RecoverPassword(string? password, string? passwordHash) =>
         PasswordPolicy.Validate(password)
             .Ensure(() => !string.Equals(PasswordHash, passwordHash, StringComparison.Ordinal),

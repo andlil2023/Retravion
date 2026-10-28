@@ -433,6 +433,8 @@ public sealed class LoginTests
                 ReferenceEquals(initial, expected) && succeeded && expected.Failures.CanAttempt(now));
         public Task CreateIfAbsent(Administrator administrator, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+        public Task<Result> ResetPassword(Administrator expected, Administrator replacement,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> RecoverPassword(Administrator expected, Administrator replacement,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> ReplacePassword(Administrator expected, Administrator replacement,
