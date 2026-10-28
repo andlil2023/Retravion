@@ -37,6 +37,7 @@ Use prompt input or confirmed conversation context; ask for missing required inp
 - If the task cannot be completed within its constraints, stop and explain the blocker.
 
 ## Completion
+- Run local and agent PostgreSQL database tests against a disposable PostgreSQL Podman container, never a locally installed PostgreSQL server. Configure `RETRAVION_TEST_POSTGRES` for that container; see `README.md` for setup and cleanup. CI may use its PostgreSQL service container.
 - Run relevant build, tests, and available architecture checks; report exact commands and results.
 - Summarize changed files, behavior, unresolved risks, and any deviations.
 - Do not claim success without evidence or self-approve. Review must be by a different human or agent session against the current diff.
