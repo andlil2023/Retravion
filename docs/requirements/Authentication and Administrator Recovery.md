@@ -253,7 +253,9 @@ These system requirements may be verified through their child software requireme
 - Only administrators can create accounts.
 - Usernames contain 3–50 characters drawn from ASCII letters, digits, `.`, `_`, and `-`.
 - Usernames are unique and matched at sign-in case-insensitively; an existing username cannot be reused with different capitalization.
-- Display names support Unicode.
+- Display names are required and support Unicode; leading and trailing whitespace is trimmed.
+- After trimming, display names contain 1–100 Unicode scalar values; empty and whitespace-only values are rejected.
+- Internal whitespace is preserved, and duplicate display names are allowed; usernames identify accounts uniquely.
 - Invalid input or a duplicate username prevents account creation.
 
 ### REQ-SW-AUTH-013 — Issue an Initial Temporary Password
