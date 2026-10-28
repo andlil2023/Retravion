@@ -7,6 +7,7 @@ namespace Retravion.UnitTests;
 // Existing single-account fixtures retain their deliberately narrow responsibilities.
 internal interface ITestAdministratorStore : IAdministratorStore
 {
+    Task<Result> IAdministratorStore.ResetPassword(Administrator expected, Administrator replacement, CancellationToken cancellationToken) => throw new NotSupportedException();
     Task<Result> IAdministratorStore.ChangeAvailability(Administrator expected, Administrator replacement, CancellationToken cancellationToken) => throw new NotSupportedException();
     Task<Result<Maybe<Administrator>>> IAdministratorStore.LoadForSignIn(string? username, CancellationToken cancellationToken) => Load(cancellationToken);
     Task<Result<IReadOnlyList<Administrator>>> IAdministratorStore.List(CancellationToken cancellationToken) => throw new NotSupportedException();

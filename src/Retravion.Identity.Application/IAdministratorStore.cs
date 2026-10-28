@@ -31,6 +31,11 @@ public interface IAdministratorStore
     Task<bool> TryRecordSignIn(Administrator expected, string? username, bool succeeded, DateTimeOffset now,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Atomically resets an existing account against its credential and availability snapshot,
+    /// clearing failed sign-ins and requiring replacement. Never inserts an account.</summary>
+    Task<Result> ResetPassword(Administrator expected, Administrator replacement,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Atomically recovers the existing account only if its entire snapshot still matches.
     /// Never inserts an account; stale snapshots and invalid transitions fail.</summary>
     Task<Result> RecoverPassword(Administrator expected, Administrator replacement,

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Retravion.Identity.Application;
 using Retravion.Identity.Domain;
+using Retravion.Web.Features.Identity.Logout;
 using ReplacementUseCase = Retravion.Identity.Application.PasswordReplacement;
 
 namespace Retravion.Web.Features.Identity.PasswordReplacement;
@@ -28,7 +29,8 @@ internal static class PasswordReplacementEndpoint
 
     internal static void MapPasswordReplacement(this WebApplication app) =>
         app.MapPost("/identity/password-replacement", async (HttpContext context,
-            IAntiforgery antiforgery, ReplacementUseCase replacement, IAdministratorStore store, IPasswordHasher hasher) =>
+            IAntiforgery antiforgery, ReplacementUseCase replacement, IAdministratorStore store, IPasswordHasher hasher,
+            SessionTicketStore sessions) =>
         {
             if (context.User.Identity?.IsAuthenticated != true)
                 return Results.LocalRedirect("/");
@@ -51,21 +53,32 @@ internal static class PasswordReplacementEndpoint
                 !string.Equals(newPassword, confirmation, StringComparison.Ordinal))
                 return Results.LocalRedirect("/password-replacement?confirmationFailed=true");
 
-            var username = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var result = await replacement.Replace(username, form["currentPassword"].ToString(),
-                newPassword, context.RequestAborted);
-            if (result.IsFailure)
-                return Results.LocalRedirect("/password-replacement?failed=true");
-
-            var loaded = await store.LoadForSignIn(username, context.RequestAborted);
-            if (loaded.IsFailure || loaded.Value.HasNoValue ||
-                !string.Equals(loaded.Value.Value.Username, username, StringComparison.OrdinalIgnoreCase) ||
-                loaded.Value.Value.RequiresPasswordReplacement || !hasher.Verify(newPassword, loaded.Value.Value.PasswordHash))
+            await sessions.CredentialGate.WaitAsync(context.RequestAborted);
+            try
             {
-                await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                return Results.LocalRedirect("/");
+                // The request may have authenticated before a reset revoked its session.
+                if (!sessions.IsActive(context.User.FindFirstValue(SessionTicketStore.SessionClaim)))
+                {
+                    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    return Results.LocalRedirect("/");
+                }
+                var username = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+                var result = await replacement.Replace(username, form["currentPassword"].ToString(),
+                    newPassword, context.RequestAborted);
+                if (result.IsFailure)
+                    return Results.LocalRedirect("/password-replacement?failed=true");
+
+                var loaded = await store.LoadForSignIn(username, context.RequestAborted);
+                if (loaded.IsFailure || loaded.Value.HasNoValue ||
+                    !string.Equals(loaded.Value.Value.Username, username, StringComparison.OrdinalIgnoreCase) ||
+                    loaded.Value.Value.RequiresPasswordReplacement || !hasher.Verify(newPassword, loaded.Value.Value.PasswordHash))
+                {
+                    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    return Results.LocalRedirect("/");
+                }
+                await SignIn(context, loaded.Value.Value, restricted: false);
+                return Results.LocalRedirect("/home");
             }
-            await SignIn(context, loaded.Value.Value, restricted: false);
-            return Results.LocalRedirect("/home");
+            finally { sessions.CredentialGate.Release(); }
         });
 }

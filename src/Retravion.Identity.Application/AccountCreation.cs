@@ -27,7 +27,7 @@ public sealed class AccountCreation(IAdministratorStore store, IPasswordHasher h
                 .Map(() => new CreatedAccount(AccountSummary.From(account), password)));
     }
 
-    private static string GeneratePassword()
+    internal static string GeneratePassword()
     {
         const string lower = "abcdefghijklmnopqrstuvwxyz";
         const string upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";

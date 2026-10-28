@@ -11,7 +11,8 @@ internal static class LoginEndpoint
 {
     internal static void MapLogin(this WebApplication app) => app.MapPost("/identity/login", async (
         HttpContext context, IAntiforgery antiforgery, PasswordSignIn signIn, IAdministratorStore store,
-        IPasswordHasher hasher, IAuditSubmission audit, TimeProvider time, ILoggerFactory loggerFactory) =>
+        IPasswordHasher hasher, IAuditSubmission audit, TimeProvider time, ILoggerFactory loggerFactory,
+        Retravion.Web.Features.Identity.Logout.SessionTicketStore sessions) =>
     {
         try
         {
@@ -50,21 +51,27 @@ internal static class LoginEndpoint
             return Results.LocalRedirect("/?failed=true");
         }
 
-        // Confirmation may take several seconds; do not issue a session from a stale credential snapshot.
-        loaded = await store.LoadForSignIn(result.Value, context.RequestAborted);
-        if (loaded.IsFailure || loaded.Value.HasNoValue ||
-            !string.Equals(loaded.Value.Value.Username, result.Value, StringComparison.Ordinal) ||
-            !loaded.Value.Value.IsActive || loaded.Value.Value.Failures.IsLocked ||
-            !hasher.Verify(form["password"].ToString(), loaded.Value.Value.PasswordHash) ||
-            context.RequestAborted.IsCancellationRequested)
+        // Reset and final validation/issuance must be ordered as one process-local operation.
+        await sessions.CredentialGate.WaitAsync(context.RequestAborted);
+        try
         {
-            await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return Results.LocalRedirect("/?failed=true");
-        }
+            // Confirmation may take several seconds; do not issue a session from a stale credential snapshot.
+            loaded = await store.LoadForSignIn(result.Value, context.RequestAborted);
+            if (loaded.IsFailure || loaded.Value.HasNoValue ||
+                !string.Equals(loaded.Value.Value.Username, result.Value, StringComparison.Ordinal) ||
+                !loaded.Value.Value.IsActive || loaded.Value.Value.Failures.IsLocked ||
+                !hasher.Verify(form["password"].ToString(), loaded.Value.Value.PasswordHash) ||
+                context.RequestAborted.IsCancellationRequested)
+            {
+                await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                return Results.LocalRedirect("/?failed=true");
+            }
 
-        var restricted = loaded.Value.Value.RequiresPasswordReplacement;
-        await PasswordReplacementEndpoint.SignIn(context, loaded.Value.Value, restricted);
-        return Results.LocalRedirect(restricted ? "/password-replacement" : "/home");
+            var restricted = loaded.Value.Value.RequiresPasswordReplacement;
+            await PasswordReplacementEndpoint.SignIn(context, loaded.Value.Value, restricted);
+            return Results.LocalRedirect(restricted ? "/password-replacement" : "/home");
+        }
+        finally { sessions.CredentialGate.Release(); }
     });
 
     private static async Task<bool> SubmitDecision(IAuditSubmission audit, TimeProvider time,

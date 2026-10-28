@@ -12,6 +12,10 @@
 <SectionContent SectionName="account-page-header">
     <PageHeader Title="User details" BackHref="/administration/users" />
 </SectionContent>
+@if (_reset is not null)
+{
+    <OneTimePasswordResult Title="Password reset" Password="@_reset.TemporaryPassword" OnDismiss="DismissPassword" />
+}
 @if (_feedback is not null)
 {
     <MudAlert Severity="@(_failed ? Severity.Error : Severity.Success)" role="status">@_feedback</MudAlert>
@@ -46,6 +50,7 @@ else if (_account is not null)
             @if (_isSelf)
             {
                 <p>You cannot inactivate your own account.</p>
+                <p>You cannot reset your own password.</p>
             }
         </MudPaper>
         <div class="mt-4">
@@ -53,6 +58,9 @@ else if (_account is not null)
                        Disabled="@(_busy || (_account.IsActive && _isSelf))" OnClick="ConfirmAvailability">
                 @(_account.IsActive ? "Inactivate" : "Reactivate")
             </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px" Class="ml-2"
+                       Disabled="@(_busy || _isSelf || _reset is not null)" OnClick="ConfirmReset"
+                       StartIcon="@Icons.Material.Outlined.LockReset">Reset password</MudButton>
         </div>
     </section>
 }
@@ -65,6 +73,30 @@ else if (_account is not null)
     private bool _failed;
     private bool _isSelf;
     private bool _busy;
+    private CreatedAccount? _reset;
+
+    private void DismissPassword() => _reset = null;
+
+    private async Task ConfirmReset()
+    {
+        if (_account is null || _busy || _isSelf || _reset is not null) return;
+        _busy = true;
+        _feedback = null;
+        try
+        {
+            var target = _account;
+            var confirmed = await Dialogs.ShowMessageBoxAsync("Reset password?",
+                $"Reset the password for {target.DisplayName} ({target.Username})? All existing sessions will end and unsaved work may be lost. A new temporary password will be shown once. Account availability will not change.",
+                yesText: "Reset password", cancelText: "Cancel");
+            if (confirmed != true) return;
+            var result = await Operations.ResetPassword((await Authentication.GetAuthenticationStateAsync()).User, target.Username);
+            _failed = result.IsFailure;
+            if (result.IsFailure) _feedback = result.Error;
+            else _reset = result.Value;
+            await RefreshAccount();
+        }
+        finally { _busy = false; }
+    }
 
     private async Task ConfirmAvailability()
     {
@@ -84,11 +116,17 @@ else if (_account is not null)
                 target.Username, !target.IsActive);
             _failed = result.IsFailure;
             _feedback = result.IsFailure ? result.Error : $"{target.Username} is now {(target.IsActive ? "inactive" : "active")}.";
-            await OnParametersSetAsync();
+            await RefreshAccount();
         }
         finally { _busy = false; }
     }
     protected override async Task OnParametersSetAsync()
+    {
+        _reset = null;
+        await RefreshAccount();
+    }
+
+    private async Task RefreshAccount()
     {
         _account = null;
         _error = null;
