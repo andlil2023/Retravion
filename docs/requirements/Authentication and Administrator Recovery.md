@@ -4,6 +4,7 @@
 
 - [UN-AUTH-001 — Controlled Access to the Application](../user-needs/UN-AUTH-001%20-%20Controlled%20Access%20to%20the%20Application.md)
 - [UN-AUTH-002 — Recover Administrator Access](../user-needs/UN-AUTH-002%20-%20Recover%20Administrator%20Access.md)
+- [UN-AUTH-003 — Create User Accounts](../user-needs/UN-AUTH-003%20-%20Create%20User%20Accounts.md)
 
 ## System Requirements
 
@@ -30,6 +31,18 @@
 **Parent need:** UN-AUTH-002
 
 **Requirement:** The system shall enable an authorized IT administrator to restore administrator access when the administrator cannot sign in.
+
+### REQ-SYS-AUTH-004 — Create User Accounts
+
+**Type:** System requirement
+
+**Parent need:** UN-AUTH-003
+
+**Requirement:** The system shall allow administrators to create user accounts so that additional authorized people can sign in to Retravion.
+
+**Acceptance criteria:**
+- Non-administrators cannot create accounts.
+- A newly created user must replace their temporary password before accessing protected functionality.
 
 ### Verification Approach
 
@@ -69,23 +82,23 @@ These system requirements may be verified through their child software requireme
 
 **Type:** Software requirement
 
-**Parent needs:** UN-AUTH-001, UN-AUTH-002
+**Parent needs:** UN-AUTH-001, UN-AUTH-002, UN-AUTH-003
 
-**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003
+**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003, REQ-SYS-AUTH-004
 
 **Requirement:** The software shall store application-managed passwords only as salted, one-way hashes, not as plaintext or reversibly encrypted values.
 
 **Acceptance criteria:**
-- This applies to initial, changed, and recovery-reset passwords.
+- This applies to initial passwords (including generated temporary passwords for newly created accounts), changed passwords, and recovery-reset passwords.
 - The `.env` provisioning source is outside the application’s hashed credential store; importing its password does not permit storing a plaintext copy in that store.
 
 ### REQ-SW-AUTH-004 — Enforce Password Rules
 
 **Type:** Software requirement
 
-**Parent needs:** UN-AUTH-001, UN-AUTH-002
+**Parent needs:** UN-AUTH-001, UN-AUTH-002, UN-AUTH-003
 
-**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003
+**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003, REQ-SYS-AUTH-004
 
 **Requirement:** The software shall accept passwords only when they contain 10–30 Unicode scalar values inclusive and include at least three of these four categories: ASCII lowercase letters (`a–z`), ASCII uppercase letters (`A–Z`), ASCII digits (`0–9`), and Unicode punctuation or symbol characters.
 
@@ -94,17 +107,17 @@ These system requirements may be verified through their child software requireme
 - Whitespace and other characters contribute to length but not to a category.
 - Validate the original input without trimming or normalization.
 - Reject null, empty, out-of-range, and insufficient-category inputs.
-- These rules apply to initial configuration, password changes, and recovery passwords.
+- These rules apply to initial configuration, generated temporary passwords for newly created accounts, password changes, and recovery passwords.
 
 ### REQ-SW-AUTH-005 — Require Initial Password Replacement
 
 **Type:** Software requirement
 
-**Parent needs:** UN-AUTH-001, UN-AUTH-002
+**Parent needs:** UN-AUTH-001, UN-AUTH-002, UN-AUTH-003
 
-**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003
+**Parent requirements:** REQ-SYS-AUTH-001, REQ-SYS-AUTH-003, REQ-SYS-AUTH-004
 
-**Requirement:** Following initial setup or administrator recovery, the software shall require the administrator to replace the initial password after successfully authenticating and before accessing protected functionality.
+**Requirement:** Following initial setup, administrator recovery, or creation of an additional account, the software shall require the user to replace the initial password after successfully authenticating and before accessing protected functionality.
 
 **Acceptance criteria:**
 - Before authentication, only login is accessible.
@@ -114,8 +127,8 @@ These system requirements may be verified through their child software requireme
 - The new password and confirmation are both required and must match exactly, case-sensitively, without trimming or Unicode normalization. This validation is enforced server-side, including direct submissions that bypass the form.
 - Missing, empty, or mismatched new-password/confirmation values prevent replacement and display a clear, accessible validation message. The stored password remains unchanged and access remains limited to completing the required password change.
 - Password values are not echoed in validation responses or URLs.
-- Confirmation is required both after initial setup and after administrator recovery.
-- Successful completion routes the administrator to the home page with full administrator access.
+- Confirmation is required after initial setup, administrator recovery, and creation of an additional account.
+- Successful completion routes the user to the home page with the access assigned to their account; administrator accounts have full administrator access.
 - Subsequent sign-ins do not require this initial-password change again unless recovery resets the account.
 
 ### REQ-SW-AUTH-006 — Delay Repeated Failed Sign-ins
@@ -207,12 +220,44 @@ These system requirements may be verified through their child software requireme
 **Acceptance criteria:**
 - The terminated session cannot subsequently access protected functionality without signing in again.
 
+### REQ-SW-AUTH-012 — Create User Accounts
+
+**Type:** Software requirement
+
+**Parent need:** UN-AUTH-003
+
+**Parent requirement:** REQ-SYS-AUTH-004
+
+**Requirement:** The software shall allow administrators to create ordinary or administrator accounts by supplying a username and display name.
+
+**Acceptance criteria:**
+- Only administrators can create accounts.
+- Usernames contain 3–50 characters drawn from ASCII letters, digits, `.`, `_`, and `-`.
+- Usernames are unique and matched at sign-in case-insensitively; an existing username cannot be reused with different capitalization.
+- Display names support Unicode.
+- Invalid input or a duplicate username prevents account creation.
+
+### REQ-SW-AUTH-013 — Issue an Initial Temporary Password
+
+**Type:** Software requirement
+
+**Parent need:** UN-AUTH-003
+
+**Parent requirement:** REQ-SYS-AUTH-004
+
+**Requirement:** On account creation, the software shall generate a temporary password satisfying REQ-SW-AUTH-004 and display it to the creating administrator once.
+
+**Acceptance criteria:**
+- The password is generated using cryptographically secure randomness.
+- It is stored according to REQ-SW-AUTH-003 and cannot subsequently be retrieved.
+- The user must replace it before accessing protected functionality, following REQ-SW-AUTH-005.
+
 ## Traceability Notes
 
-REQ-SW-AUTH-003–REQ-SW-AUTH-005 support both initial authentication setup and administrator recovery. They remain single requirements with multiple traceability links rather than duplicated requirements.
+REQ-SW-AUTH-003–REQ-SW-AUTH-005 support initial authentication setup, administrator recovery, and creation of additional accounts. They remain single requirements with multiple traceability links rather than duplicated requirements.
 
 REQ-SW-AUTH-007 protects authentication under UN-AUTH-001. Its reference to recovery connects it to REQ-SW-AUTH-008; that dependency does not make lockout itself a recovery requirement.
 
 ## Scope
 
-Creating additional users, role-specific permissions, audit-trail recording, and recovery mechanisms for additional accounts remain outside this increment. The recovery command or script and password-hashing technology remain implementation decisions.
+Creating additional ordinary and administrator accounts is included. Role-specific permissions beyond the ordinary/administrator account distinction, audit-trail recording, and recovery mechanisms for additional accounts remain outside this increment. The recovery command or script and password-hashing technology remain implementation decisions.
