@@ -1,5 +1,6 @@
 using Retravion.Application.Product;
 using Retravion.Application.Product.Create;
+using Retravion.Application.Product.Description;
 using Retravion.Application.Product.Retrieve;
 using Retravion.Application.Product.Status;
 using CSharpFunctionalExtensions;
@@ -80,6 +81,37 @@ public sealed class ProductTests
         Assert.True(store.Product.IsActive);
     }
 
+    [Fact]
+    public async Task DescriptionUpdatesPreserveIdentityAndStatusAndPropagateFailures()
+    {
+        var original = ProductState.Create("id", "Name", "original").Value.Retire().Value;
+        var changed = original.UpdateDescription("# Heading\n\n**Formatted**");
+        Assert.Equal("original", original.Description);
+        Assert.Equal(original.Id, changed.Id);
+        Assert.Equal(original.Name, changed.Name);
+        Assert.False(changed.IsActive);
+        Assert.Equal("", changed.UpdateDescription(null).Description);
+        var store = new Store();
+        var update = new UpdateProductDescription(store);
+        Assert.Equal("Product not found.", (await update.Execute("id", "", "new")).Error);
+        Assert.Equal(0, store.Writes);
+        store.Error = "read failed";
+        Assert.Equal(store.Error, (await update.Execute("id", "", "new")).Error);
+        Assert.Equal(0, store.Writes);
+        store.Error = null;
+        store.Product = original;
+        Assert.True((await update.Execute("id", "stale", "new")).IsFailure);
+        Assert.Equal(0, store.Writes);
+        store.WriteError = "write failed";
+        Assert.Equal(store.WriteError, (await update.Execute("id", "original", "new")).Error);
+        Assert.Equal(original, store.Product);
+        store.WriteError = null;
+        var result = await update.Execute("id", "original", changed.Description);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(changed, result.Value);
+        Assert.Equal(changed, store.Product);
+    }
+
     private sealed class Store : IProductStore
     {
         public int Calls;
@@ -97,6 +129,13 @@ public sealed class ProductTests
             Calls++;
             return Task.FromResult(Error is null ? Result.Success(Maybe<ProductState>.From(Product))
                 : Result.Failure<Maybe<ProductState>>(Error));
+        }
+        public Task<Result> UpdateDescription(ProductState expected, ProductState replacement, CancellationToken cancellationToken = default)
+        {
+            Calls++; Writes++;
+            if (WriteError is not null) return Task.FromResult(Result.Failure(WriteError));
+            Product = replacement;
+            return Task.FromResult(Result.Success());
         }
         public Task<Result> ChangeStatus(ProductState expected, ProductState replacement, CancellationToken cancellationToken = default)
         {

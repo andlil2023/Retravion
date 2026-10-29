@@ -1,0 +1,42 @@
+<MudPaper Class="pa-4" Elevation="0">
+    <form id="product-description-form" @onsubmit="Save" @onsubmit:preventDefault aria-label="Edit Product description">
+        <label for="preview-arrangement">Editor and preview arrangement</label>
+        <select id="preview-arrangement" @bind="_arrangement">
+            <option value="side-by-side">Side by side</option>
+            <option value="stacked">Stacked</option>
+        </select>
+        <div class="description-layout @_arrangement">
+            <div>
+                <MudTextField T="string" Value="_markdown" ValueChanged="Edit" Immediate="true" Lines="12"
+                              Label="Description (Markdown)" Disabled="Busy" />
+            </div>
+            <section aria-label="Description preview" class="description-preview">
+                <h2>Preview</h2>
+                @((MarkupString)ProductMarkdown.Render(_markdown))
+            </section>
+        </div>
+    </form>
+</MudPaper>
+<div class="mt-4">
+    <MudButton ButtonType="ButtonType.Submit" form="product-description-form" Variant="Variant.Filled" Color="Color.Primary"
+               Disabled="Busy" Style="min-height:44px">Save description</MudButton>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string InitialDescription { get; set; } = "";
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<string> OnSave { get; set; }
+    private string _markdown = "";
+    private string _arrangement = "side-by-side";
+    private bool _initialized;
+
+    protected override void OnParametersSet()
+    {
+        if (_initialized) return;
+        _markdown = InitialDescription;
+        _initialized = true;
+    }
+
+    private void Edit(string value) => _markdown = value;
+    private Task Save() => Busy ? Task.CompletedTask : OnSave.InvokeAsync(_markdown);
+}

@@ -26,6 +26,8 @@ public sealed record Product
         return new Product(id, name, description, isActive);
     }
 
+    public Product UpdateDescription(string? description) => new(Id, Name, description ?? "", IsActive);
+
     public Result<Product> Retire() => IsActive
         ? new Product(Id, Name, Description, false)
         : Result.Failure<Product>("The Product is already retired.");

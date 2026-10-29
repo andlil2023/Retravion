@@ -1,0 +1,23 @@
+.description-layout {
+    display: grid;
+    gap: 1.5rem;
+    margin-top: 1rem;
+}
+
+.description-layout.side-by-side {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.description-layout.stacked {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.description-preview {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    overflow: auto;
+}
+
+.description-preview ::deep img {
+    max-width: 100%;
+}
