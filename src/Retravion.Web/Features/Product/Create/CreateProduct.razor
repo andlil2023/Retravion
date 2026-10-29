@@ -1,5 +1,6 @@
 @page "/products/create"
 @using Retravion.Web.Features.Product.Description
+@using Retravion.Domain.Product
 @inject ProductOperations Operations
 @inject AuthenticationStateProvider Authentication
 @inject NavigationManager Navigation
@@ -16,15 +17,22 @@
             <MudAlert Severity="Severity.Error" role="alert" Class="mb-4">@_error</MudAlert>
         }
         <div class="product-identity">
-            <MudTextField @bind-Value="_id" Label="Product ID" Variant="Variant.Outlined" Disabled="_busy" HelperText="Generated automatically. You may change it before creation; it cannot be changed afterward. Maximum 100 Unicode characters. IDs match exactly, including case and spaces." Required="true" />
+            <MudTextField @bind-Value="_id" Label="Product ID" Variant="Variant.Outlined" Disabled="_busy" HelperText="Required. Maximum 100 Unicode characters. IDs are unique regardless of case." Required="true" />
             <MudTextField @bind-Value="_name" Label="Name" Variant="Variant.Outlined" Disabled="_busy" Required="true" />
+            <MudSelect T="ProductKind?" @bind-Value="_kind" Label="Kind" Variant="Variant.Outlined" Disabled="_busy" Required="true">
+                <MudSelectItem T="ProductKind?" Value="@ProductKind.System">System</MudSelectItem>
+                <MudSelectItem T="ProductKind?" Value="@ProductKind.SoftwareApplication">Software application</MudSelectItem>
+                <MudSelectItem T="ProductKind?" Value="@ProductKind.HardwareDevice">Hardware device</MudSelectItem>
+                <MudSelectItem T="ProductKind?" Value="@ProductKind.Firmware">Firmware</MudSelectItem>
+            </MudSelect>
         </div>
     </ChildContent>
 </DescriptionEditor>
 
 @code {
-    private string _id = Guid.NewGuid().ToString();
+    private string _id = "";
     private string _name = "";
+    private ProductKind? _kind;
     private string? _error;
     private bool _busy;
 
@@ -35,7 +43,7 @@
         _error = null;
         try
         {
-            var result = await Operations.Create((await Authentication.GetAuthenticationStateAsync()).User, _id, _name, markdown);
+            var result = await Operations.Create((await Authentication.GetAuthenticationStateAsync()).User, _id, _name, _kind, markdown);
             if (result.IsFailure) _error = result.Error;
             else Navigation.NavigateTo($"/products/details?id={Uri.EscapeDataString(result.Value.Id)}");
         }

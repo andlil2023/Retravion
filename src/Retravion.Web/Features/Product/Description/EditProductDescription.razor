@@ -11,7 +11,11 @@
 {
     <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
 }
-@if (_product is not null)
+@if (_product is not null && !_product.IsActive)
+{
+    <MudAlert Severity="Severity.Info" role="status">Reactivate the Product before editing its description.</MudAlert>
+}
+@if (_product is not null && _product.IsActive)
 {
     <div class="product-heading">
         <h2>@_product.Id – @_product.Name</h2>
@@ -51,7 +55,7 @@
         try
         {
             var result = await Operations.UpdateDescription((await Authentication.GetAuthenticationStateAsync()).User,
-                target.Id, target.Description, markdown);
+                target.Id, target.InternalId, target.Description, markdown);
             if (result.IsFailure) _error = result.Error;
             else Navigation.NavigateTo($"/products/details?id={Uri.EscapeDataString(result.Value.Id)}");
         }

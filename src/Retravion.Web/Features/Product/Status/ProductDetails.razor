@@ -22,6 +22,7 @@
         <div class="product-heading">
             <h2 id="product-heading">@_product.Id – @_product.Name</h2>
             <span class="product-status">@(_product.IsActive ? "Active" : "Retired")</span>
+            <span>Kind: @KindLabel(_product.Kind)</span>
         </div>
         <MudPaper id="product-details-card" Class="product-card product-document" Elevation="0">
             <article aria-label="Product description" class="product-markdown">
@@ -36,7 +37,10 @@
             </article>
         </MudPaper>
         <div class="product-actions">
-            <MudButton Href="@($"/products/description?id={Uri.EscapeDataString(_product.Id)}")" Variant="Variant.Filled" Color="Color.Primary" Class="product-button">Edit description</MudButton>
+            @if (_product.IsActive)
+            {
+                <MudButton Href="@($"/products/description?id={Uri.EscapeDataString(_product.Id)}")" Variant="Variant.Filled" Color="Color.Primary" Class="product-button">Edit description</MudButton>
+            }
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="product-button product-status-action" Disabled="_busy" OnClick="ConfirmStatus">
                 @(_product.IsActive ? "Retire" : "Reactivate")
             </MudButton>
@@ -50,6 +54,12 @@
     private string? _error;
     private string? _feedback;
     private bool _busy;
+    private static string KindLabel(Retravion.Domain.Product.ProductKind kind) => kind switch
+    {
+        Retravion.Domain.Product.ProductKind.SoftwareApplication => "Software application",
+        Retravion.Domain.Product.ProductKind.HardwareDevice => "Hardware device",
+        _ => kind.ToString()
+    };
 
     protected override async Task OnParametersSetAsync()
     {
@@ -79,7 +89,7 @@
                 $"{action} {target.Name} ({target.Id})?", yesText: action, cancelText: "Cancel");
             if (confirmed != true) return;
             var result = await Operations.ChangeStatus((await Authentication.GetAuthenticationStateAsync()).User,
-                target.Id, !target.IsActive);
+                target.Id, target.InternalId, !target.IsActive);
             await Refresh();
             if (result.IsFailure) _error = result.Error;
             else _feedback = $"Product is now {(result.Value.IsActive ? "active" : "retired")}.";
