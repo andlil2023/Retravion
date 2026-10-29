@@ -17,6 +17,7 @@ const executable = process.env.RETRAVION_TEST_BROWSER || [
 assert.ok(executable, 'Set RETRAVION_TEST_BROWSER to an installed Chromium executable.');
 const moduleSource = await readFile(new URL('../src/Retravion.Web/wwwroot/js/markdownFullscreen.js', import.meta.url), 'utf8');
 const editorCss = (await readFile(new URL('../src/Retravion.Web/Features/Product/Description/DescriptionEditor.razor.css', import.meta.url), 'utf8')).replaceAll('::deep', '');
+const appCss = await readFile(new URL('../src/Retravion.Web/wwwroot/css/app.css', import.meta.url), 'utf8');
 const fixture = `<!doctype html><html><head><meta charset="utf-8"><style>
 :root { --mud-palette-background:white; --mud-palette-text-primary:black; --mud-palette-divider:gray; }
 body { margin:0; } ${editorCss}
@@ -187,6 +188,40 @@ try {
     assert.equal(await evaluate("document.activeElement === document.querySelector('#confirmation')"), true, 'Confirmation outside the editor can receive focus.');
     assert.ok(await evaluate("editor.value.startsWith('Unsaved markdown')"), 'Status save preserves the draft.');
     console.log('PASS: status-save modal exit permits outside confirmation focus and retains draft');
+    // Exercise the production Product details CSS with the page's rendered structure.
+    await evaluate(`(() => {
+        const style = document.createElement('style'); style.textContent = ${JSON.stringify(appCss)}; document.head.append(style);
+        const section = document.createElement('section'); section.id = 'details-fixture'; section.className = 'page-content';
+        section.innerHTML = '<div class="product-heading"><h2>SP-001 – Retravion</h2><span class="product-status">Active</span><dl class="product-kind"><dt>Kind</dt><dd>Software application</dd></dl></div><div class="product-card mud-paper product-document"><article class="product-markdown"><p>Description</p><ul><li>Applications<ul><li>Nested</li></ul></li><li>Revisions</li></ul><ol><li>First</li><li>Second</li></ol></article></div>';
+        document.body.append(section);
+    })()`);
+    for (const [width, theme] of [[1280, 'light'], [390, 'light'], [1280, 'dark'], [390, 'dark']]) {
+        await command('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+        const layout = await evaluate(`(() => {
+            const fixture = document.querySelector('#details-fixture');
+            fixture.style.setProperty('--mud-palette-text-secondary', '${theme === 'dark' ? 'rgb(200, 210, 220)' : 'rgb(80, 90, 100)'}');
+            const kind = fixture.querySelector('.product-kind'); const heading = fixture.querySelector('h2');
+            const article = fixture.querySelector('article'); const lists = [...article.querySelectorAll('ul, ol')];
+            return { below: kind.getBoundingClientRect().top >= heading.getBoundingClientRect().bottom,
+                kindColor: getComputedStyle(kind.querySelector('dt')).color,
+                valueSize: parseFloat(getComputedStyle(kind.querySelector('dd')).fontSize),
+                labelAboveValue: kind.querySelector('dt').getBoundingClientRect().bottom <= kind.querySelector('dd').getBoundingClientRect().top,
+                clipped: article.scrollWidth > article.clientWidth,
+                lists: lists.map(list => ({ padding: parseFloat(getComputedStyle(list).paddingInlineStart),
+                    type: getComputedStyle(list).listStyleType,
+                    itemInset: list.querySelector('li').getBoundingClientRect().left - article.getBoundingClientRect().left })) };
+        })()`);
+        assert.equal(layout.below, true, `Kind is below the title at ${width}px in ${theme}.`);
+        assert.equal(layout.kindColor, theme === 'dark' ? 'rgb(200, 210, 220)' : 'rgb(80, 90, 100)');
+        assert.ok(layout.valueSize >= 16, 'Kind value uses normal readable text size.');
+        assert.equal(layout.labelAboveValue, true, 'Kind is presented as a labeled property.');
+        assert.equal(layout.clipped, false);
+        for (const list of layout.lists) {
+            assert.ok(list.padding >= 20 && list.itemInset >= 20, 'List markers have room inside the scroll container.');
+            assert.notEqual(list.type, 'none', 'List markers remain enabled.');
+        }
+    }
+    console.log('PASS: Product details Kind placement and list marker space at wide/narrow widths in both theme palettes');
     await evaluate("editor.disabled = true; changeMode(true)");
     assert.equal(await evaluate('document.activeElement === toggle'), true, 'Busy editor still permits exiting fullscreen.');
     await evaluate('cleanupEditor()');
