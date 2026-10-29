@@ -143,15 +143,25 @@ public sealed class UiCatalogFormTests
         await renderer.Dispatcher.InvokeAsync(async () =>
         {
             await renderer.Mount(typeof(CatalogButtonGuide));
-            Assert.Contains("Default: ready", renderer.Text());
-            await renderer.Event("onmouseenter", new MouseEventArgs(), "id", "catalog-state-button");
-            Assert.Contains("Hover: pointer is over", renderer.Text());
+            Assert.Contains("None yet; button ready", renderer.Text());
             await renderer.Event("onfocus", new FocusEventArgs(), "id", "catalog-state-button");
-            Assert.Contains("Keyboard focus:", renderer.Text());
+            Assert.Contains("Focus received by pointer or keyboard", renderer.Text());
+            await renderer.Event("onmouseenter", new MouseEventArgs(), "id", "catalog-state-button");
+            Assert.Contains("Pointer entered. Focus may also be present.", renderer.Text());
+            await renderer.Event("onmouseleave", new MouseEventArgs(), "id", "catalog-state-button");
+            Assert.Contains("Pointer left. Focus, if present, is unchanged.", renderer.Text());
+            Assert.DoesNotContain("Default: pointer left", renderer.Text());
+            // Pointer-acquired focus must not be mislabeled as keyboard-only focus.
+            await renderer.Event("onmouseenter", new MouseEventArgs(), "id", "catalog-state-button");
+            await renderer.Event("onfocus", new FocusEventArgs(), "id", "catalog-state-button");
+            Assert.Contains("Focus received by pointer or keyboard", renderer.Text());
+            Assert.DoesNotContain("Keyboard focus:", renderer.Text());
+            await renderer.Event("onblur", new FocusEventArgs(), "id", "catalog-state-button");
+            Assert.Contains("Focus left. Pointer hover may still be present.", renderer.Text());
             await renderer.Event("onpointerdown", new PointerEventArgs(), "id", "catalog-state-button");
-            Assert.Contains("Pressed: pointer is held", renderer.Text());
+            Assert.Contains("Pointer pressed. This is not a persistent selection.", renderer.Text());
             await renderer.Event("onpointerup", new PointerEventArgs(), "id", "catalog-state-button");
-            Assert.Contains("Hover: pointer released", renderer.Text());
+            Assert.Contains("Pointer released. Focus and hover may still be present.", renderer.Text());
             await renderer.Click("Try button states");
             Assert.Contains("Activated: example only", renderer.Text());
             Assert.True(renderer.HasAttribute("disabled", true));

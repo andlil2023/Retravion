@@ -31,17 +31,18 @@
 <h3>Default, hover, keyboard focus, and pressed</h3>
 <p>These are real browser states on the same enabled button below—not manually painted imitations.
     Hover with the pointer, Tab to focus, and hold the pointer down or hold Space while focused to see pressed feedback.
-    Enter or release Space activates the button. Use browser responsive/coarse-pointer emulation to inspect the touch target above.</p>
+    Enter or release Space activates the button. Use browser responsive/coarse-pointer emulation to inspect the touch target above.
+    Status reports the last interaction event, not all simultaneous states: focus and hover can overlap.</p>
 <MudButton id="catalog-state-button" Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px"
-           @onmouseenter="@(() => _state = "Hover: pointer is over the button.")"
-           @onmouseleave="@(() => _state = "Default: pointer left the button.")"
-           @onfocus="@(() => _state = "Keyboard focus: this button receives the next keyboard action.")"
-           @onblur="@(() => _state = "Default: focus left the button.")"
-           @onpointerdown="@(() => _state = "Pressed: pointer is held down; this is not a persistent selection.")"
-           @onpointerup="@(() => _state = "Hover: pointer released.")"
-           @onpointercancel="@(() => _state = "Default: pointer interaction cancelled.")"
+           @onmouseenter="@(() => _state = "Pointer entered. Focus may also be present.")"
+           @onmouseleave="@(() => _state = "Pointer left. Focus, if present, is unchanged.")"
+           @onfocus="@(() => _state = "Focus received by pointer or keyboard. Use Tab to inspect keyboard focus styling.")"
+           @onblur="@(() => _state = "Focus left. Pointer hover may still be present.")"
+           @onpointerdown="@(() => _state = "Pointer pressed. This is not a persistent selection.")"
+           @onpointerup="@(() => _state = "Pointer released. Focus and hover may still be present.")"
+           @onpointercancel="@(() => _state = "Pointer interaction cancelled. Focus may still be present.")"
            OnClick="@(() => _state = "Activated: example only; no data changed.")">Try button states</MudButton>
-<p role="status">@_state</p>
+<p role="status">Last interaction event: @_state</p>
 <p>Filled Primary uses the theme primary color by default and its darken token for hover/focus/active feedback.
     MudBlazor supplies hover and pressed elevation/ripple behavior.
     Keyboard focus additionally uses <code>:focus-visible</code> in <code>wwwroot/css/app.css</code>
@@ -63,7 +64,7 @@
     <code>.razor.css</code> rule <code>[aria-pressed="true"]</code>. Preserve that contract rather than inventing another highlight style.</p>
 
 @code {
-    private string _state = "Default: ready for interaction.";
+    private string _state = "None yet; button ready for interaction.";
     private const string SizeSnippet = """
         <!-- Account action: below its card -->
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px">Save</MudButton>
