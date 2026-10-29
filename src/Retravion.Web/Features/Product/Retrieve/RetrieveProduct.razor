@@ -1,5 +1,6 @@
 @page "/products"
-@inject NavigationManager Navigation
+@inject ProductOperations Operations
+@inject AuthenticationStateProvider Authentication
 
 <PageTitle>Products · Retravion</PageTitle>
 <SectionContent SectionName="product-page-header">
@@ -7,16 +8,50 @@
         <Actions><MudButton Class="product-button" Href="/products/create" StartIcon="@Icons.Material.Outlined.Add">Create Product</MudButton></Actions>
     </PageHeader>
 </SectionContent>
-<MudPaper Class="product-card pa-4" Elevation="0">
-    <form id="retrieve-product-form" @onsubmit="Retrieve" @onsubmit:preventDefault aria-label="Retrieve Product">
-        <MudTextField @bind-Value="_id" Label="Product ID" Variant="Variant.Outlined" Required="true" />
-    </form>
-</MudPaper>
-<div class="product-actions">
-    <MudButton ButtonType="ButtonType.Submit" form="retrieve-product-form" Variant="Variant.Filled" Color="Color.Primary" Class="product-button">Retrieve Product</MudButton>
-</div>
-
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+}
+else if (_products is null)
+{
+    <p role="status">Loading Products…</p>
+}
+else
+{
+    <MudTextField T="string" @bind-Value="_search" Immediate="true" Label="Search Product ID or name" />
+    <MudSelect T="string" @bind-Value="_status" Label="Status">
+        <MudSelectItem Value="@("All")">All</MudSelectItem>
+        <MudSelectItem Value="@("Active")">Active</MudSelectItem>
+        <MudSelectItem Value="@("Retired")">Retired</MudSelectItem>
+    </MudSelect>
+    <MudTable Items="Filtered" Dense="true" Hover="true" Elevation="0" aria-label="Products">
+        <HeaderContent><MudTh>Product ID</MudTh><MudTh>Name</MudTh><MudTh>Kind</MudTh><MudTh>Status</MudTh></HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Product ID"><MudLink Href="@($"/products/details?id={Uri.EscapeDataString(context.Id)}")">@context.Id</MudLink></MudTd>
+            <MudTd DataLabel="Name">@context.Name</MudTd>
+            <MudTd DataLabel="Kind">@KindLabel(context.Kind)</MudTd>
+            <MudTd DataLabel="Status">@(context.IsActive ? "Active" : "Retired")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><p>No Products found.</p></NoRecordsContent>
+    </MudTable>
+}
 @code {
-    private string _id = "";
-    private void Retrieve() => Navigation.NavigateTo($"/products/details?id={Uri.EscapeDataString(_id)}");
+    private IReadOnlyList<Retravion.Domain.Product.Product>? _products;
+    private string? _error;
+    private string _search = "";
+    private string _status = "All";
+    private IEnumerable<Retravion.Domain.Product.Product> Filtered => _products!.Where(p =>
+        (_status == "All" || p.IsActive == (_status == "Active")) &&
+        (p.Id.Contains(_search ?? "", StringComparison.OrdinalIgnoreCase) || p.Name.Contains(_search ?? "", StringComparison.OrdinalIgnoreCase)));
+    private static string KindLabel(Retravion.Domain.Product.ProductKind kind) => kind switch {
+        Retravion.Domain.Product.ProductKind.SoftwareApplication => "Software application",
+        Retravion.Domain.Product.ProductKind.HardwareDevice => "Hardware device",
+        _ => kind.ToString()
+    };
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Operations.List((await Authentication.GetAuthenticationStateAsync()).User);
+        if (result.IsFailure) _error = result.Error;
+        else _products = result.Value;
+    }
 }

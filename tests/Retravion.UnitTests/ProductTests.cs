@@ -160,6 +160,8 @@ public sealed class ProductTests
             Calls++; Writes++;
             return Task.FromResult(Error is null ? Result.Success() : Result.Failure(Error));
         }
+        public Task<Result<IReadOnlyList<ProductState>>> List(CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result.Success<IReadOnlyList<ProductState>>(Product is null ? [] : [Product]));
         public Task<Result<Maybe<ProductState>>> Find(string id, CancellationToken cancellationToken = default)
         {
             Calls++;

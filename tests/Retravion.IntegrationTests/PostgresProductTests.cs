@@ -47,6 +47,10 @@ public sealed class PostgresProductTests
         var status = new ChangeProductStatus(new PostgresProductStore(database.ConnectionString));
         Assert.True((await status.Execute(firstId, first.InternalId, false)).IsSuccess);
         Assert.False((await retrieve.Execute(firstId)).Value.IsActive);
+        var listed = await store.List();
+        Assert.True(listed.IsSuccess);
+        Assert.Contains(listed.Value, p => p.Id == firstId && !p.IsActive);
+        Assert.Contains(listed.Value, p => p.Id == secondId && p.IsActive);
         Assert.True((await status.Execute(firstId, first.InternalId, false)).IsFailure);
         Assert.True((await status.Execute(firstId, first.InternalId, true)).IsSuccess);
         Assert.Equal(first, (await retrieve.Execute(firstId)).Value);

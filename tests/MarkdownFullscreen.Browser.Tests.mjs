@@ -30,7 +30,7 @@ body { margin:0; } ${editorCss}
 aria-label="Resize Markdown and preview panes" aria-valuemin="25" aria-valuemax="75" aria-valuenow="50"></div>
 <section class="description-preview"><h3>Preview</h3><div style="height:1600px">Long preview</div></section></div></form>
 <div class="product-actions"><button type="submit" id="save">Save</button><a href="#cancel" id="cancel">Cancel</a></div>
-</dialog><script type="module">
+</dialog><button id="confirmation" hidden>Confirm status change</button><script type="module">
 import { setFullscreen, initializeSplitter, dispose } from '/module.js';
 const dialog = document.querySelector('dialog');
 initializeSplitter(dialog);
@@ -43,6 +43,8 @@ dialog.addEventListener('cancel', event => { event.preventDefault(); changeMode(
 window.backgroundClicks = 0;
 document.querySelector('#background').onclick = () => backgroundClicks++;
 document.querySelector('#arrangement').onclick = () => dialog.querySelector('.description-layout').className = 'description-layout stacked';
+// Model the component's status-save sequence: exit the native modal before opening confirmation.
+document.querySelector('#save').onclick = event => { event.preventDefault(); changeMode(false); const confirmation = document.querySelector('#confirmation'); confirmation.hidden = false; confirmation.focus(); };
 window.cleanupEditor = () => { dialog.remove(); dispose(dialog); };
 window.ready = true;
 </script></body></html>`;
@@ -180,6 +182,11 @@ try {
         assert.equal(await evaluate('document.activeElement === toggle'), true);
         console.log(`PASS: ${width}x${height} modal, draft/selection, focus/background isolation, Escape/toggle and scroll behavior`);
     }
+    await evaluate("changeMode(true); document.querySelector('#save').click()");
+    assert.equal(await evaluate("root.matches(':modal')"), false, 'Status save exits the native modal before confirmation.');
+    assert.equal(await evaluate("document.activeElement === document.querySelector('#confirmation')"), true, 'Confirmation outside the editor can receive focus.');
+    assert.ok(await evaluate("editor.value.startsWith('Unsaved markdown')"), 'Status save preserves the draft.');
+    console.log('PASS: status-save modal exit permits outside confirmation focus and retains draft');
     await evaluate("editor.disabled = true; changeMode(true)");
     assert.equal(await evaluate('document.activeElement === toggle'), true, 'Busy editor still permits exiting fullscreen.');
     await evaluate('cleanupEditor()');

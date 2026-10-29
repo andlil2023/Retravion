@@ -1,0 +1,88 @@
+@page "/products/edit"
+@using Retravion.Web.Features.Product.Description
+@using Retravion.Domain.Product
+@inject ProductOperations Operations
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+@inject IDialogService Dialogs
+
+<PageTitle>Edit Product · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Edit Product" BackHref="@DetailsPath" BackText="Product details" /></SectionContent>
+@if (_product is null && _error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_product is not null)
+{
+    <DescriptionEditor @key="_editorKey" InitialDescription="@_markdown" DescriptionChanged="MarkdownChanged" Busy="_busy" ReadOnly="@(!CanEdit)" SaveDisabled="@(!_product.IsActive && !_pendingReactivate)" ExitFullscreenOnSave="@(_pendingRetire || _pendingReactivate)" OnSave="Save" FormId="edit-product-form" SubmitText="Save" CancelHref="@DetailsPath" Optional="true">
+        <ChildContent>
+            @if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+            <p>Status: @(_product.IsActive ? "Active" : "Retired")</p>
+            <div class="product-identity">
+                <MudTextField @bind-Value="_id" Immediate="true" Label="Product ID" Disabled="@(!CanEdit || _busy)" Required="true" />
+                <MudTextField @bind-Value="_name" Immediate="true" Label="Name" Disabled="@(!CanEdit || _busy)" Required="true" />
+                <MudSelect T="ProductKind?" @bind-Value="_kind" Label="Kind" Disabled="@(!CanEdit || _busy)" Required="true">
+                    <MudSelectItem T="ProductKind?" Value="@ProductKind.System">System</MudSelectItem>
+                    <MudSelectItem T="ProductKind?" Value="@ProductKind.SoftwareApplication">Software application</MudSelectItem>
+                    <MudSelectItem T="ProductKind?" Value="@ProductKind.HardwareDevice">Hardware device</MudSelectItem>
+                    <MudSelectItem T="ProductKind?" Value="@ProductKind.Firmware">Firmware</MudSelectItem>
+                </MudSelect>
+            </div>
+            @if (_product.IsActive && Dirty) { <p>Save or discard field changes before selecting retirement.</p> }
+        </ChildContent>
+        <Actions>
+            @if (_product.IsActive && Dirty) { <MudButton ButtonType="ButtonType.Button" OnClick="Discard" Disabled="_busy">Discard field changes</MudButton> }
+            <MudButton ButtonType="ButtonType.Button" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || (_product.IsActive && Dirty))" OnClick="ToggleStatus">
+                @(_pendingRetire || _pendingReactivate ? "Undo status change" : _product.IsActive ? "Retire" : "Reactivate")
+            </MudButton>
+        </Actions>
+    </DescriptionEditor>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "id")] public string? Id { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private string _id = "", _name = "", _markdown = "";
+    private ProductKind? _kind;
+    private bool _pendingRetire, _pendingReactivate, _busy;
+    private int _editorKey;
+    private string? _error;
+    private bool Dirty => _product is not null && (_id != _product.Id || _name != _product.Name || _kind != _product.Kind || _markdown != _product.Description);
+    private bool CanEdit => _product is not null && !_pendingRetire && (_product.IsActive || _pendingReactivate);
+    private string DetailsPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _product = null;
+        var result = await Operations.Retrieve((await Authentication.GetAuthenticationStateAsync()).User, Id);
+        _error = result.IsFailure ? result.Error : null;
+        if (result.IsSuccess) { _product = result.Value; Discard(); _pendingRetire = _pendingReactivate = false; }
+    }
+    private void MarkdownChanged(string value) => _markdown = value;
+    private void Discard()
+    {
+        if (_product is null) return;
+        _id = _product.Id; _name = _product.Name; _kind = _product.Kind; _markdown = _product.Description; _editorKey++;
+    }
+    private void ToggleStatus()
+    {
+        if (_product is null || (_product.IsActive && Dirty)) return;
+        if (_product.IsActive) _pendingRetire = !_pendingRetire;
+        else _pendingReactivate = !_pendingReactivate;
+    }
+    private async Task Save(string markdown)
+    {
+        if (_busy || _product is null || (!_product.IsActive && !_pendingReactivate) || (_pendingRetire && Dirty)) return;
+        _busy = true; _error = null;
+        try
+        {
+            if (_pendingRetire || _pendingReactivate)
+            {
+                var action = _pendingRetire ? "Retire" : "Reactivate";
+                if (await Dialogs.ShowMessageBoxAsync($"{action} Product?", $"{action} {_product.Name} ({_product.Id})?", yesText: action, cancelText: "Cancel") != true) return;
+            }
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var result = _pendingRetire
+                ? await Operations.Retire(actor, _product)
+                : await Operations.Edit(actor, _product, _id, _name, _kind, markdown, _pendingReactivate);
+            if (result.IsFailure) _error = result.Error;
+            else Navigation.NavigateTo($"/products/details?id={Uri.EscapeDataString(result.Value.Id)}");
+        }
+        finally { _busy = false; }
+    }
+}

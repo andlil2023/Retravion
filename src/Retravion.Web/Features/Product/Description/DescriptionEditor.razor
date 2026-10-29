@@ -32,7 +32,7 @@
         <div class="description-layout @_arrangement">
             <div class="description-source">
                 <label for="product-markdown">Description (Markdown)</label>
-                <textarea id="product-markdown" value="@_markdown" @oninput="Edit" disabled="@Busy" rows="12" spellcheck="true"></textarea>
+                <textarea id="product-markdown" value="@_markdown" @oninput="Edit" disabled="@(Busy || ReadOnly)" rows="12" spellcheck="true"></textarea>
             </div>
             <div class="description-splitter" role="separator" tabindex="0" aria-orientation="vertical"
                  aria-label="Resize Markdown and preview panes" aria-controls="product-markdown"
@@ -46,8 +46,9 @@
     </form>
 </MudPaper>
 <div class="product-actions">
+    @Actions
     <MudButton ButtonType="ButtonType.Submit" form="@FormId" Variant="Variant.Filled" Color="Color.Primary"
-               Disabled="Busy" Class="product-button">@SubmitText</MudButton>
+               Disabled="@(Busy || SaveDisabled)" Class="product-button">@SubmitText</MudButton>
     @if (CancelHref is not null)
     {
         <MudButton Href="@CancelHref" Class="product-button">Cancel</MudButton>
@@ -62,8 +63,13 @@
 @code {
     [Parameter, EditorRequired] public string InitialDescription { get; set; } = "";
     [Parameter] public bool Busy { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public bool SaveDisabled { get; set; }
+    [Parameter] public bool ExitFullscreenOnSave { get; set; }
+    [Parameter] public EventCallback<string> DescriptionChanged { get; set; }
     [Parameter] public EventCallback<string> OnSave { get; set; }
     [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
     [Parameter] public string FormId { get; set; } = "product-description-form";
     [Parameter] public string SubmitText { get; set; } = "Save description";
     [Parameter] public string? CancelHref { get; set; }
@@ -140,6 +146,32 @@
         _initialized = true;
     }
 
-    private void Edit(ChangeEventArgs args) => _markdown = args.Value?.ToString() ?? "";
-    private Task Save() => Busy ? Task.CompletedTask : OnSave.InvokeAsync(_markdown);
+    private async Task Edit(ChangeEventArgs args)
+    {
+        _markdown = args.Value?.ToString() ?? "";
+        await DescriptionChanged.InvokeAsync(_markdown);
+    }
+    private async Task Save()
+    {
+        if (Busy || SaveDisabled || _changingMode) return;
+        if (ExitFullscreenOnSave && _fullscreen)
+        {
+            _changingMode = true;
+            try
+            {
+                if (_module is null) return;
+                await _module.InvokeVoidAsync("setFullscreen", _dialog, false);
+                _fullscreen = false;
+                _fullscreenError = null;
+            }
+            catch (JSDisconnectedException) { return; }
+            catch (JSException)
+            {
+                _fullscreenError = "Exit fullscreen before saving the status change.";
+                return;
+            }
+            finally { _changingMode = false; }
+        }
+        await OnSave.InvokeAsync(_markdown);
+    }
 }

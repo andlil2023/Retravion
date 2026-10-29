@@ -28,6 +28,24 @@ public sealed class PostgresProductStore(string connectionString) : IProductStor
         return result.IsSuccess ? Result.Success() : Result.Failure(result.Error);
     }
 
+    public Task<Result<IReadOnlyList<ProductState>>> List(CancellationToken cancellationToken = default) =>
+        Execute(async (connection, transaction) =>
+        {
+            await using var command = new NpgsqlCommand("""
+                SELECT internal_id, id, name, kind, description, is_active FROM retravion_product.product ORDER BY id
+                """, connection, transaction);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var products = new List<ProductState>();
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var product = ProductState.Restore(reader.GetGuid(0), reader.GetString(1), reader.GetString(2),
+                    (ProductKind)reader.GetInt32(3), reader.GetString(4), reader.GetBoolean(5));
+                if (product.IsFailure) return Result.Failure<IReadOnlyList<ProductState>>("The persisted Product is invalid.");
+                products.Add(product.Value);
+            }
+            return Result.Success<IReadOnlyList<ProductState>>(products);
+        }, cancellationToken);
+
     public Task<Result<Maybe<ProductState>>> Find(string id, CancellationToken cancellationToken = default) =>
         Execute(async (connection, transaction) =>
         {

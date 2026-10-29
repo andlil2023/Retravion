@@ -125,6 +125,37 @@ public sealed class ProductDescriptionEditorTests
         Assert.Empty(renderer.Errors);
     }
 
+    [Fact]
+    public async Task StatusSaveExitsFullscreenBeforeInvokingConfirmationAndPreservesDraft()
+    {
+        var js = new RecordingJS();
+        await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton<IJSRuntime>(js).AddSingleton<NavigationManager, TestNavigation>().BuildServiceProvider();
+        await using var renderer = new EditorRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var saved = new List<string>();
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.Mount(new Dictionary<string, object?>
+            {
+                [nameof(DescriptionEditor.InitialDescription)] = "Original",
+                [nameof(DescriptionEditor.ExitFullscreenOnSave)] = true,
+                [nameof(DescriptionEditor.OnSave)] = EventCallback.Factory.Create<string>(saved, (string value) =>
+                {
+                    Assert.Equal("setFullscreen", js.Calls.Last().Name);
+                    Assert.Equal(false, js.Calls.Last().Args![1]);
+                    saved.Add(value); // Simulate a cancelled parent confirmation.
+                })
+            });
+            await renderer.Event("textarea", "oninput", new ChangeEventArgs { Value = "Pending draft" });
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Fullscreen Markdown editor");
+            await renderer.Event("form", "onsubmit", EventArgs.Empty);
+            renderer.AssertAttribute("role", "group");
+            await renderer.Event("form", "onsubmit", EventArgs.Empty);
+            Assert.Equal(new[] { "Pending draft", "Pending draft" }, saved);
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
     private sealed class RecordingJS : IJSRuntime, IJSObjectReference
     {
         internal List<(string Name, object?[]? Args)> Calls { get; } = [];
