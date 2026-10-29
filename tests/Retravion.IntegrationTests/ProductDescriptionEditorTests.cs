@@ -35,7 +35,7 @@ public sealed class ProductDescriptionEditorTests
             Assert.Contains("<h1>Heading</h1>", renderer.Markup());
             Assert.Contains("<strong>Formatted</strong>", renderer.Markup());
             Assert.Empty(saved); // No blur or save is needed for live preview.
-            await renderer.Event("select", "onchange", new ChangeEventArgs { Value = "stacked" });
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Stacked");
             renderer.AssertLayout("stacked");
             Assert.Contains("<h1>Heading</h1>", renderer.Markup());
             await renderer.Event("form", "onsubmit", EventArgs.Empty);
@@ -46,7 +46,7 @@ public sealed class ProductDescriptionEditorTests
             Assert.Contains("<em>Again</em>", renderer.Markup());
             Assert.DoesNotContain("<script>", renderer.Markup());
             Assert.DoesNotContain("<h1>Heading</h1>", renderer.Markup());
-            await renderer.Event("select", "onchange", new ChangeEventArgs { Value = "side-by-side" });
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Side by side");
             renderer.AssertLayout("side-by-side");
             await renderer.Event("form", "onsubmit", EventArgs.Empty);
             Assert.Equal(new[] { first, second }, saved);
@@ -99,11 +99,14 @@ public sealed class ProductDescriptionEditorTests
                     foreach (var child in Frames(frame.ComponentId)) yield return child;
             }
         }
-        internal Task Event(string element, string eventName, EventArgs args)
+        internal Task Event(string element, string eventName, EventArgs args, string? label = null)
         {
-            var handler = Frames(_root).SkipWhile(frame => frame.FrameType != RenderTreeFrameType.Element || frame.ElementName != element)
-                .Skip(1).TakeWhile(frame => frame.FrameType == RenderTreeFrameType.Attribute)
-                .Single(frame => frame.AttributeName == eventName && frame.AttributeEventHandlerId != 0);
+            var frames = Frames(_root).ToArray();
+            var attributes = Enumerable.Range(0, frames.Length)
+                .Where(i => frames[i].FrameType == RenderTreeFrameType.Element && frames[i].ElementName == element)
+                .Select(i => frames.Skip(i + 1).TakeWhile(frame => frame.FrameType == RenderTreeFrameType.Attribute).ToArray())
+                .Single(attributes => label is null || attributes.Any(frame => frame.AttributeName == "aria-label" && Equals(frame.AttributeValue, label)));
+            var handler = attributes.Single(frame => frame.AttributeName == eventName && frame.AttributeEventHandlerId != 0);
             return DispatchEventAsync(handler.AttributeEventHandlerId, null, args);
         }
     }
