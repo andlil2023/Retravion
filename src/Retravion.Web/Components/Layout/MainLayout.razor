@@ -2,6 +2,7 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Sections
 @inject NavigationManager Navigation
+@inject IWebHostEnvironment Environment
 @inherits LayoutComponentBase
 
 <MudThemeProvider Theme="PrototypeTheme.Value" IsDarkMode="_darkMode" />
@@ -24,6 +25,17 @@
             </AuthorizeView>
         </nav>
         <div class="sidebar-bottom">
+            @if (Environment.IsDevelopment())
+            {
+                <AuthorizeView Policy="UiCatalogDevelopment">
+                    <section aria-label="Development">
+                        <p class="navigation-caption">DEVELOPMENT</p>
+                        <nav aria-label="Development navigation">
+                            <a class="navigation-node @(IsCatalog ? "selected" : "")" href="/development/ui-catalog" aria-current="@(IsCatalog ? "page" : null)"><MudIcon Icon="@Icons.Material.Outlined.Palette" /><span>UI catalog</span></a>
+                        </nav>
+                    </section>
+                </AuthorizeView>
+            }
             <AuthorizeView Policy="Administrator">
                 <section aria-label="Administration">
                     <p class="navigation-caption">ADMINISTRATION</p>
@@ -55,7 +67,11 @@
                            OnClick="ToggleNavigation" aria-label="Toggle navigation" title="Toggle navigation"
                            aria-expanded="@_navigationOpen" aria-controls="app-navigation" />
             <div class="page-header-slot">
-                @if (IsAdministration)
+                @if (IsCatalog)
+                {
+                    <SectionOutlet SectionName="catalog-page-header" />
+                }
+                else if (IsAdministration)
                 {
                     <SectionOutlet SectionName="account-page-header" />
                 }
@@ -73,13 +89,14 @@
                            aria-label="@(_darkMode ? "Use light theme" : "Use dark theme")"
                            title="@(_darkMode ? "Use light theme" : "Use dark theme")" />
         </header>
-        <main id="page-content" class="page-content" tabindex="-1" aria-label="@(IsAdministration ? "Account management content" : IsProduct ? "Products content" : "Overview content")">
+        <main id="page-content" class="page-content" tabindex="-1" aria-label="@(IsCatalog ? "UI catalog content" : IsAdministration ? "Account management content" : IsProduct ? "Products content" : "Overview content")">
             @Body
         </main>
     </div>
 </div>
 
 @code {
+    private bool IsCatalog => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("development/ui-catalog", StringComparison.OrdinalIgnoreCase);
     private bool IsAdministration => Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("administration/", StringComparison.OrdinalIgnoreCase);
     private bool IsProduct => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("products", StringComparison.OrdinalIgnoreCase)
         || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("products/", StringComparison.OrdinalIgnoreCase);

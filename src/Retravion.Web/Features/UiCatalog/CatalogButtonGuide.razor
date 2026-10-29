@@ -1,0 +1,76 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Web
+
+<h3>Button dimensions: reuse the owning page's style</h3>
+<p>No universal fixed width is established. Text buttons grow with their label; do not truncate or force every action to the same width.
+    Account actions and compact Product controls intentionally differ. These measurements describe existing implementations, not new global rules.</p>
+<div class="catalog-table" tabindex="0" role="region" aria-label="Button sizing reference">
+    <table>
+        <thead><tr><th scope="col">Existing use</th><th scope="col">Height / width</th><th scope="col">Padding / icons</th><th scope="col">Source</th></tr></thead>
+        <tbody>
+            <tr><th scope="row">Account primary action</th><td>min-height: 44px; width automatic; inherited min-width: 64px</td><td>Medium Filled: 6px vertical / 16px horizontal; start/end icon 20px</td><td><code>Features/Identity/Users/CreateUser.razor</code> plus MudBlazor defaults</td></tr>
+            <tr><th scope="row">Compact Product text button</th><td>height and min-height: 36px; width automatic; inherited min-width: 64px</td><td>4px vertical; horizontal remains 16px Filled / 8px Text (Medium); start/end icon 20px</td><td><code>wwwroot/css/app.css</code>: <code>.product-button.mud-button-root</code></td></tr>
+            <tr><th scope="row">Compact Product icon button</th><td>36 × 36px</td><td>6px; <code>Size.Small</code> as used by DescriptionEditor; Material SVG 20px at a 16px root font</td><td><code>wwwroot/css/app.css</code>: <code>.product-button.mud-icon-button</code></td></tr>
+            <tr><th scope="row">Product controls on coarse pointers</th><td>44px hit-target height; icon hit target 44 × 44px</td><td>4px transparent border retains the compact painted surface; background-clip: padding-box; no shadow</td><td><code>wwwroot/css/app.css</code>: <code>@@media (pointer: coarse)</code></td></tr>
+        </tbody>
+    </table>
+</div>
+<p>Paths above are relative to <code>src/Retravion.Web/</code>. Inherited measurements come from pinned MudBlazor 9.11.0
+    <code>MudBlazor.min.css</code>: <code>.mud-button</code>, <code>.mud-button-text</code>,
+    <code>.mud-button-icon-size-medium</code>, and <code>.mud-icon-size-small</code>.
+    MudBlazor Small/Medium/Large start/end icons are 18/20/22px; standalone SVG Small/Medium/Large icons are 1.25/1.5/2.25rem.
+    These are library defaults, not newly established app rules. Recheck them on library upgrades.
+    Height is a minimum for account actions, not a text-clipping constraint. Preserve readable labels and touch targets.</p>
+<div class="catalog-examples">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px" StartIcon="@Icons.Material.Outlined.Check">Account-size example</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="product-button" StartIcon="@Icons.Material.Outlined.Check">Compact Product example</MudButton>
+    <MudIconButton Icon="@Icons.Material.Outlined.VerticalSplit" Class="product-button" Size="Size.Small" aria-label="Compact Product icon example" title="Compact Product icon example" />
+</div>
+<pre><code>@SizeSnippet</code></pre>
+
+<h3>Default, hover, keyboard focus, and pressed</h3>
+<p>These are real browser states on the same enabled button below—not manually painted imitations.
+    Hover with the pointer, Tab to focus, and hold the pointer down or hold Space while focused to see pressed feedback.
+    Enter or release Space activates the button. Use browser responsive/coarse-pointer emulation to inspect the touch target above.
+    Status reports the last interaction event, not all simultaneous states: focus and hover can overlap.</p>
+<MudButton id="catalog-state-button" Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px"
+           @onmouseenter="@(() => _state = "Pointer entered. Focus may also be present.")"
+           @onmouseleave="@(() => _state = "Pointer left. Focus, if present, is unchanged.")"
+           @onfocus="@(() => _state = "Focus received by pointer or keyboard. Use Tab to inspect keyboard focus styling.")"
+           @onblur="@(() => _state = "Focus left. Pointer hover may still be present.")"
+           @onpointerdown="@(() => _state = "Pointer pressed. This is not a persistent selection.")"
+           @onpointerup="@(() => _state = "Pointer released. Focus and hover may still be present.")"
+           @onpointercancel="@(() => _state = "Pointer interaction cancelled. Focus may still be present.")"
+           OnClick="@(() => _state = "Activated: example only; no data changed.")">Try button states</MudButton>
+<p role="status">Last interaction event: @_state</p>
+<p>Filled Primary uses the theme primary color by default and its darken token for hover/focus/active feedback.
+    MudBlazor supplies hover and pressed elevation/ripple behavior.
+    Keyboard focus additionally uses <code>:focus-visible</code> in <code>wwwroot/css/app.css</code>
+    (3px outline, 4px offset, with dark-theme handling). Never remove focus indication.</p>
+
+<h3>Disabled, loading, and selected are different</h3>
+<div class="catalog-examples">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="true" Style="min-height:44px">Disabled example</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="true" Style="min-height:44px" aria-busy="true">
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" aria-hidden="true" /> Saving example…
+    </MudButton>
+</div>
+<ul>
+    <li><strong>Disabled:</strong> native disabled button; cannot activate or receive Tab focus. Explain the unmet condition in nearby text, not color alone.</li>
+    <li><strong>Loading:</strong> operation in progress; disable repeat submission, keep a readable action label, and show status. The create/edit templates below demonstrate a held busy state.</li>
+    <li><strong>Selected / highlighted:</strong> persistent choice, not hover, focus, or an operation's momentary pressed state. In the live Markdown example, Side by side / Stacked uses <code>aria-pressed="true"</code>, Primary icons, and the existing selected background. Switch between them to inspect selection.</li>
+</ul>
+<p>Selected styling source: <code>src/Retravion.Web/Features/Product/Description/DescriptionEditor.razor</code> and its
+    <code>.razor.css</code> rule <code>[aria-pressed="true"]</code>. Preserve that contract rather than inventing another highlight style.</p>
+
+@code {
+    private string _state = "None yet; button ready for interaction.";
+    private const string SizeSnippet = """
+        <!-- Account action: below its card -->
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px">Save</MudButton>
+        <!-- Product action: reuse the existing app.css class, including coarse-pointer rules -->
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="product-button">Save</MudButton>
+        <MudIconButton Icon="@Icons.Material.Outlined.VerticalSplit" Class="product-button"
+                       Size="Size.Small" aria-label="Side by side" title="Side by side" />
+        """;
+}

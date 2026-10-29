@@ -1,0 +1,15 @@
+.ui-catalog { min-width: 0; }
+.ui-catalog ::deep section[id] { margin-top: 2rem; scroll-margin-top: 1rem; }
+.ui-catalog ::deep h2 { margin: 1.5rem 0 1rem; }
+.ui-catalog ::deep h3 { margin: 1.5rem 0 .75rem; }
+.ui-catalog ::deep p { margin: 1rem 0; max-width: 85ch; }
+.ui-catalog ::deep .catalog-links, .ui-catalog ::deep .catalog-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
+.ui-catalog ::deep .catalog-links a { color: var(--mud-palette-primary); text-underline-offset: .2em; }
+.ui-catalog ::deep .catalog-table { max-width: 100%; overflow-x: auto; }
+.ui-catalog ::deep .catalog-table table { width: 100%; border-collapse: collapse; }
+.ui-catalog ::deep .catalog-table th, .ui-catalog ::deep .catalog-table td { padding: .75rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--mud-palette-divider); }
+.ui-catalog ::deep .swatch { display: inline-block; width: 1.5rem; height: 1.5rem; margin-right: .5rem; vertical-align: middle; border: 1px solid var(--mud-palette-text-secondary); border-radius: var(--mud-default-borderradius); }
+.ui-catalog ::deep pre { max-width: 100%; overflow-x: auto; padding: 1rem; margin: 1rem 0; border: 1px solid var(--mud-palette-divider); border-radius: var(--mud-default-borderradius); background: var(--mud-palette-surface); }
+.ui-catalog ::deep code { overflow-wrap: anywhere; }
+.ui-catalog ::deep pre code { overflow-wrap: normal; }
+.ui-catalog ::deep .catalog-template-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }

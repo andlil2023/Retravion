@@ -83,6 +83,7 @@ function Reset-Fixture {
     $script:FailDatabase = $false
     $script:ResetDatabase = $false
     $script:UpdateImages = $false
+    $script:Development = $false
 }
 function Count-Calls([string] $Pattern) { return @($script:Calls | Where-Object { $_ -like $Pattern }).Count }
 
@@ -96,7 +97,7 @@ Assert-True ((Count-Calls 'stop|retravion-review-app') -eq 1) 'Recovery stops th
 Assert-True ((Count-Calls 'run|*--recover-initial-administrator') -eq 1) 'Recovery invokes one-off command'
 Assert-True ((Count-Calls 'start|retravion-review-app') -eq 0) 'Old image container is never restarted'
 Assert-True ((Count-Calls 'rm|retravion-review-app') -eq 1) 'Recovery removes the old image container'
-Assert-True ((Count-Calls 'run|-d|--name|retravion-review-app|*localhost/retravion-review:local') -eq 1) 'Recovery recreates the application from the newly built image'
+Assert-True ((Count-Calls 'run|-d|*--name|retravion-review-app|*localhost/retravion-review:local') -eq 1) 'Recovery recreates the application from the newly built image'
 Assert-True ($script:Calls.FindIndex([Predicate[string]] { param($call) $call -like 'run|*--recover-initial-administrator' }) -lt $script:Calls.FindIndex([Predicate[string]] { param($call) $call -eq 'rm|retravion-review-app' })) 'Recovery succeeds before replacing the old container'
 Assert-True ((Count-Calls "*$($config.INITIAL_ADMIN_PASSWORD)*") -eq 0) 'Recovery password absent from arguments'
 
@@ -115,13 +116,47 @@ $script:FailRecovery = $true
 Assert-Throws { Invoke-ReviewRecovery } 'Administrator recovery failed'
 Assert-True ((Count-Calls 'start|retravion-review-app') -eq 0) 'Failed recovery leaves application stopped'
 Assert-True ((Count-Calls 'rm|retravion-review-app') -eq 0) 'Failed recovery preserves the stopped container'
-Assert-True ((Count-Calls 'run|-d|--name|retravion-review-app|*') -eq 0) 'Failed recovery does not create a new application'
+Assert-True ((Count-Calls 'run|-d|*--name|retravion-review-app|*') -eq 0) 'Failed recovery does not create a new application'
 
 Reset-Fixture
 $script:ResourcesExist = $true
 $script:Answer = 'no'
 Assert-Throws { Invoke-ReviewRecovery } 'Recovery cancelled'
 Assert-True ((Count-Calls 'stop|*') -eq 0) 'Declined recovery leaves application running'
+
+# Both deployment and recovery must explicitly choose the environment, ignoring shell defaults.
+$oldAspNetEnvironment = $env:ASPNETCORE_ENVIRONMENT
+$oldDotNetEnvironment = $env:DOTNET_ENVIRONMENT
+try {
+    $env:ASPNETCORE_ENVIRONMENT = 'Development'
+    $env:DOTNET_ENVIRONMENT = 'Development'
+    foreach ($developmentMode in @($false, $true)) {
+        foreach ($recoveryMode in @($false, $true)) {
+            Reset-Fixture
+            $script:ResourcesExist = $true
+            $script:Development = $developmentMode
+            if ($recoveryMode) {
+                $script:Answer = 'RECOVER'
+                Invoke-ReviewRecovery
+            } else { Invoke-ReviewDeployment }
+            $expectedEnvironment = if ($developmentMode) { 'Development' } else { 'Production' }
+            $appCall = @($script:Calls | Where-Object { $_ -like 'run|-d|*--name|retravion-review-app|*' })
+            Assert-True ($appCall.Count -eq 1) 'One application host recreated'
+            Assert-True ($appCall[0].Contains("|-e|ASPNETCORE_ENVIRONMENT=$expectedEnvironment|")) 'Explicit ASP.NET hosting environment'
+            Assert-True ($appCall[0].Contains("|-e|DOTNET_ENVIRONMENT=$expectedEnvironment|")) 'Explicit .NET hosting environment'
+            Assert-True ($appCall[0].Contains('|-e|ConnectionStrings__DefaultConnection|')) 'Existing database connection configuration retained'
+            Assert-True ($appCall[0].Contains('|-e|InitialAdmin__Username|-e|InitialAdmin__Password|')) 'Existing provisioning configuration retained'
+            Assert-True ($appCall[0].Contains('127.0.0.1:8443:8443')) 'Existing loopback HTTPS binding retained'
+            Assert-True ($appCall[0].Contains('localhost.pfx:ro')) 'Existing certificate mount retained'
+            Assert-True ((Count-Calls 'volume|rm|*') -eq 0) 'Mode selection never removes the database volume'
+            Assert-True ((Count-Calls 'volume|create|*') -eq 0) 'Existing database volume is reused'
+            Assert-True ($env:ASPNETCORE_ENVIRONMENT -eq 'Development' -and $env:DOTNET_ENVIRONMENT -eq 'Development') 'Caller environment unchanged'
+        }
+    }
+} finally {
+    $env:ASPNETCORE_ENVIRONMENT = $oldAspNetEnvironment
+    $env:DOTNET_ENVIRONMENT = $oldDotNetEnvironment
+}
 
 Reset-Fixture
 $oldPassword = [Environment]::GetEnvironmentVariable('POSTGRES_PASSWORD', 'Process')

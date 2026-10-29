@@ -3,6 +3,7 @@
 param(
     [switch] $ResetDatabase,
     [switch] $UpdateImages,
+    [switch] $Development,
     [switch] $RecoverAdministrator
 )
 
@@ -168,7 +169,8 @@ function Invoke-ReviewRecovery {
         # A stopped container retains its old image even after the tag is rebuilt.
         Invoke-Podman @('rm', $app) | Out-Null
         $certificatePath = $pfx.Replace('\', '/')
-        Invoke-Podman @('run', '-d', '--name', $app, '--label', 'com.retravion.review=1', '--network', $network,
+        $hostingEnvironment = if ($Development) { 'Development' } else { 'Production' }
+        Invoke-Podman @('run', '-d', '-e', "ASPNETCORE_ENVIRONMENT=$hostingEnvironment", '-e', "DOTNET_ENVIRONMENT=$hostingEnvironment", '--name', $app, '--label', 'com.retravion.review=1', '--network', $network,
             '--pull=never', '-p', "127.0.0.1:$($config.APP_HTTPS_PORT):8443", '-v', "${certificatePath}:/https/localhost.pfx:ro",
             '-e', 'ASPNETCORE_URLS=https://+:8443', '-e', 'ASPNETCORE_Kestrel__Certificates__Default__Path=/https/localhost.pfx',
             '-e', 'ASPNETCORE_Kestrel__Certificates__Default__Password', '-e', 'ConnectionStrings__DefaultConnection',
@@ -260,7 +262,8 @@ function Invoke-ReviewDeployment {
         Write-Host 'Starting application...'
         # Forward slashes keep Windows drive paths compatible with Podman's volume parser.
         $certificatePath = $pfx.Replace('\', '/')
-        Invoke-Podman @('run', '-d', '--name', $app, '--label', 'com.retravion.review=1', '--network', $network,
+        $hostingEnvironment = if ($Development) { 'Development' } else { 'Production' }
+        Invoke-Podman @('run', '-d', '-e', "ASPNETCORE_ENVIRONMENT=$hostingEnvironment", '-e', "DOTNET_ENVIRONMENT=$hostingEnvironment", '--name', $app, '--label', 'com.retravion.review=1', '--network', $network,
             '--pull=never', '-p', "127.0.0.1:$($config.APP_HTTPS_PORT):8443", '-v', "${certificatePath}:/https/localhost.pfx:ro",
             '-e', 'ASPNETCORE_URLS=https://+:8443', '-e', 'ASPNETCORE_Kestrel__Certificates__Default__Path=/https/localhost.pfx',
             '-e', 'ASPNETCORE_Kestrel__Certificates__Default__Password', '-e', 'ConnectionStrings__DefaultConnection',

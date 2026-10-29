@@ -1,0 +1,139 @@
+<p>These are working, catalog-only templates with deterministic sample data and outcomes. State selectors are demonstration controls,
+    not controls to copy into business pages. No use cases, database writes, or real account operations are invoked.</p>
+<p>Inline preview headers use h3 to preserve the catalog's single h1. A standalone page uses the shared
+    <code>PageHeader</code> in its feature-owned <code>SectionContent</code> slot, as shown in the snippets.
+    Do not copy the catalog's section name into another feature. Only <code>docs/patterns.md</code> establishes application rules.</p>
+
+<section id="list-template" aria-labelledby="list-template-heading">
+    <h3 id="list-template-heading">List-page template</h3>
+    <p>Reference: <code>src/Retravion.Web/Features/Identity/Users/Users.razor</code>.
+        Navigation to Create belongs in the header; dense tables use responsive column labels.
+        Use the selector to inspect loaded, loading, empty, and error states; retry returns to sample data.</p>
+    <CatalogListTemplate />
+    <p>Complete demonstration source: <code>src/Retravion.Web/Features/UiCatalog/CatalogListTemplate.razor</code>.</p>
+    <pre><code>@ListSnippet</code></pre>
+</section>
+
+<section id="create-template" aria-labelledby="create-template-heading">
+    <h3 id="create-template-heading">Create-page template</h3>
+    <p>Reference: <code>src/Retravion.Web/Features/Identity/Users/CreateUser.razor</code> for form actions/validation,
+        and <code>src/Retravion.Web/Features/Product/Create/CreateProduct.razor</code> for create-with-Markdown.
+        Submit an empty name for field validation. Choose Failure to inspect an operation error, or Hold busy to inspect disabled fields/actions.
+        Complete simulation releases the held request. Success is local feedback here; real create pages may navigate or show their approved result.</p>
+    <CatalogPageForm />
+    <p>Cancel clears this demonstration only. Real Cancel navigation must use the owning feature's destination, as in CreateProduct.
+        Complete demonstration source: <code>src/Retravion.Web/Features/UiCatalog/CatalogPageForm.razor</code>.</p>
+    <pre><code>@CreateSnippet</code></pre>
+</section>
+
+<section id="edit-template" aria-labelledby="edit-template-heading">
+    <h3 id="edit-template-heading">Edit-page template</h3>
+    <p>Reference: <code>src/Retravion.Web/Features/Product/Description/EditProductDescription.razor</code>.
+        Populate from the retrieved entity before editing; retain entered values when saving fails.
+        The generic name/notes form below is a provisional illustration, not an approved new entity-edit workflow.</p>
+    <CatalogPageForm EditMode="true" />
+    <p>Cancel restores the original example values here; real Cancel navigates to the owning entity's detail page.
+        Save calls the approved use case with the original expected value when concurrency protection requires it.
+        Do not replace or re-key an editor merely to display an error: doing so discards unsaved input.</p>
+    <pre><code>@EditSnippet</code></pre>
+</section>
+
+<section id="markdown-template" aria-labelledby="markdown-template-heading">
+    <h3 id="markdown-template-heading">Markdown field / edit-page template</h3>
+    <CatalogMarkdownExample />
+    <p>Sources: <code>src/Retravion.Web/Features/Product/Description/DescriptionEditor.razor</code>,
+        <code>DescriptionEditor.razor.css</code>, <code>ProductMarkdown.cs</code>, and <code>EditProductDescription.razor</code> in the same directory.
+        The editor is full width; text area is 100% wide, at least 20rem tall, vertically resizable, with 12 initial rows.
+        Source/preview columns split equally and automatically stack at 850px or narrower. Preview images stay within the column.
+        Use the component's Busy, OnSave, FormId, SubmitText, CancelHref, Optional, and ChildContent parameters rather than cloning it.
+        This catalog embeds the existing Product editor as a reference, not a new cross-feature shared-editor contract.</p>
+    <p>Complete demonstration wrapper: <code>src/Retravion.Web/Features/UiCatalog/CatalogMarkdownExample.razor</code>.</p>
+    <pre><code>@MarkdownSnippet</code></pre>
+</section>
+
+@code {
+    private const string ListSnippet = """
+        @using Microsoft.AspNetCore.Components.Sections
+        @using MudBlazor
+        @using Retravion.Web.Components
+        <SectionContent SectionName="your-feature-page-header">
+            <PageHeader Title="Items">
+                <Actions><MudButton Href="/your-feature/create">Create item</MudButton></Actions>
+            </PageHeader>
+        </SectionContent>
+        @if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+        else if (_items is null) { <p role="status">Loading items…</p> }
+        else
+        {
+            <MudTable T="string" Items="_items" Dense="true" Hover="true" Elevation="0">
+                <HeaderContent><MudTh>Name</MudTh></HeaderContent>
+                <RowTemplate><MudTd DataLabel="Name">@context</MudTd></RowTemplate>
+                <NoRecordsContent><p>No items yet.</p></NoRecordsContent>
+            </MudTable>
+        }
+        @code {
+            // Replace sample assignment with the approved query and expose its failure via _error.
+            private string? _error;
+            private string[]? _items = ["Example"];
+        }
+        """;
+    private const string CreateSnippet = """
+        @using Microsoft.AspNetCore.Components.Sections
+        @using Microsoft.AspNetCore.Components.Web
+        @using MudBlazor
+        @using Retravion.Web.Components
+        <SectionContent SectionName="your-feature-page-header">
+            <PageHeader Title="Create item" BackHref="/your-feature" BackText="Items" />
+        </SectionContent>
+        <MudPaper Class="pa-4" Elevation="0">
+            <form id="create-item-form" @onsubmit="Create" @onsubmit:preventDefault>
+                <MudTextField T="string" @bind-Value="_name" Label="Name" Required="true" Disabled="_busy" />
+                @if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+            </form>
+        </MudPaper>
+        <div class="mt-4">
+            <MudButton ButtonType="ButtonType.Submit" form="create-item-form" Disabled="_busy"
+                       Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px">Create item</MudButton>
+            <MudButton Href="/your-feature" Disabled="_busy" Variant="Variant.Text">Cancel</MudButton>
+        </div>
+        @code {
+            private string _name = "";
+            private string? _error;
+            private bool _busy;
+            private void Create()
+            {
+                if (_busy) return;
+                _error = string.IsNullOrWhiteSpace(_name) ? "A name is required." : null;
+                if (_error is not null) return;
+                _busy = true;
+                try { /* Await the approved create use case; handle its result. No persistence in this skeleton. */ }
+                finally { _busy = false; }
+            }
+        }
+        """;
+    private static string EditSnippet => CreateSnippet
+        .Replace("Create item", "Edit item", StringComparison.Ordinal)
+        .Replace("create-item-form", "edit-item-form", StringComparison.Ordinal)
+        .Replace("@onsubmit=\"Create\"", "@onsubmit=\"Save\"", StringComparison.Ordinal)
+        .Replace("void Create()", "void Save()", StringComparison.Ordinal)
+        .Replace(">Edit item</MudButton>", ">Save changes</MudButton>", StringComparison.Ordinal)
+        .Replace("_name = \"\";", "_name = \"Existing value\"; // Populate after approved retrieval; retain on failed save.", StringComparison.Ordinal)
+        .Replace("approved create use case", "approved update use case", StringComparison.Ordinal);
+    private const string MarkdownSnippet = """
+        @using MudBlazor
+        @using Retravion.Web.Features.Product.Description
+        <DescriptionEditor InitialDescription="@_original" Busy="_busy" OnSave="Save"
+                           FormId="edit-description-example" SubmitText="Save description"
+                           CancelHref="/development/ui-catalog#page-pattern" />
+        @if (_saved is not null) { <p role="status">Captured locally; nothing persisted.</p> }
+        @code {
+            private string _original = "## Existing description";
+            private bool _busy;
+            private string? _saved;
+            private void Save(string markdown) => _saved = markdown;
+            // For real Product editing, follow EditProductDescription.razor:
+            // await the update use case, preserve input on failure, navigate on success.
+            // On create, use Optional="true" and ChildContent for Product ID/Name.
+        }
+        """;
+}

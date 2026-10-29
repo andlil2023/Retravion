@@ -1,0 +1,93 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Web
+
+<header class="catalog-template-header">
+    <h3>@(EditMode ? "Edit example item" : "Create example item")</h3>
+    <MudButton Href="/development/ui-catalog#list-template" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.ArrowBack">Example list</MudButton>
+</header>
+<p>Demonstration only. Choose the simulated outcome, then submit. No data is persisted.</p>
+<MudSelect T="string" @bind-Value="_outcome" Label="@(EditMode ? "Edit simulated outcome" : "Create simulated outcome")" Disabled="_busy" Class="mb-4">
+    <MudSelectItem Value="@("Success")">Success</MudSelectItem>
+    <MudSelectItem Value="@("Failure")">Failure</MudSelectItem>
+    <MudSelectItem Value="@("Hold busy")">Hold busy</MudSelectItem>
+</MudSelect>
+<MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
+    <form id="@FormId" @onsubmit="Submit" @onsubmit:preventDefault aria-label="@(EditMode ? "Edit template form" : "Create template form")" aria-busy="@_busy">
+        @if (EditMode)
+        {
+            <p>Example ID: <strong>EXAMPLE-001</strong> (not editable)</p>
+        }
+        <MudTextField T="string" @bind-Value="_name" Label="@(EditMode ? "Edit example name" : "Create example name")"
+                      Required="true" Disabled="_busy" Error="@(_validation is not null)" ErrorText="@_validation" />
+        <MudTextField T="string" @bind-Value="_notes" Label="@(EditMode ? "Edit example notes" : "Create example notes")" Lines="3" Disabled="_busy" />
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" role="alert" Class="my-4">@_error</MudAlert>
+        }
+        @if (_feedback is not null)
+        {
+            <MudAlert Severity="Severity.Success" role="status" Class="my-4">@_feedback</MudAlert>
+        }
+    </form>
+</MudPaper>
+<div class="product-actions">
+    <MudButton ButtonType="ButtonType.Submit" form="@FormId" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" Style="min-height:44px" aria-busy="@_busy">
+        @if (_busy)
+        {
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" aria-hidden="true" />
+        }
+        @(_busy ? "Saving example…" : EditMode ? "Save example changes" : "Create example item")
+    </MudButton>
+    <MudButton OnClick="Cancel" Disabled="_busy" Variant="Variant.Text">Cancel @(EditMode ? "edit" : "create") example</MudButton>
+</div>
+@if (_busy)
+{
+    <p role="status">Simulated request in progress. Fields and save/cancel actions are disabled.</p>
+    <MudButton OnClick="Complete" Variant="Variant.Text">Complete @(EditMode ? "edit" : "create") simulation</MudButton>
+}
+
+@code {
+    [Parameter] public bool EditMode { get; set; }
+    private string FormId => EditMode ? "catalog-edit-form" : "catalog-create-form";
+    private string _name = "";
+    private string _notes = "";
+    private string _outcome = "Success";
+    private string? _validation;
+    private string? _error;
+    private string? _feedback;
+    private bool _busy;
+
+    protected override void OnInitialized() => ResetFields();
+
+    private void ResetFields()
+    {
+        _name = EditMode ? "Existing example item" : "";
+        _notes = EditMode ? "Existing notes" : "";
+    }
+
+    private void Submit()
+    {
+        if (_busy) return;
+        _error = _feedback = null;
+        _validation = string.IsNullOrWhiteSpace(_name) ? "An example name is required." : null;
+        if (_validation is not null) return;
+        _busy = true;
+        if (_outcome != "Hold busy") Complete();
+    }
+
+    private void Complete()
+    {
+        if (!_busy) return;
+        _busy = false;
+        if (_outcome == "Failure") _error = "Simulated save failed. Your entered values are retained; choose Success and retry.";
+        else _feedback = "Example saved in this demonstration only. Nothing was persisted.";
+    }
+
+    private void Cancel()
+    {
+        if (_busy) return;
+        ResetFields();
+        _validation = _error = null;
+        _feedback = EditMode ? "Edit cancelled; original example values restored." : "Create cancelled; example fields cleared.";
+    }
+}

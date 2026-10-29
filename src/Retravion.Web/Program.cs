@@ -48,6 +48,11 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("Administrator", policy => policy
         .RequireAuthenticatedUser().RequireRole("Administrator")
         .RequireAssertion(context => !context.User.HasClaim(PasswordReplacementEndpoint.RestrictedClaim, "true")));
+    options.AddPolicy("UiCatalogDevelopment", policy => policy
+        .RequireAuthenticatedUser()
+        .RequireRole("Administrator", "User")
+        .RequireAssertion(context => builder.Environment.IsDevelopment() &&
+            !context.User.HasClaim(PasswordReplacementEndpoint.RestrictedClaim, "true")));
     options.AddPolicy("PasswordReplacementRequired", policy => policy
         .RequireAuthenticatedUser()
         .RequireClaim(PasswordReplacementEndpoint.RestrictedClaim, "true"));
@@ -142,6 +147,12 @@ app.UseAuthentication();
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
+    if (path.StartsWithSegments("/development/ui-catalog", StringComparison.OrdinalIgnoreCase) &&
+        !app.Environment.IsDevelopment())
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
     var replacementPage = string.Equals(path.Value?.TrimEnd('/'), "/password-replacement", StringComparison.OrdinalIgnoreCase);
     var replacementOperation = string.Equals(path.Value?.TrimEnd('/'), "/identity/password-replacement", StringComparison.OrdinalIgnoreCase);
     var logout = string.Equals(path.Value?.TrimEnd('/'), "/identity/logout", StringComparison.OrdinalIgnoreCase);

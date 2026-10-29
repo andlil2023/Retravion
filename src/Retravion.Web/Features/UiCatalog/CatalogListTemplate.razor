@@ -1,0 +1,44 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Web
+
+<div class="catalog-list-template">
+    <header class="catalog-template-header">
+        <h3>Example items</h3>
+        <MudButton Href="/development/ui-catalog#create-template" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Add">Create example</MudButton>
+    </header>
+    <MudSelect T="string" Value="_state" ValueChanged="ChangeState" Label="List demonstration state" Class="mb-4">
+        @foreach (var state in States)
+        {
+            <MudSelectItem Value="@state">@state</MudSelectItem>
+        }
+    </MudSelect>
+    @if (_state == "Loading")
+    {
+        <p role="status">Loading example items…</p>
+    }
+    else if (_state == "Error")
+    {
+        <MudAlert Severity="Severity.Error" role="alert">Example items could not be loaded. Try again.</MudAlert>
+        <MudButton OnClick="@(() => ChangeState("Loaded"))" Variant="Variant.Text">Retry example list</MudButton>
+    }
+    else
+    {
+        <MudTable T="ExampleItem" Items="@(_state == "Empty" ? Array.Empty<ExampleItem>() : Items)" Dense="true" Hover="true" Elevation="0" aria-label="List template items">
+            <HeaderContent><MudTh>Name</MudTh><MudTh>State</MudTh><MudTh>Navigation</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Name">@context.Name</MudTd>
+                <MudTd DataLabel="State">@context.State</MudTd>
+                <MudTd DataLabel="Navigation"><MudLink Href="/development/ui-catalog#edit-template">Edit example</MudLink></MudTd>
+            </RowTemplate>
+            <NoRecordsContent><p>No example items yet. Use Create example to begin.</p></NoRecordsContent>
+        </MudTable>
+    }
+</div>
+
+@code {
+    private static readonly string[] States = ["Loaded", "Loading", "Empty", "Error"];
+    private sealed record ExampleItem(string Name, string State);
+    private static readonly ExampleItem[] Items = [new("Example item", "Active"), new("Another example", "Inactive")];
+    private string _state = "Loaded";
+    private void ChangeState(string state) => _state = state;
+}
