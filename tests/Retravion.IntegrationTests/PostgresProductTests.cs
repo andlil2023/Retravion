@@ -1,5 +1,6 @@
 using Npgsql;
 using Retravion.Application.Product.Create;
+using Retravion.Application.Product.Description;
 using Retravion.Application.Product.Retrieve;
 using Retravion.Application.Product.Status;
 using Retravion.Infrastructure.Product;
@@ -132,6 +133,45 @@ public sealed class PostgresProductTests
         var found = await store.Find("invalid");
         Assert.True(found.IsFailure);
         Assert.Equal("The persisted Product is invalid.", found.Error);
+    }
+
+    [PostgresFact]
+    public async Task DescriptionEditsPersistAndRejectStaleWritesWithoutChangingOtherFields()
+    {
+        await using var database = await Database.Create();
+        var store = new PostgresProductStore(database.ConnectionString);
+        var original = ProductState.Create("description-id", "Name", "").Value;
+        Assert.True((await store.Create(original)).IsSuccess);
+        var update = new UpdateProductDescription(store);
+        var markdown = "# Heading\n\n**Formatted** 😀";
+        Assert.True((await update.Execute(original.Id, "", markdown)).IsSuccess);
+        var retrieve = new RetrieveProduct(new PostgresProductStore(database.ConnectionString));
+        var first = (await retrieve.Execute(original.Id)).Value;
+        Assert.Equal(original.UpdateDescription(markdown), first);
+        Assert.True((await update.Execute(original.Id, markdown, "## Updated\n\n*Again*")).IsSuccess);
+        var second = (await retrieve.Execute(original.Id)).Value;
+        Assert.Equal("## Updated\n\n*Again*", second.Description);
+        Assert.Equal(original.Id, second.Id);
+        Assert.Equal(original.Name, second.Name);
+        Assert.True(second.IsActive);
+        Assert.True((await update.Execute(original.Id, markdown, "stale editor")).IsFailure);
+        Assert.True((await store.UpdateDescription(first, first.UpdateDescription("stale persistence"))).IsFailure);
+        Assert.Equal(second, (await retrieve.Execute(original.Id)).Value);
+        Assert.True((await store.UpdateDescription(second, second.Retire().Value)).IsFailure);
+        Assert.True((await store.UpdateDescription(second, ProductState.Create("other-id", "Name", "new").Value)).IsFailure);
+        Assert.True((await store.UpdateDescription(second, ProductState.Create(second.Id, "Other name", "new").Value)).IsFailure);
+        // A concurrent status change is preserved by the description-only UPDATE.
+        Assert.True((await store.ChangeStatus(second, second.Retire().Value)).IsSuccess);
+        Assert.True((await store.UpdateDescription(second, second.UpdateDescription("retired edit"))).IsSuccess);
+        var retired = (await retrieve.Execute(original.Id)).Value;
+        Assert.False(retired.IsActive);
+        Assert.Equal("retired edit", retired.Description);
+        Assert.True((await update.Execute(original.Id, retired.Description, "")).IsSuccess);
+        Assert.Equal("", (await retrieve.Execute(original.Id)).Value.Description);
+        Assert.True((await update.Execute("missing", "", "new")).IsFailure);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.UpdateDescription(retired, retired.UpdateDescription("new"), cancelled.Token));
     }
 
     private sealed class Database(string connectionString, string serverConnection, string name) : IAsyncDisposable

@@ -39,6 +39,26 @@ public sealed class PostgresProductStore(string connectionString) : IProductStor
                 : Result.Failure<Maybe<ProductState>>("The persisted Product is invalid.");
         }, cancellationToken);
 
+    public async Task<Result> UpdateDescription(ProductState expected, ProductState replacement,
+        CancellationToken cancellationToken = default)
+    {
+        if (expected.Id != replacement.Id || expected.Name != replacement.Name || expected.IsActive != replacement.IsActive)
+            return Result.Failure("Invalid Product description update.");
+        var result = await Execute(async (connection, transaction) =>
+        {
+            await using var command = new NpgsqlCommand("""
+                UPDATE retravion_product.product SET description = $1
+                WHERE id = $2 AND description = $3
+                """, connection, transaction);
+            command.Parameters.AddWithValue(replacement.Description);
+            command.Parameters.AddWithValue(expected.Id);
+            command.Parameters.AddWithValue(expected.Description);
+            return await command.ExecuteNonQueryAsync(cancellationToken) == 1
+                ? Result.Success(true) : Result.Failure<bool>("The description changed or the Product no longer exists. Retrieve it again.");
+        }, cancellationToken);
+        return result.IsSuccess ? Result.Success() : Result.Failure(result.Error);
+    }
+
     public async Task<Result> ChangeStatus(ProductState expected, ProductState replacement,
         CancellationToken cancellationToken = default)
     {

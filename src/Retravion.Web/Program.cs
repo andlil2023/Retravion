@@ -1,6 +1,7 @@
 using System.Data.Common;
 using Retravion.Application.Product;
 using Retravion.Application.Product.Create;
+using Retravion.Application.Product.Description;
 using Retravion.Application.Product.Retrieve;
 using Retravion.Application.Product.Status;
 using Retravion.Infrastructure.Product;
@@ -76,6 +77,7 @@ builder.Services.AddSingleton<IProductStore>(_ => new PostgresProductStore(
 builder.Services.AddSingleton<CreateProduct>();
 builder.Services.AddSingleton<RetrieveProduct>();
 builder.Services.AddSingleton<ChangeProductStatus>();
+builder.Services.AddSingleton<UpdateProductDescription>();
 builder.Services.AddScoped<ProductOperations>();
 builder.Services.AddSingleton<AccountCreation>();
 builder.Services.AddScoped<UserOperations>();

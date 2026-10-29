@@ -1,4 +1,5 @@
 @page "/products/details"
+@using Retravion.Web.Features.Product.Description
 @inject ProductOperations Operations
 @inject AuthenticationStateProvider Authentication
 @inject IDialogService Dialogs
@@ -23,11 +24,12 @@
             <dl>
                 <dt>Product ID</dt><dd style="overflow-wrap:anywhere">@_product.Id</dd>
                 <dt>Name</dt><dd>@_product.Name</dd>
-                <dt>Description</dt><dd style="white-space:pre-wrap;overflow-wrap:anywhere">@_product.Description</dd>
+                <dt>Description</dt><dd style="overflow-wrap:anywhere;overflow:auto">@((MarkupString)ProductMarkdown.Render(_product.Description))</dd>
                 <dt>Status</dt><dd>@(_product.IsActive ? "Active" : "Retired")</dd>
             </dl>
         </MudPaper>
         <div class="mt-4">
+            <MudButton Href="@($"/products/description?id={Uri.EscapeDataString(_product.Id)}")" Variant="Variant.Outlined" Color="Color.Primary" Style="min-height:44px">Edit description</MudButton>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px" Disabled="_busy" OnClick="ConfirmStatus">
                 @(_product.IsActive ? "Retire" : "Reactivate")
             </MudButton>

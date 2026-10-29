@@ -83,6 +83,20 @@ public sealed partial class AccountManagementTests
         AssertProductAction(details, "Reactivate");
         Assert.True((await operations.ChangeStatus(actor, id, true)).IsSuccess);
         Assert.True((await operations.Retrieve(actor, id)).Value.IsActive);
+        var editor = await user.GetStringAsync("/products/description?id=" + Uri.EscapeDataString(id));
+        Assert.Contains("Description (Markdown)", editor);
+        Assert.Contains("Side by side", editor);
+        Assert.Contains("Stacked", editor);
+        Assert.Contains("Save description", editor);
+        Assert.True((await operations.UpdateDescription(actor, id, "<b>Plain description</b>", "# Heading\n\n**Formatted**")).IsSuccess);
+        details = await user.GetStringAsync(detailPath);
+        Assert.Contains("<h1>Heading</h1>", details);
+        Assert.Contains("<strong>Formatted</strong>", details);
+        Assert.True((await operations.UpdateDescription(actor, id, "# Heading\n\n**Formatted**", "## Updated\n\n*Again*")).IsSuccess);
+        details = await user.GetStringAsync(detailPath);
+        Assert.Contains("<h2>Updated</h2>", details);
+        Assert.Contains("<em>Again</em>", details);
+        Assert.DoesNotContain("<h1>Heading</h1>", details);
         Assert.Contains("Product not found.", await user.GetStringAsync("/products/details?id=missing"));
         Assert.Contains("A Product ID is required.", await user.GetStringAsync("/products/details"));
         // A retained circuit principal must not bypass revocation.
@@ -91,6 +105,7 @@ public sealed partial class AccountManagementTests
         Assert.True((await operations.Create(actor, "revoked", "No", "")).IsFailure);
         Assert.True((await operations.Retrieve(actor, id)).IsFailure);
         Assert.True((await operations.ChangeStatus(actor, id, false)).IsFailure);
+        Assert.True((await operations.UpdateDescription(actor, id, "", "denied")).IsFailure);
         Assert.Equal(calls, products.Calls);
     }
 
@@ -102,13 +117,13 @@ public sealed partial class AccountManagementTests
         await using var factory = baseFactory.WithWebHostBuilder(builder =>
             builder.ConfigureServices(services => services.AddSingleton<IProductStore>(products)));
         using var user = Client(factory);
-        foreach (var path in new[] { "/products", "/products/create", "/products/details?id=anything" })
+        foreach (var path in new[] { "/products", "/products/create", "/products/details?id=anything", "/products/description?id=anything" })
         {
             using var denied = await user.GetAsync(path);
             Assert.Equal("/", denied.Headers.Location?.OriginalString);
         }
         var restricted = await ProductPrincipal(user, factory.Services, "admin", Initial, "/password-replacement");
-        foreach (var path in new[] { "/products", "/products/create", "/products/details?id=anything" })
+        foreach (var path in new[] { "/products", "/products/create", "/products/details?id=anything", "/products/description?id=anything" })
         {
             using var denied = await user.GetAsync(path);
             Assert.Equal("/password-replacement", denied.Headers.Location?.OriginalString);
@@ -120,6 +135,7 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.Create(actor, "denied", "Denied", "")).IsFailure);
             Assert.True((await operations.Retrieve(actor, "anything")).IsFailure);
             Assert.True((await operations.ChangeStatus(actor, "anything", false)).IsFailure);
+            Assert.True((await operations.UpdateDescription(actor, "anything", "", "denied")).IsFailure);
         }
         Assert.Equal(0, products.Calls);
     }
@@ -166,6 +182,14 @@ public sealed partial class AccountManagementTests
         {
             Calls++;
             return Task.FromResult(Result.Success(Maybe<ProductState>.From(products.GetValueOrDefault(id))));
+        }
+        public Task<Result> UpdateDescription(ProductState expected, ProductState replacement, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            if (products.GetValueOrDefault(expected.Id)?.Description != expected.Description)
+                return Task.FromResult(Result.Failure("Stale description."));
+            products[expected.Id] = replacement;
+            return Task.FromResult(Result.Success());
         }
         public Task<Result> ChangeStatus(ProductState expected, ProductState replacement, CancellationToken cancellationToken = default)
         {

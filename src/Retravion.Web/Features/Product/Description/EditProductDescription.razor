@@ -1,0 +1,50 @@
+@page "/products/description"
+@inject ProductOperations Operations
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Edit Product description · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Edit Product description" BackHref="@DetailsPath" />
+</SectionContent>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+}
+@if (_product is not null)
+{
+    <h2>@_product.Name</h2>
+    <DescriptionEditor @key="_product" InitialDescription="_product.Description" Busy="_busy" OnSave="Save" />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "id")] public string? Id { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private string? _error;
+    private bool _busy;
+    private string DetailsPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _product = null;
+        var result = await Operations.Retrieve((await Authentication.GetAuthenticationStateAsync()).User, Id);
+        _error = result.IsFailure ? result.Error : null;
+        if (result.IsSuccess) _product = result.Value;
+    }
+
+    private async Task Save(string markdown)
+    {
+        if (_busy || _product is null) return;
+        _busy = true;
+        _error = null;
+        var target = _product;
+        try
+        {
+            var result = await Operations.UpdateDescription((await Authentication.GetAuthenticationStateAsync()).User,
+                target.Id, target.Description, markdown);
+            if (result.IsFailure) _error = result.Error;
+            else Navigation.NavigateTo($"/products/details?id={Uri.EscapeDataString(result.Value.Id)}");
+        }
+        finally { _busy = false; }
+    }
+}

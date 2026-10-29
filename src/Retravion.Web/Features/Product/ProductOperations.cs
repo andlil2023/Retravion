@@ -2,6 +2,7 @@ using System.Security.Claims;
 using CSharpFunctionalExtensions;
 using Microsoft.AspNetCore.Authorization;
 using Retravion.Application.Product.Create;
+using Retravion.Application.Product.Description;
 using Retravion.Application.Product.Retrieve;
 using Retravion.Application.Product.Status;
 using Retravion.Web.Features.Identity.Logout;
@@ -11,7 +12,7 @@ namespace Retravion.Web.Features.Product;
 
 // Recheck live session and authorization on every circuit callback, not only page entry.
 internal sealed class ProductOperations(IAuthorizationService authorization, SessionTicketStore sessions,
-    CreateProduct create, RetrieveProduct retrieve, ChangeProductStatus status)
+    CreateProduct create, RetrieveProduct retrieve, ChangeProductStatus status, UpdateProductDescription description)
 {
     private async Task<bool> Allowed(ClaimsPrincipal actor) =>
         sessions.IsActive(actor.FindFirstValue(SessionTicketStore.SessionClaim)) &&
@@ -25,6 +26,11 @@ internal sealed class ProductOperations(IAuthorizationService authorization, Ses
     public async Task<Result<ProductState>> Retrieve(ClaimsPrincipal actor, string? id,
         CancellationToken cancellationToken = default) => await Allowed(actor)
         ? await retrieve.Execute(id, cancellationToken)
+        : Result.Failure<ProductState>("Access denied.");
+
+    public async Task<Result<ProductState>> UpdateDescription(ClaimsPrincipal actor, string id, string expectedDescription,
+        string? markdown, CancellationToken cancellationToken = default) => await Allowed(actor)
+        ? await description.Execute(id, expectedDescription, markdown, cancellationToken)
         : Result.Failure<ProductState>("Access denied.");
 
     public async Task<Result<ProductState>> ChangeStatus(ClaimsPrincipal actor, string id, bool active,
