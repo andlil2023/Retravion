@@ -1,4 +1,10 @@
 using System.Data.Common;
+using Retravion.Application.Product;
+using Retravion.Application.Product.Create;
+using Retravion.Application.Product.Retrieve;
+using Retravion.Application.Product.Status;
+using Retravion.Infrastructure.Product;
+using Retravion.Web.Features.Product;
 using Retravion.Web.Features.Identity.Users;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -64,6 +70,13 @@ builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 builder.Services.AddSingleton<IAdministratorStore>(_ => new PostgresAdministratorStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<IProductStore>(_ => new PostgresProductStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<CreateProduct>();
+builder.Services.AddSingleton<RetrieveProduct>();
+builder.Services.AddSingleton<ChangeProductStatus>();
+builder.Services.AddScoped<ProductOperations>();
 builder.Services.AddSingleton<AccountCreation>();
 builder.Services.AddScoped<UserOperations>();
 builder.Services.AddScoped<AccountAudit>();

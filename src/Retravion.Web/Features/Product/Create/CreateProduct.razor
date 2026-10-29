@@ -1,0 +1,45 @@
+@page "/products/create"
+@inject ProductOperations Operations
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Create Product · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Create Product" BackHref="/products" />
+</SectionContent>
+<MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
+    <form id="create-product-form" @onsubmit="Create" @onsubmit:preventDefault aria-label="Create Product">
+        <MudTextField @bind-Value="_id" Label="Product ID" HelperText="Generated automatically. You may change it before creation; it cannot be changed afterward. Maximum 100 Unicode characters. IDs match exactly, including case and spaces." Required="true" />
+        <MudTextField @bind-Value="_name" Label="Name" Required="true" />
+        <MudTextField @bind-Value="_description" Label="Description (optional)" Lines="6" />
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" role="alert" Class="my-4">@_error</MudAlert>
+        }
+    </form>
+</MudPaper>
+<div class="mt-4">
+    <MudButton ButtonType="ButtonType.Submit" form="create-product-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" Style="min-height:44px">Create Product</MudButton>
+</div>
+
+@code {
+    private string _id = Guid.NewGuid().ToString();
+    private string _name = "";
+    private string _description = "";
+    private string? _error;
+    private bool _busy;
+
+    private async Task Create()
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await Operations.Create((await Authentication.GetAuthenticationStateAsync()).User, _id, _name, _description);
+            if (result.IsFailure) _error = result.Error;
+            else Navigation.NavigateTo($"/products/details?id={Uri.EscapeDataString(result.Value.Id)}");
+        }
+        finally { _busy = false; }
+    }
+}

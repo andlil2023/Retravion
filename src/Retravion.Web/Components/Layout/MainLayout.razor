@@ -19,12 +19,8 @@
         <p class="navigation-caption">WORKSPACE</p>
         <nav aria-label="Main navigation">
             <a class="navigation-node" href="/home"><MudIcon Icon="@Icons.Material.Outlined.Home" /><span>Home</span></a>
-            <AuthorizeView Policy="Administrator">
-            <button type="button" class="navigation-node @(_productsSelected ? "selected" : "")"
-                    aria-pressed="@_productsSelected" @onclick="SelectProducts">
-                <MudIcon Icon="@Icons.Material.Outlined.Inventory2" />
-                <span>Products</span>
-            </button>
+            <AuthorizeView Policy="CompletedPasswordReplacement">
+                <a class="navigation-node" href="/products"><MudIcon Icon="@Icons.Material.Outlined.Inventory2" /><span>Products</span></a>
             </AuthorizeView>
         </nav>
         <div class="sidebar-bottom">
@@ -63,16 +59,13 @@
                 {
                     <SectionOutlet SectionName="account-page-header" />
                 }
+                else if (IsProduct)
+                {
+                    <SectionOutlet SectionName="product-page-header" />
+                }
                 else
                 {
-                    <PageHeader Title="@(_productsSelected ? "Products" : "Overview")">
-                        <Actions>
-                            @if (_productsSelected)
-                            {
-                                <MudButton OnClick="ShowOverview" Size="Size.Small" StartIcon="@Icons.Material.Outlined.ArrowBack">Overview</MudButton>
-                            }
-                        </Actions>
-                    </PageHeader>
+                    <PageHeader Title="Overview" />
                 }
             </div>
             <MudIconButton Icon="@(_darkMode ? Icons.Material.Outlined.LightMode : Icons.Material.Outlined.DarkMode)"
@@ -80,7 +73,7 @@
                            aria-label="@(_darkMode ? "Use light theme" : "Use dark theme")"
                            title="@(_darkMode ? "Use light theme" : "Use dark theme")" />
         </header>
-        <main id="page-content" class="page-content" tabindex="-1" aria-label="@(IsAdministration ? "Account management content" : _productsSelected ? "Products content" : "Overview content")">
+        <main id="page-content" class="page-content" tabindex="-1" aria-label="@(IsAdministration ? "Account management content" : IsProduct ? "Products content" : "Overview content")">
             @Body
         </main>
     </div>
@@ -88,18 +81,12 @@
 
 @code {
     private bool IsAdministration => Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("administration/", StringComparison.OrdinalIgnoreCase);
+    private bool IsProduct => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("products", StringComparison.OrdinalIgnoreCase)
+        || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("products/", StringComparison.OrdinalIgnoreCase);
     private bool _navigationOpen;
-    private bool _productsSelected;
     private bool _darkMode;
 
     private void ToggleNavigation() => _navigationOpen = !_navigationOpen;
     private void ToggleTheme() => _darkMode = !_darkMode;
 
-    private void SelectProducts()
-    {
-        _productsSelected = true;
-        _navigationOpen = false;
-    }
-
-    private void ShowOverview() => _productsSelected = false;
 }
