@@ -1,0 +1,22 @@
+@page "/products"
+@inject NavigationManager Navigation
+
+<PageTitle>Products · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Products">
+        <Actions><MudButton Href="/products/create" StartIcon="@Icons.Material.Outlined.Add">Create Product</MudButton></Actions>
+    </PageHeader>
+</SectionContent>
+<MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
+    <form id="retrieve-product-form" @onsubmit="Retrieve" @onsubmit:preventDefault aria-label="Retrieve Product">
+        <MudTextField @bind-Value="_id" Label="Product ID" Required="true" />
+    </form>
+</MudPaper>
+<div class="mt-4">
+    <MudButton ButtonType="ButtonType.Submit" form="retrieve-product-form" Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px">Retrieve Product</MudButton>
+</div>
+
+@code {
+    private string _id = "";
+    private void Retrieve() => Navigation.NavigateTo($"/products/details?id={Uri.EscapeDataString(_id)}");
+}

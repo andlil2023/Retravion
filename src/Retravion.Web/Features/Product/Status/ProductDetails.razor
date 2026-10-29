@@ -1,0 +1,80 @@
+@page "/products/details"
+@inject ProductOperations Operations
+@inject AuthenticationStateProvider Authentication
+@inject IDialogService Dialogs
+
+<PageTitle>Product details · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Product details" BackHref="/products" />
+</SectionContent>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+}
+@if (_feedback is not null)
+{
+    <MudAlert Severity="Severity.Success" role="status">@_feedback</MudAlert>
+}
+@if (_product is not null)
+{
+    <section aria-labelledby="product-heading" style="max-width:40rem">
+        <MudPaper id="product-details-card" Class="pa-4" Elevation="0">
+            <h2 id="product-heading">@_product.Name</h2>
+            <dl>
+                <dt>Product ID</dt><dd style="overflow-wrap:anywhere">@_product.Id</dd>
+                <dt>Name</dt><dd>@_product.Name</dd>
+                <dt>Description</dt><dd style="white-space:pre-wrap;overflow-wrap:anywhere">@_product.Description</dd>
+                <dt>Status</dt><dd>@(_product.IsActive ? "Active" : "Retired")</dd>
+            </dl>
+        </MudPaper>
+        <div class="mt-4">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px" Disabled="_busy" OnClick="ConfirmStatus">
+                @(_product.IsActive ? "Retire" : "Reactivate")
+            </MudButton>
+        </div>
+    </section>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "id")] public string? Id { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private string? _error;
+    private string? _feedback;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _feedback = null;
+        await Refresh();
+    }
+
+    private async Task Refresh()
+    {
+        _product = null;
+        var result = await Operations.Retrieve((await Authentication.GetAuthenticationStateAsync()).User, Id);
+        _error = result.IsFailure ? result.Error : null;
+        if (result.IsSuccess) _product = result.Value;
+    }
+
+    private async Task ConfirmStatus()
+    {
+        if (_busy || _product is null) return;
+        _busy = true;
+        _error = null;
+        _feedback = null;
+        var target = _product;
+        try
+        {
+            var action = target.IsActive ? "Retire" : "Reactivate";
+            var confirmed = await Dialogs.ShowMessageBoxAsync($"{action} Product?",
+                $"{action} {target.Name} ({target.Id})?", yesText: action, cancelText: "Cancel");
+            if (confirmed != true) return;
+            var result = await Operations.ChangeStatus((await Authentication.GetAuthenticationStateAsync()).User,
+                target.Id, !target.IsActive);
+            await Refresh();
+            if (result.IsFailure) _error = result.Error;
+            else _feedback = $"Product is now {(result.Value.IsActive ? "active" : "retired")}.";
+        }
+        finally { _busy = false; }
+    }
+}
