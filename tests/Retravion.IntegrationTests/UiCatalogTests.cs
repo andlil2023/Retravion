@@ -28,7 +28,15 @@ public sealed partial class AccountManagementTests
         Assert.DoesNotContain("catalog-example-form", header);
         Assert.Contains("aria-current=\"page\"", html);
         foreach (var section in new[] { "foundations", "components", "page-pattern" })
+        {
             Assert.Contains($"id=\"{section}\"", html);
+            var link = Regex.Match(html, $"href=\"([^\"]*#{section})\"");
+            Assert.True(link.Success);
+            // App.razor sets <base href="/">, so fragment-only links resolve to the login page.
+            var destination = new Uri(new Uri("https://localhost/"), link.Groups[1].Value);
+            Assert.Equal("/development/ui-catalog", destination.AbsolutePath);
+            Assert.Equal("#" + section, destination.Fragment);
+        }
         Assert.Contains(PrototypeTheme.Value.PaletteLight.Primary.ToString(), html);
         Assert.Contains(PrototypeTheme.Value.PaletteDark.Primary.ToString(), html);
         Assert.Contains(PrototypeTheme.Value.Typography.Default.FontFamily![0], html);
