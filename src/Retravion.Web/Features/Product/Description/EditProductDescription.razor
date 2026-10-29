@@ -7,7 +7,7 @@
 <SectionContent SectionName="product-page-header">
     <PageHeader Title="Edit Product description" BackHref="@DetailsPath" BackText="Product details" />
 </SectionContent>
-@if (_error is not null)
+@if (_error is not null && _product is null)
 {
     <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
 }
@@ -17,7 +17,14 @@
         <h2>@_product.Id – @_product.Name</h2>
         <span class="product-status">@(_product.IsActive ? "Active" : "Retired")</span>
     </div>
-    <DescriptionEditor @key="_product" InitialDescription="@_product.Description" Busy="_busy" OnSave="Save" CancelHref="@DetailsPath" />
+    <DescriptionEditor @key="_product" InitialDescription="@_product.Description" Busy="_busy" OnSave="Save" CancelHref="@DetailsPath">
+        <ChildContent>
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+            }
+        </ChildContent>
+    </DescriptionEditor>
 }
 
 @code {

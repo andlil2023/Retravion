@@ -58,15 +58,96 @@ public sealed class ProductDescriptionEditorTests
         Assert.Empty(renderer.Errors);
     }
 
+    [Fact]
+    public async Task FullscreenRetainsEditorDraftArrangementSaveErrorsAndBusyGuards()
+    {
+        var js = new RecordingJS();
+        await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton<IJSRuntime>(js).AddSingleton<NavigationManager, TestNavigation>().BuildServiceProvider();
+        await using var renderer = new EditorRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var saved = new List<string>();
+        var failed = false;
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var parameters = new Dictionary<string, object?>
+            {
+                [nameof(DescriptionEditor.InitialDescription)] = "Original",
+                [nameof(DescriptionEditor.CancelHref)] = "/products/details?id=example",
+                [nameof(DescriptionEditor.ChildContent)] = (RenderFragment)(builder =>
+                {
+                    if (failed) builder.AddMarkupContent(0, "<p role=\"alert\">Save failed; draft retained.</p>");
+                }),
+                [nameof(DescriptionEditor.OnSave)] = EventCallback.Factory.Create<string>(saved, (string value) =>
+                {
+                    saved.Add(value);
+                    failed = true; // Parent failure feedback uses the existing ChildContent contract.
+                })
+            };
+            await renderer.Mount(parameters);
+            renderer.AssertToolbarOrder();
+            Assert.Single(js.Calls, call => call.Name == "initializeSplitter");
+            Assert.Contains("role=\"separator\"", renderer.Markup());
+            Assert.Contains("aria-orientation=\"vertical\"", renderer.Markup());
+            Assert.Contains("aria-valuemin=\"25\"", renderer.Markup());
+            Assert.Contains("aria-valuemax=\"75\"", renderer.Markup());
+            Assert.Contains("aria-valuenow=\"50\"", renderer.Markup());
+            const string draft = "## Unsaved **draft**";
+            await renderer.Event("textarea", "oninput", new ChangeEventArgs { Value = draft });
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Stacked");
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Fullscreen Markdown editor");
+            renderer.AssertAttribute("aria-modal", "true");
+            renderer.AssertLayout("stacked");
+            Assert.Contains("<strong>draft</strong>", renderer.Markup());
+            Assert.Contains(js.Calls, call => call.Name == "setFullscreen" && Equals(call.Args![1], true));
+            await renderer.Event("form", "onsubmit", EventArgs.Empty);
+            Assert.Equal(new[] { draft }, saved);
+            Assert.Contains("Save failed; draft retained.", renderer.Markup());
+            renderer.AssertAttribute("aria-modal", "true");
+            parameters[nameof(DescriptionEditor.Busy)] = true;
+            await renderer.Render(parameters);
+            await renderer.Event("form", "onsubmit", EventArgs.Empty);
+            Assert.Single(saved);
+            renderer.AssertAttribute("disabled", true);
+            // Escape can exit even while saving; it changes presentation, not business state.
+            await renderer.Event("dialog", "oncancel", EventArgs.Empty);
+            renderer.AssertAttribute("role", "group");
+            Assert.Contains(js.Calls, call => call.Name == "setFullscreen" && Equals(call.Args![1], false));
+            renderer.AssertLayout("stacked");
+            parameters[nameof(DescriptionEditor.Busy)] = false;
+            await renderer.Render(parameters);
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Fullscreen Markdown editor");
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Exit fullscreen Markdown editor");
+            renderer.AssertAttribute("role", "group");
+            renderer.AssertAttribute("href", "/products/details?id=example");
+            await renderer.Event("form", "onsubmit", EventArgs.Empty);
+            Assert.Equal(new[] { draft, draft }, saved);
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    private sealed class RecordingJS : IJSRuntime, IJSObjectReference
+    {
+        internal List<(string Name, object?[]? Args)> Calls { get; } = [];
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
+        {
+            Calls.Add((identifier, args));
+            return ValueTask.FromResult(identifier == "import" ? (TValue)(object)this : default!);
+        }
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) => InvokeAsync<TValue>(identifier, args);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class TestNavigation : NavigationManager
     {
         public TestNavigation() => Initialize("https://localhost/", "https://localhost/products/description?id=id");
         protected override void NavigateToCore(string uri, bool forceLoad) { }
     }
 
-    private sealed class NoOpJS : IJSRuntime
+    private sealed class NoOpJS : IJSRuntime, IJSObjectReference
     {
-        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) => ValueTask.FromResult(default(TValue)!);
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            ValueTask.FromResult(identifier == "import" ? (TValue)(object)this : default!);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
             InvokeAsync<TValue>(identifier, args);
     }
@@ -87,6 +168,19 @@ public sealed class ProductDescriptionEditorTests
         }
         internal Task Render(Dictionary<string, object?> parameters) => RenderRootComponentAsync(_root, ParameterView.FromDictionary(parameters));
         internal string Markup() => string.Join("", Frames(_root).Where(frame => frame.FrameType == RenderTreeFrameType.Markup).Select(frame => frame.MarkupContent));
+        internal void AssertAttribute(string name, object value) => Assert.Contains(Frames(_root), frame =>
+            frame.FrameType == RenderTreeFrameType.Attribute && frame.AttributeName == name && Equals(frame.AttributeValue, value));
+        internal void AssertToolbarOrder()
+        {
+            var frames = Frames(_root).ToArray();
+            var labels = Enumerable.Range(0, frames.Length)
+                .Where(i => frames[i].FrameType == RenderTreeFrameType.Element && frames[i].ElementName == "button")
+                .SelectMany(i => frames.Skip(i + 1).TakeWhile(frame => frame.FrameType == RenderTreeFrameType.Attribute))
+                .Where(frame => frame.AttributeName == "aria-label")
+                .Select(frame => frame.AttributeValue as string)
+                .Where(label => label is "Side by side" or "Stacked" or "Fullscreen Markdown editor");
+            Assert.Equal(new[] { "Side by side", "Stacked", "Fullscreen Markdown editor" }, labels);
+        }
         internal void AssertLayout(string arrangement) => Assert.Contains(Frames(_root), frame => frame.FrameType == RenderTreeFrameType.Attribute &&
             frame.AttributeName == "class" && Equals(frame.AttributeValue, "description-layout " + arrangement));
         private IEnumerable<RenderTreeFrame> Frames(int id)

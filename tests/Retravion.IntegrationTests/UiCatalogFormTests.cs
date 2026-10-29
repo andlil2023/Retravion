@@ -179,9 +179,11 @@ public sealed class UiCatalogFormTests
         protected override void NavigateToCore(string uri, bool forceLoad) { }
     }
 
-    private sealed class NoOpJS : IJSRuntime
+    private sealed class NoOpJS : IJSRuntime, IJSObjectReference
     {
-        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) => ValueTask.FromResult(default(TValue)!);
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            ValueTask.FromResult(identifier == "import" ? (TValue)(object)this : default!);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
             InvokeAsync<TValue>(identifier, args);
     }

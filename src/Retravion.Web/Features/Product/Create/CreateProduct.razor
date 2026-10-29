@@ -8,13 +8,13 @@
 <SectionContent SectionName="product-page-header">
     <PageHeader Title="Create Product" BackHref="/products" BackText="Products" />
 </SectionContent>
-@if (_error is not null)
-{
-    <MudAlert Severity="Severity.Error" role="alert" Class="mb-4">@_error</MudAlert>
-}
 <DescriptionEditor InitialDescription="" Busy="_busy" OnSave="Create" FormId="create-product-form"
                    SubmitText="Create Product" Optional="true" CancelHref="/products">
     <ChildContent>
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" role="alert" Class="mb-4">@_error</MudAlert>
+        }
         <div class="product-identity">
             <MudTextField @bind-Value="_id" Label="Product ID" Variant="Variant.Outlined" Disabled="_busy" HelperText="Generated automatically. You may change it before creation; it cannot be changed afterward. Maximum 100 Unicode characters. IDs match exactly, including case and spaces." Required="true" />
             <MudTextField @bind-Value="_name" Label="Name" Variant="Variant.Outlined" Disabled="_busy" Required="true" />

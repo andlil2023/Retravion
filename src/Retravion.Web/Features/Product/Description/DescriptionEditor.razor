@@ -1,17 +1,32 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<dialog open @ref="_dialog" class="description-editor-shell @(_fullscreen ? "is-fullscreen" : "")"
+        role="@(_fullscreen ? "dialog" : "group")" aria-label="Markdown editor"
+        aria-modal="@(_fullscreen ? "true" : null)" @oncancel="ExitFullscreen" @oncancel:preventDefault>
 <MudPaper Class="product-card" Elevation="0">
     <form id="@FormId" @onsubmit="Save" @onsubmit:preventDefault aria-label="@SubmitText">
         @ChildContent
         <div class="description-toolbar">
             <h2>@(Optional ? "Description (optional)" : "Description")</h2>
-            <div class="description-tools" role="group" aria-label="Editor and preview arrangement">
-                <MudIconButton Icon="@Icons.Material.Outlined.VerticalSplit" Class="product-button" Size="Size.Small"
-                               Color="@(_arrangement == "side-by-side" ? Color.Primary : Color.Default)"
-                               OnClick='@(() => _arrangement = "side-by-side")'
-                               aria-label="Side by side" title="Side by side" aria-pressed="@(_arrangement == "side-by-side")" />
-                <MudIconButton Icon="@Icons.Material.Outlined.HorizontalSplit" Class="product-button" Size="Size.Small"
-                               Color="@(_arrangement == "stacked" ? Color.Primary : Color.Default)"
-                               OnClick='@(() => _arrangement = "stacked")'
-                               aria-label="Stacked" title="Stacked" aria-pressed="@(_arrangement == "stacked")" />
+            <div class="description-tools" role="group" aria-label="Editor controls">
+                <div class="description-arrangement" role="group" aria-label="Editor and preview arrangement">
+                    <MudIconButton Icon="@Icons.Material.Outlined.VerticalSplit" Class="product-button" Size="Size.Small"
+                                   Color="@(_arrangement == "side-by-side" ? Color.Primary : Color.Default)"
+                                   OnClick='@(() => _arrangement = "side-by-side")'
+                                   aria-label="Side by side" title="Side by side" aria-pressed="@(_arrangement == "side-by-side")" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.HorizontalSplit" Class="product-button" Size="Size.Small"
+                                   Color="@(_arrangement == "stacked" ? Color.Primary : Color.Default)"
+                                   OnClick='@(() => _arrangement = "stacked")'
+                                   aria-label="Stacked" title="Stacked" aria-pressed="@(_arrangement == "stacked")" />
+                </div>
+                <MudIconButton data-markdown-fullscreen-toggle="true"
+                               Icon="@(_fullscreen ? Icons.Material.Outlined.FullscreenExit : Icons.Material.Outlined.Fullscreen)"
+                               Class="product-button" Size="Size.Small" aria-busy="@_changingMode" OnClick="ToggleFullscreen"
+                               aria-label="@(_fullscreen ? "Exit fullscreen Markdown editor" : "Fullscreen Markdown editor")"
+                               title="@(_fullscreen ? "Exit fullscreen (Escape)" : "Fullscreen Markdown editor")"
+                               aria-expanded="@_fullscreen" />
             </div>
         </div>
         <div class="description-layout @_arrangement">
@@ -19,6 +34,10 @@
                 <label for="product-markdown">Description (Markdown)</label>
                 <textarea id="product-markdown" value="@_markdown" @oninput="Edit" disabled="@Busy" rows="12" spellcheck="true"></textarea>
             </div>
+            <div class="description-splitter" role="separator" tabindex="0" aria-orientation="vertical"
+                 aria-label="Resize Markdown and preview panes" aria-controls="product-markdown"
+                 aria-valuemin="25" aria-valuemax="75" aria-valuenow="50"
+                 title="Drag to resize; use Left/Right arrow keys, Home or End"></div>
             <section aria-label="Description preview" class="description-preview">
                 <h3>Preview</h3>
                 @((MarkupString)ProductMarkdown.Render(_markdown))
@@ -34,6 +53,11 @@
         <MudButton Href="@CancelHref" Class="product-button">Cancel</MudButton>
     }
 </div>
+@if (_fullscreenError is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert" Class="mt-4">@_fullscreenError</MudAlert>
+}
+</dialog>
 
 @code {
     [Parameter, EditorRequired] public string InitialDescription { get; set; } = "";
@@ -47,6 +71,67 @@
     private string _markdown = "";
     private string _arrangement = "side-by-side";
     private bool _initialized;
+    private ElementReference _dialog;
+    private IJSObjectReference? _module;
+    private bool _fullscreen;
+    private bool _changingMode;
+    private bool _applyMode;
+    private bool _disposed;
+    private string? _fullscreenError;
+
+    private void ToggleFullscreen()
+    {
+        if (_changingMode) return;
+        _fullscreenError = null;
+        _fullscreen = !_fullscreen;
+        _changingMode = _applyMode = true;
+    }
+
+    private void ExitFullscreen()
+    {
+        if (_fullscreen) ToggleFullscreen();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if ((!firstRender && !_applyMode) || _disposed) return;
+        var applyMode = _applyMode;
+        _applyMode = false;
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/markdownFullscreen.js");
+            if (_disposed)
+            {
+                await _module.DisposeAsync();
+                return;
+            }
+            if (firstRender) await _module.InvokeVoidAsync("initializeSplitter", _dialog);
+            if (applyMode) await _module.InvokeVoidAsync("setFullscreen", _dialog, _fullscreen);
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException)
+        {
+            _fullscreen = false;
+            _fullscreenError = "Editor display controls could not be changed. Continue editing in the normal page.";
+        }
+        finally
+        {
+            _changingMode = false;
+            if (!_disposed && (applyMode || _fullscreenError is not null)) StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        if (_module is null) return;
+        try
+        {
+            await _module.InvokeVoidAsync("dispose", _dialog);
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+    }
 
     protected override void OnParametersSet()
     {
