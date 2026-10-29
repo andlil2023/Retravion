@@ -1,6 +1,7 @@
 using System.Data.Common;
 using Retravion.Application.Product;
 using Retravion.Application.Product.Create;
+using Retravion.Application.Product.Edit;
 using Retravion.Application.Product.Description;
 using Retravion.Application.Product.Retrieve;
 using Retravion.Application.Product.Status;
@@ -80,6 +81,7 @@ builder.Services.AddSingleton<IProductStore>(_ => new PostgresProductStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddSingleton<CreateProduct>();
+builder.Services.AddSingleton<EditProduct>();
 builder.Services.AddSingleton<RetrieveProduct>();
 builder.Services.AddSingleton<ChangeProductStatus>();
 builder.Services.AddSingleton<UpdateProductDescription>();

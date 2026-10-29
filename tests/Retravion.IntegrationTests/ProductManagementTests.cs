@@ -41,7 +41,9 @@ public sealed partial class AccountManagementTests
         var operations = scope.ServiceProvider.GetRequiredService<ProductOperations>();
         Assert.Contains("href=\"/products\"", await user.GetStringAsync("/home"));
         var landing = await user.GetStringAsync("/products");
-        Assert.Contains("Retrieve Product", landing);
+        Assert.Contains("Search Product ID or name", landing);
+        Assert.Contains("Status", landing);
+        Assert.Contains("Product ID", landing);
         Assert.Contains("href=\"/products/create\"", landing);
         Assert.Single(Regex.Matches(landing, "<h1\\b"));
         var form = await user.GetStringAsync("/products/create");
@@ -69,6 +71,9 @@ public sealed partial class AccountManagementTests
         Assert.True(result.Value.IsActive);
         Assert.True((await operations.Create(actor, id, "Duplicate", ProductKind.System, "")).IsFailure);
         Assert.True((await operations.Create(actor, "invalid", " \t", ProductKind.System, "")).IsFailure);
+        var list = await operations.List(actor);
+        Assert.True(list.IsSuccess);
+        Assert.Contains(list.Value, p => p.Id == id);
         var callsBeforeOversizedId = products.Calls;
         var oversized = await operations.Create(actor, new string('a', 101), "Too long", ProductKind.System, "");
         Assert.True(oversized.IsFailure);
@@ -79,15 +84,37 @@ public sealed partial class AccountManagementTests
         Assert.Contains("&lt;script&gt;Product&lt;/script&gt;", details);
         Assert.Contains("&lt;b&gt;Plain description&lt;/b&gt;", details);
         Assert.DoesNotContain("<script>Product</script>", details);
-        AssertProductAction(details, "Retire");
+        Assert.Contains("/products/edit?id=", details);
+        Assert.DoesNotContain(result.Value.InternalId.ToString(), details);
+        Assert.DoesNotContain(">Retire</button>", details);
+        var editPage = await user.GetStringAsync("/products/edit?id=" + Uri.EscapeDataString(id));
+        Assert.Contains("Description (Markdown)", editPage);
+        Assert.Contains("Retire", editPage);
+        AssertFilledPrimaryButton(Assert.Single(Regex.Matches(editPage, "<button\\b[^>]*>[\\s\\S]*?</button>").Cast<Match>(),
+            match => Regex.Replace(match.Value, "<[^>]+>", "").Trim() == "Retire").Value);
+        Assert.Contains("Save", editPage);
         Assert.True((await operations.ChangeStatus(actor, id, result.Value.InternalId, false)).IsSuccess);
         Assert.False((await operations.Retrieve(actor, id)).Value.IsActive);
         details = await user.GetStringAsync(detailPath);
         Assert.Contains("class=\"product-status\">Retired</span>", details);
         Assert.DoesNotContain("<dt>Name</dt>", details);
         Assert.DoesNotContain("max-width:40rem", details);
-        AssertProductAction(details, "Reactivate");
-        Assert.True((await operations.ChangeStatus(actor, id, result.Value.InternalId, true)).IsSuccess);
+        Assert.Contains("/products/edit?id=", details);
+        Assert.DoesNotContain(">Reactivate</button>", details);
+        editPage = await user.GetStringAsync("/products/edit?id=" + Uri.EscapeDataString(id));
+        Assert.Contains("Reactivate", editPage);
+        AssertFilledPrimaryButton(Assert.Single(Regex.Matches(editPage, "<button\\b[^>]*>[\\s\\S]*?</button>").Cast<Match>(),
+            match => Regex.Replace(match.Value, "<[^>]+>", "").Trim() == "Reactivate").Value);
+        Assert.Matches("<textarea[^>]*disabled", editPage);
+        var retired = (await operations.Retrieve(actor, id)).Value;
+        Assert.True((await operations.Edit(actor, retired, id, "Changed", ProductKind.Firmware, "new", false)).IsFailure);
+        var reactivated = await operations.Edit(actor, retired, id, "Changed", ProductKind.Firmware, "new", true);
+        Assert.True(reactivated.IsSuccess);
+        Assert.True(reactivated.Value.IsActive);
+        Assert.Equal("Changed", reactivated.Value.Name);
+        Assert.Equal("new", reactivated.Value.Description);
+        Assert.True((await operations.Retire(actor, retired)).IsFailure);
+        Assert.True((await operations.Edit(actor, reactivated.Value, id, "<script>Product</script>", ProductKind.System, "<b>Plain description</b>", false)).IsSuccess);
         Assert.True((await operations.Retrieve(actor, id)).Value.IsActive);
         var editor = await user.GetStringAsync("/products/description?id=" + Uri.EscapeDataString(id));
         Assert.Contains("Description (Markdown)", editor);
@@ -116,6 +143,9 @@ public sealed partial class AccountManagementTests
         var calls = products.Calls;
         Assert.True((await operations.Create(actor, "revoked", "No", ProductKind.System, "")).IsFailure);
         Assert.True((await operations.Retrieve(actor, id)).IsFailure);
+        Assert.True((await operations.List(actor)).IsFailure);
+        Assert.True((await operations.Edit(actor, result.Value, id, "Denied", ProductKind.System, "", false)).IsFailure);
+        Assert.True((await operations.Retire(actor, result.Value)).IsFailure);
         Assert.True((await operations.ChangeStatus(actor, id, result.Value.InternalId, false)).IsFailure);
         Assert.True((await operations.UpdateDescription(actor, id, result.Value.InternalId, "", "denied")).IsFailure);
         Assert.Equal(calls, products.Calls);
@@ -129,13 +159,13 @@ public sealed partial class AccountManagementTests
         await using var factory = baseFactory.WithWebHostBuilder(builder =>
             builder.ConfigureServices(services => services.AddSingleton<IProductStore>(products)));
         using var user = Client(factory);
-        foreach (var path in new[] { "/products", "/products/create", "/products/details?id=anything", "/products/description?id=anything" })
+        foreach (var path in new[] { "/products", "/products/create", "/products/details?id=anything", "/products/description?id=anything", "/products/edit?id=anything" })
         {
             using var denied = await user.GetAsync(path);
             Assert.Equal("/", denied.Headers.Location?.OriginalString);
         }
         var restricted = await ProductPrincipal(user, factory.Services, "admin", Initial, "/password-replacement");
-        foreach (var path in new[] { "/products", "/products/create", "/products/details?id=anything", "/products/description?id=anything" })
+        foreach (var path in new[] { "/products", "/products/create", "/products/details?id=anything", "/products/description?id=anything", "/products/edit?id=anything" })
         {
             using var denied = await user.GetAsync(path);
             Assert.Equal("/password-replacement", denied.Headers.Location?.OriginalString);
@@ -146,6 +176,10 @@ public sealed partial class AccountManagementTests
         {
             Assert.True((await operations.Create(actor, "denied", "Denied", ProductKind.System, "")).IsFailure);
             Assert.True((await operations.Retrieve(actor, "anything")).IsFailure);
+            Assert.True((await operations.List(actor)).IsFailure);
+            var expected = ProductState.Create("anything", "Name", ProductKind.System, "").Value;
+            Assert.True((await operations.Edit(actor, expected, "anything", "Denied", ProductKind.System, "", false)).IsFailure);
+            Assert.True((await operations.Retire(actor, expected)).IsFailure);
             Assert.True((await operations.ChangeStatus(actor, "anything", Guid.NewGuid(), false)).IsFailure);
             Assert.True((await operations.UpdateDescription(actor, "anything", Guid.NewGuid(), "", "denied")).IsFailure);
         }
@@ -191,6 +225,11 @@ public sealed partial class AccountManagementTests
         {
             Calls++;
             return Task.FromResult(products.TryAdd(product.Id, product) ? Result.Success() : Result.Failure("Duplicate Product ID."));
+        }
+        public Task<Result<IReadOnlyList<ProductState>>> List(CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(Result.Success<IReadOnlyList<ProductState>>(products.Values.ToArray()));
         }
         public Task<Result<Maybe<ProductState>>> Find(string id, CancellationToken cancellationToken = default)
         {
