@@ -1,31 +1,49 @@
-<MudPaper Class="pa-4" Elevation="0">
-    <form id="product-description-form" @onsubmit="Save" @onsubmit:preventDefault aria-label="Edit Product description">
-        <label for="preview-arrangement">Editor and preview arrangement</label>
-        <select id="preview-arrangement" @bind="_arrangement">
-            <option value="side-by-side">Side by side</option>
-            <option value="stacked">Stacked</option>
-        </select>
+<MudPaper Class="product-card" Elevation="0">
+    <form id="@FormId" @onsubmit="Save" @onsubmit:preventDefault aria-label="@SubmitText">
+        @ChildContent
+        <div class="description-toolbar">
+            <h2>@(Optional ? "Description (optional)" : "Description")</h2>
+            <div class="description-tools" role="group" aria-label="Editor and preview arrangement">
+                <MudIconButton Icon="@Icons.Material.Outlined.VerticalSplit" Class="product-button" Size="Size.Small"
+                               Color="@(_arrangement == "side-by-side" ? Color.Primary : Color.Default)"
+                               OnClick='@(() => _arrangement = "side-by-side")'
+                               aria-label="Side by side" title="Side by side" aria-pressed="@(_arrangement == "side-by-side")" />
+                <MudIconButton Icon="@Icons.Material.Outlined.HorizontalSplit" Class="product-button" Size="Size.Small"
+                               Color="@(_arrangement == "stacked" ? Color.Primary : Color.Default)"
+                               OnClick='@(() => _arrangement = "stacked")'
+                               aria-label="Stacked" title="Stacked" aria-pressed="@(_arrangement == "stacked")" />
+            </div>
+        </div>
         <div class="description-layout @_arrangement">
-            <div>
-                <MudTextField T="string" Value="_markdown" ValueChanged="Edit" Immediate="true" Lines="12"
-                              Label="Description (Markdown)" Disabled="Busy" />
+            <div class="description-source">
+                <label for="product-markdown">Description (Markdown)</label>
+                <textarea id="product-markdown" value="@_markdown" @oninput="Edit" disabled="@Busy" rows="12" spellcheck="true"></textarea>
             </div>
             <section aria-label="Description preview" class="description-preview">
-                <h2>Preview</h2>
+                <h3>Preview</h3>
                 @((MarkupString)ProductMarkdown.Render(_markdown))
             </section>
         </div>
     </form>
 </MudPaper>
-<div class="mt-4">
-    <MudButton ButtonType="ButtonType.Submit" form="product-description-form" Variant="Variant.Filled" Color="Color.Primary"
-               Disabled="Busy" Style="min-height:44px">Save description</MudButton>
+<div class="product-actions">
+    <MudButton ButtonType="ButtonType.Submit" form="@FormId" Variant="Variant.Filled" Color="Color.Primary"
+               Disabled="Busy" Class="product-button">@SubmitText</MudButton>
+    @if (CancelHref is not null)
+    {
+        <MudButton Href="@CancelHref" Class="product-button">Cancel</MudButton>
+    }
 </div>
 
 @code {
     [Parameter, EditorRequired] public string InitialDescription { get; set; } = "";
     [Parameter] public bool Busy { get; set; }
     [Parameter] public EventCallback<string> OnSave { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string FormId { get; set; } = "product-description-form";
+    [Parameter] public string SubmitText { get; set; } = "Save description";
+    [Parameter] public string? CancelHref { get; set; }
+    [Parameter] public bool Optional { get; set; }
     private string _markdown = "";
     private string _arrangement = "side-by-side";
     private bool _initialized;
@@ -37,6 +55,6 @@
         _initialized = true;
     }
 
-    private void Edit(string value) => _markdown = value;
+    private void Edit(ChangeEventArgs args) => _markdown = args.Value?.ToString() ?? "";
     private Task Save() => Busy ? Task.CompletedTask : OnSave.InvokeAsync(_markdown);
 }

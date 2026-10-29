@@ -51,6 +51,13 @@ public sealed partial class AccountManagementTests
         Assert.DoesNotContain("disabled", input);
         Assert.DoesNotContain(generated.Value, await user.GetStringAsync("/products/create"));
         Assert.Contains("Description (optional)", form);
+        Assert.Contains("Description preview", form);
+        Assert.Contains("aria-label=\"Side by side\"", form);
+        Assert.Contains("aria-label=\"Stacked\"", form);
+        Assert.DoesNotContain("<select", form);
+        Assert.DoesNotContain("max-width:40rem", form);
+        Assert.Contains("Products</span>", form);
+        Assert.Contains("aria-current=\"page\"", form);
         Assert.Contains("Maximum 100 Unicode characters.", form);
         var header = Regex.Match(form, "<header\\b[^>]*class=\"page-toolbar\"[^>]*>[\\s\\S]*?</header>");
         Assert.DoesNotContain("form=\"create-product-form\"", header.Value);
@@ -79,7 +86,9 @@ public sealed partial class AccountManagementTests
         Assert.True((await operations.ChangeStatus(actor, id, false)).IsSuccess);
         Assert.False((await operations.Retrieve(actor, id)).Value.IsActive);
         details = await user.GetStringAsync(detailPath);
-        Assert.Contains("<dd>Retired</dd>", details);
+        Assert.Contains("class=\"product-status\">Retired</span>", details);
+        Assert.DoesNotContain("<dt>Name</dt>", details);
+        Assert.DoesNotContain("max-width:40rem", details);
         AssertProductAction(details, "Reactivate");
         Assert.True((await operations.ChangeStatus(actor, id, true)).IsSuccess);
         Assert.True((await operations.Retrieve(actor, id)).Value.IsActive);
@@ -88,10 +97,16 @@ public sealed partial class AccountManagementTests
         Assert.Contains("Side by side", editor);
         Assert.Contains("Stacked", editor);
         Assert.Contains("Save description", editor);
+        Assert.Contains("&lt;b&gt;Plain description&lt;/b&gt;", editor);
+        Assert.DoesNotContain("_product.Description", editor);
+        Assert.DoesNotContain("<select", editor);
         Assert.True((await operations.UpdateDescription(actor, id, "<b>Plain description</b>", "# Heading\n\n**Formatted**")).IsSuccess);
         details = await user.GetStringAsync(detailPath);
         Assert.Contains("<h1>Heading</h1>", details);
         Assert.Contains("<strong>Formatted</strong>", details);
+        editor = await user.GetStringAsync("/products/description?id=" + Uri.EscapeDataString(id));
+        Assert.Contains("<h1>Heading</h1>", editor);
+        Assert.Contains("<strong>Formatted</strong>", editor);
         Assert.True((await operations.UpdateDescription(actor, id, "# Heading\n\n**Formatted**", "## Updated\n\n*Again*")).IsSuccess);
         details = await user.GetStringAsync(detailPath);
         Assert.Contains("<h2>Updated</h2>", details);
@@ -147,10 +162,12 @@ public sealed partial class AccountManagementTests
         var button = Assert.Single(Regex.Matches(html, "<button\\b[^>]*>[\\s\\S]*?</button>").Cast<Match>(),
             match => Regex.Replace(match.Value, "<[^>]+>", "").Trim() == action);
         AssertFilledPrimaryButton(button.Value);
-        Assert.True(button.Index > html.IndexOf("</dl>", StringComparison.Ordinal));
-        var cardEnd = html.IndexOf("</div>", html.IndexOf("</dl>", StringComparison.Ordinal), StringComparison.Ordinal);
+        var article = Regex.Match(html, "<article\\b[^>]*aria-label=\"Product description\"[^>]*>[\\s\\S]*?</article>");
+        Assert.True(article.Success);
+        var cardEnd = html.IndexOf("</div>", article.Index + article.Length, StringComparison.Ordinal);
+        Assert.True(cardEnd >= 0);
         Assert.True(button.Index > cardEnd);
-        Assert.DoesNotContain("<input", Regex.Match(html, "<dl>[\\s\\S]*?</dl>").Value);
+        Assert.DoesNotContain("<input", article.Value);
     }
 
     private static async Task<ClaimsPrincipal> ProductPrincipal(HttpClient client, IServiceProvider services,

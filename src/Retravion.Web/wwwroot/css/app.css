@@ -131,6 +131,42 @@ a, button, input { -webkit-tap-highlight-color: transparent; }
 .page-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .page-content { flex: 1; padding: 32px; }
 .navigation-toggle.mud-icon-button, .navigation-backdrop { display: none; }
+/* Product workspace: compact controls, full-width authoring, readable documents. */
+.product-card.mud-paper { border: 1px solid var(--mud-palette-divider); border-radius: 10px; overflow: hidden; }
+.product-identity { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 24px; padding: 24px; border-bottom: 1px solid var(--mud-palette-divider); }
+.product-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.product-heading h2 { margin: 0; font-size: 26px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; min-width: 0; }
+.product-status { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; background: var(--mud-palette-action-default-hover); }
+.product-document { padding: 28px 32px; min-height: 260px; }
+.product-markdown { overflow: auto; overflow-wrap: anywhere; }
+.product-markdown img { max-width: 100%; }
+.product-markdown p { max-width: 75ch; }
+.product-empty { color: var(--mud-palette-text-secondary); }
+.product-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 20px; }
+.product-status-action { margin-left: auto; }
+.product-button.mud-button-root, .product-button.mud-icon-button { min-height: 36px; height: 36px; padding-top: 4px; padding-bottom: 4px; text-transform: none; }
+.product-button.mud-icon-button { width: 36px; padding: 6px; }
+@media (pointer: coarse) {
+    /* The real element is 44px: ripple overflow cannot clip its hit target.
+       Transparent borders leave a 36px painted surface inside that target. */
+    .product-button.mud-button-root, .product-button.mud-icon-button {
+        height: 44px;
+        min-height: 44px;
+        border: 4px solid transparent;
+        background-clip: padding-box;
+        box-shadow: none;
+    }
+    .product-button.mud-icon-button { width: 44px; }
+
+}
+@media (max-width: 850px) {
+    .product-identity { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+    .product-heading h2 { font-size: 22px; }
+    .product-identity, .product-document { padding: 20px; }
+    .product-status-action { margin-left: 0; }
+}
 .skip-link { position: fixed; top: -100px; left: 16px; z-index: 20; padding: 12px 18px; border-radius: 6px; color: #20384a; background: #fff; }
 .skip-link:focus { top: 12px; }
 

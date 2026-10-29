@@ -1,42 +1,41 @@
 @page "/products/create"
+@using Retravion.Web.Features.Product.Description
 @inject ProductOperations Operations
 @inject AuthenticationStateProvider Authentication
 @inject NavigationManager Navigation
 
 <PageTitle>Create Product · Retravion</PageTitle>
 <SectionContent SectionName="product-page-header">
-    <PageHeader Title="Create Product" BackHref="/products" />
+    <PageHeader Title="Create Product" BackHref="/products" BackText="Products" />
 </SectionContent>
-<MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
-    <form id="create-product-form" @onsubmit="Create" @onsubmit:preventDefault aria-label="Create Product">
-        <MudTextField @bind-Value="_id" Label="Product ID" HelperText="Generated automatically. You may change it before creation; it cannot be changed afterward. Maximum 100 Unicode characters. IDs match exactly, including case and spaces." Required="true" />
-        <MudTextField @bind-Value="_name" Label="Name" Required="true" />
-        <MudTextField @bind-Value="_description" Label="Description (optional)" Lines="6" />
-        @if (_error is not null)
-        {
-            <MudAlert Severity="Severity.Error" role="alert" Class="my-4">@_error</MudAlert>
-        }
-    </form>
-</MudPaper>
-<div class="mt-4">
-    <MudButton ButtonType="ButtonType.Submit" form="create-product-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" Style="min-height:44px">Create Product</MudButton>
-</div>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert" Class="mb-4">@_error</MudAlert>
+}
+<DescriptionEditor InitialDescription="" Busy="_busy" OnSave="Create" FormId="create-product-form"
+                   SubmitText="Create Product" Optional="true" CancelHref="/products">
+    <ChildContent>
+        <div class="product-identity">
+            <MudTextField @bind-Value="_id" Label="Product ID" Variant="Variant.Outlined" Disabled="_busy" HelperText="Generated automatically. You may change it before creation; it cannot be changed afterward. Maximum 100 Unicode characters. IDs match exactly, including case and spaces." Required="true" />
+            <MudTextField @bind-Value="_name" Label="Name" Variant="Variant.Outlined" Disabled="_busy" Required="true" />
+        </div>
+    </ChildContent>
+</DescriptionEditor>
 
 @code {
     private string _id = Guid.NewGuid().ToString();
     private string _name = "";
-    private string _description = "";
     private string? _error;
     private bool _busy;
 
-    private async Task Create()
+    private async Task Create(string markdown)
     {
         if (_busy) return;
         _busy = true;
         _error = null;
         try
         {
-            var result = await Operations.Create((await Authentication.GetAuthenticationStateAsync()).User, _id, _name, _description);
+            var result = await Operations.Create((await Authentication.GetAuthenticationStateAsync()).User, _id, _name, markdown);
             if (result.IsFailure) _error = result.Error;
             else Navigation.NavigateTo($"/products/details?id={Uri.EscapeDataString(result.Value.Id)}");
         }

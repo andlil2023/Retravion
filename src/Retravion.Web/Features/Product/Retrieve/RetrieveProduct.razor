@@ -4,16 +4,16 @@
 <PageTitle>Products · Retravion</PageTitle>
 <SectionContent SectionName="product-page-header">
     <PageHeader Title="Products">
-        <Actions><MudButton Href="/products/create" StartIcon="@Icons.Material.Outlined.Add">Create Product</MudButton></Actions>
+        <Actions><MudButton Class="product-button" Href="/products/create" StartIcon="@Icons.Material.Outlined.Add">Create Product</MudButton></Actions>
     </PageHeader>
 </SectionContent>
-<MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
+<MudPaper Class="product-card pa-4" Elevation="0">
     <form id="retrieve-product-form" @onsubmit="Retrieve" @onsubmit:preventDefault aria-label="Retrieve Product">
-        <MudTextField @bind-Value="_id" Label="Product ID" Required="true" />
+        <MudTextField @bind-Value="_id" Label="Product ID" Variant="Variant.Outlined" Required="true" />
     </form>
 </MudPaper>
-<div class="mt-4">
-    <MudButton ButtonType="ButtonType.Submit" form="retrieve-product-form" Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px">Retrieve Product</MudButton>
+<div class="product-actions">
+    <MudButton ButtonType="ButtonType.Submit" form="retrieve-product-form" Variant="Variant.Filled" Color="Color.Primary" Class="product-button">Retrieve Product</MudButton>
 </div>
 
 @code {
