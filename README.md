@@ -83,6 +83,39 @@ network. Both services are checked for readiness before the script reports succe
 .\deploy.ps1 -ResetDatabase -UpdateImages
 ```
 
+### View the UI catalog in Development mode
+
+From a checkout containing the UI catalog (currently branch `pbi/93-ui-catalog`), run:
+
+```powershell
+.\deploy.ps1 -Development
+```
+
+Sign in at **https://localhost:8443**, complete password replacement if required,
+then open **https://localhost:8443/development/ui-catalog** or select **UI catalog**
+under Development in the sidebar. Substitute `APP_HTTPS_PORT` from `.env` if changed.
+The switch explicitly sets both `ASPNETCORE_ENVIRONMENT` and `DOTNET_ENVIRONMENT`
+inside the application container; setting them in the calling shell alone does not
+select Development mode. Use this mode only for trusted local development: it enables
+Development-only behavior, including the catalog.
+
+No database reset or credential changes are needed. Existing database data, `.env`
+settings, and the HTTPS certificate are reused. Deployment still replaces the app
+container and ends its active sessions. The option also applies to the app recreated
+by `.\deploy.ps1 -RecoverAdministrator -Development`; recovery otherwise retains its
+existing confirmation and password-replacement requirements.
+
+Return to Production mode with:
+
+```powershell
+.\deploy.ps1
+```
+
+Without `-Development`, the app explicitly uses Production regardless of the shell's
+environment settings; the catalog and its navigation link are unavailable.
+
+### Deployment behavior
+
 A normal rerun replaces this setup's containers but retains the named database volume.
 Identity creates its schema/table when absent; no automatic upgrades of existing tables
 are performed. Early schema changes may require an explicit reset. The singleton key
