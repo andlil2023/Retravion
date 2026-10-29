@@ -42,6 +42,127 @@ public sealed class UiCatalogFormTests
         Assert.Empty(renderer.Errors);
     }
 
+    [Fact]
+    public async Task ListTemplateExposesLoadedLoadingEmptyErrorAndRetryStates()
+    {
+        await using var services = Services();
+        await using var renderer = new FormRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.Mount(typeof(CatalogListTemplate));
+            Assert.Contains("Another example", renderer.Text());
+            var selector = renderer.Components<MudSelect<string>>().Single();
+            await selector.ValueChanged.InvokeAsync("Loading");
+            Assert.Contains("Loading example items", renderer.Text());
+            Assert.DoesNotContain("Another example", renderer.Text());
+            await selector.ValueChanged.InvokeAsync("Empty");
+            Assert.Contains("No example items yet", renderer.Text());
+            await selector.ValueChanged.InvokeAsync("Error");
+            Assert.Contains("Example items could not be loaded", renderer.Text());
+            await renderer.Click("Retry example list");
+            Assert.Contains("Another example", renderer.Text());
+            Assert.DoesNotContain("could not be loaded", renderer.Text());
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAndEditTemplatesRetainInputOnFailureGuardBusyAndCancel(bool editMode)
+    {
+        await using var services = Services();
+        await using var renderer = new FormRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.Mount(typeof(CatalogPageForm), new() { [nameof(CatalogPageForm.EditMode)] = editMode });
+            var field = renderer.Components<MudTextField<string>>().First();
+            Assert.Equal(editMode ? "Existing example item" : "", field.GetState(x => x.Value));
+            await field.ValueChanged.InvokeAsync(" ");
+            await renderer.Submit();
+            Assert.Contains("An example name is required.", renderer.Text());
+            await field.ValueChanged.InvokeAsync("Changed example");
+            var outcome = renderer.Components<MudSelect<string>>().Single();
+            await outcome.ValueChanged.InvokeAsync("Failure");
+            await renderer.Submit();
+            Assert.Contains("Simulated save failed.", renderer.Text());
+            Assert.Equal("Changed example", renderer.Components<MudTextField<string>>().First().GetState(x => x.Value));
+            await outcome.ValueChanged.InvokeAsync("Hold busy");
+            await renderer.Submit();
+            Assert.Contains("Simulated request in progress", renderer.Text());
+            Assert.True(renderer.HasAttribute("disabled", true));
+            Assert.True(renderer.HasAttribute("aria-busy", "true"));
+            await renderer.Submit(); // A queued/double submit cannot complete a held request.
+            Assert.DoesNotContain("Example saved", renderer.Text());
+            await renderer.Click(editMode ? "Complete edit simulation" : "Complete create simulation");
+            Assert.Contains("Nothing was persisted", renderer.Text());
+            Assert.DoesNotContain("Simulated request in progress", renderer.Text());
+            await renderer.Click(editMode ? "Cancel edit example" : "Cancel create example");
+            Assert.Equal(editMode ? "Existing example item" : "", renderer.Components<MudTextField<string>>().First().GetState(x => x.Value));
+            Assert.Contains(editMode ? "original example values restored" : "example fields cleared", renderer.Text());
+            await outcome.ValueChanged.InvokeAsync("Success");
+            await renderer.Components<MudTextField<string>>().First().ValueChanged.InvokeAsync("Retry succeeds");
+            await renderer.Submit();
+            Assert.Contains("Example saved", renderer.Text());
+            Assert.DoesNotContain("Simulated save failed", renderer.Text());
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    [Fact]
+    public async Task MarkdownTemplateUsesActualEditorForLivePreviewLayoutsAndLocalSave()
+    {
+        await using var services = Services();
+        await using var renderer = new FormRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.Mount(typeof(CatalogMarkdownExample));
+            Assert.Single(renderer.Components<Retravion.Web.Features.Product.Description.DescriptionEditor>());
+            Assert.Contains("<strong>Markdown</strong>", renderer.Text());
+            await renderer.Event("oninput", new ChangeEventArgs { Value = "## Changed\n\n**Live**\n\n<script>alert(1)</script>" });
+            Assert.Contains("<strong>Live</strong>", renderer.Text());
+            Assert.DoesNotContain("<script>", renderer.Text());
+            await renderer.Event("onclick", new MouseEventArgs(), "aria-label", "Stacked");
+            Assert.True(renderer.HasAttribute("class", "description-layout stacked"));
+            Assert.True(renderer.ElementHasAttribute("aria-label", "Stacked", "aria-pressed", true));
+            await renderer.Submit();
+            Assert.Contains("Markdown captured for this demonstration only", renderer.Text());
+            Assert.Contains("Last saved Markdown source", renderer.Text());
+            await renderer.Event("onclick", new MouseEventArgs(), "aria-label", "Side by side");
+            Assert.True(renderer.HasAttribute("class", "description-layout side-by-side"));
+            Assert.True(renderer.ElementHasAttribute("aria-label", "Side by side", "aria-pressed", true));
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    [Fact]
+    public async Task ButtonGuideReportsRealInteractionStatesWithoutChangingBusinessData()
+    {
+        await using var services = Services();
+        await using var renderer = new FormRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.Mount(typeof(CatalogButtonGuide));
+            Assert.Contains("Default: ready", renderer.Text());
+            await renderer.Event("onmouseenter", new MouseEventArgs(), "id", "catalog-state-button");
+            Assert.Contains("Hover: pointer is over", renderer.Text());
+            await renderer.Event("onfocus", new FocusEventArgs(), "id", "catalog-state-button");
+            Assert.Contains("Keyboard focus:", renderer.Text());
+            await renderer.Event("onpointerdown", new PointerEventArgs(), "id", "catalog-state-button");
+            Assert.Contains("Pressed: pointer is held", renderer.Text());
+            await renderer.Event("onpointerup", new PointerEventArgs(), "id", "catalog-state-button");
+            Assert.Contains("Hover: pointer released", renderer.Text());
+            await renderer.Click("Try button states");
+            Assert.Contains("Activated: example only", renderer.Text());
+            Assert.True(renderer.HasAttribute("disabled", true));
+            Assert.True(renderer.HasAttribute("aria-busy", "true"));
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    private static ServiceProvider Services() => new ServiceCollection().AddLogging().AddMudServices()
+        .AddSingleton<IJSRuntime, NoOpJS>().AddSingleton<NavigationManager, TestNavigation>().BuildServiceProvider();
+
     private sealed class TestNavigation : NavigationManager
     {
         public TestNavigation() => Initialize("https://localhost/", "https://localhost/development/ui-catalog");
@@ -64,14 +185,41 @@ public sealed class UiCatalogFormTests
         internal List<Exception> Errors { get; } = [];
         protected override void HandleException(Exception exception) => Errors.Add(exception);
         protected override Task UpdateDisplayAsync(in RenderBatch renderBatch) => Task.CompletedTask;
-        internal Task Mount()
+        internal Task Mount(Type? type = null, Dictionary<string, object?>? parameters = null)
         {
-            _root = AssignRootComponentId(InstantiateComponent(typeof(CatalogForm)));
-            return RenderRootComponentAsync(_root, ParameterView.Empty);
+            _root = AssignRootComponentId(InstantiateComponent(type ?? typeof(CatalogForm)));
+            return RenderRootComponentAsync(_root, parameters is null ? ParameterView.Empty : ParameterView.FromDictionary(parameters));
+        }
+        internal IEnumerable<T> Components<T>() => Frames(_root).Where(frame => frame.FrameType == RenderTreeFrameType.Component)
+            .Select(frame => frame.Component).OfType<T>();
+        internal bool HasAttribute(string name, object value) => Frames(_root).Any(frame =>
+            frame.FrameType == RenderTreeFrameType.Attribute && frame.AttributeName == name && Equals(frame.AttributeValue, value));
+        internal bool ElementHasAttribute(string matchName, string matchValue, string name, object value) =>
+            Attributes().Any(attributes => attributes.Any(frame => frame.AttributeName == matchName && Equals(frame.AttributeValue, matchValue)) &&
+                attributes.Any(frame => frame.AttributeName == name && Equals(frame.AttributeValue, value)));
+        private IEnumerable<RenderTreeFrame[]> Attributes()
+        {
+            var frames = Frames(_root).ToArray();
+            return Enumerable.Range(0, frames.Length).Where(i => frames[i].FrameType == RenderTreeFrameType.Element)
+                .Select(i => frames.Skip(i + 1).TakeWhile(frame => frame.FrameType == RenderTreeFrameType.Attribute).ToArray());
+        }
+        internal Task Event(string name, EventArgs args, string? matchName = null, string? matchValue = null)
+        {
+            var attributes = Attributes().Single(attributes => attributes.Any(frame => frame.AttributeName == name && frame.AttributeEventHandlerId != 0) &&
+                (matchName is null || attributes.Any(frame => frame.AttributeName == matchName && Equals(frame.AttributeValue, matchValue))));
+            var handler = attributes.Single(frame => frame.AttributeName == name);
+            return DispatchEventAsync(handler.AttributeEventHandlerId, null, args);
+        }
+        internal Task Click(string text)
+        {
+            var button = Frames(_root).Where(frame => frame.FrameType == RenderTreeFrameType.Component && frame.Component is MudButton)
+                .Single(frame => Text(frame.ComponentId).Trim() == text);
+            return ((MudButton)button.Component).OnClick.InvokeAsync(new MouseEventArgs());
         }
         internal MudTextField<string> NameField() => Frames(_root).Where(frame => frame.FrameType == RenderTreeFrameType.Component)
             .Select(frame => frame.Component).OfType<MudTextField<string>>().Single();
-        internal string Text() => string.Join("", Frames(_root).Select(frame => frame.FrameType switch
+        internal string Text() => Text(_root);
+        private string Text(int id) => string.Join("", Frames(id).Select(frame => frame.FrameType switch
         {
             RenderTreeFrameType.Text => frame.TextContent,
             RenderTreeFrameType.Markup => frame.MarkupContent,

@@ -1,0 +1,19 @@
+@using MudBlazor
+@using Retravion.Web.Features.Product.Description
+
+<p>This is the actual Product DescriptionEditor, not a separately styled Markdown control.
+    Edit the text to update the sanitized preview without saving. Choose Side by side or Stacked;
+    the active layout uses a persistent highlight and <code>aria-pressed</code>, distinct from pointer hover.</p>
+<DescriptionEditor InitialDescription="@InitialMarkdown" OnSave="Save" FormId="catalog-markdown-form"
+                   SubmitText="Save Markdown example" CancelHref="/development/ui-catalog#page-pattern" />
+@if (_saved is not null)
+{
+    <MudAlert Severity="Severity.Success" role="status" Class="my-4">Markdown captured for this demonstration only; nothing was persisted.</MudAlert>
+    <details><summary>Last saved Markdown source</summary><pre><code>@_saved</code></pre></details>
+}
+
+@code {
+    private const string InitialMarkdown = "## Example description\n\nEdit **Markdown** here.\n\n- Live preview\n- No database writes";
+    private string? _saved;
+    private void Save(string markdown) => _saved = markdown;
+}

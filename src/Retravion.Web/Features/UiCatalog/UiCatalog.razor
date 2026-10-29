@@ -19,7 +19,7 @@
             The visual foundation remains provisional; only rules in <code>docs/patterns.md</code> are established.
             Use the shell theme toggle to inspect examples in light and dark mode.</p>
         <nav aria-label="Catalog sections" class="catalog-links">
-            <a href="/development/ui-catalog#foundations">Foundations</a><a href="/development/ui-catalog#components">Components</a><a href="/development/ui-catalog#page-pattern">Page pattern</a>
+            <a href="/development/ui-catalog#foundations">Foundations</a><a href="/development/ui-catalog#components">Components</a><a href="/development/ui-catalog#page-pattern">Page templates</a><a href="/development/ui-catalog#button-guide">Button sizing and states</a>
         </nav>
 
         <section id="foundations" aria-labelledby="foundations-heading">
@@ -109,6 +109,11 @@
                 Source: <code>src/Retravion.Web/Features/Identity/Users/CreateUser.razor</code>; rule: <code>docs/patterns.md</code>.</p>
             <pre><code>@ButtonSnippet</code></pre>
 
+            <section id="button-guide" aria-labelledby="button-guide-heading">
+                <h3 id="button-guide-heading">Button sizing and interaction reference</h3>
+                <CatalogButtonGuide />
+            </section>
+
             <h3>Form controls and validation</h3>
             <MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
                 <MudTextField T="string" Label="Editable field" HelperText="Use a visible label and explain constraints." />
@@ -133,7 +138,9 @@
         </section>
 
         <section id="page-pattern" aria-labelledby="pattern-heading">
-            <h2 id="pattern-heading">Representative form page</h2>
+            <h2 id="pattern-heading">Page templates</h2>
+            <CatalogPageTemplates />
+            <h3>Minimal form reference</h3>
             <p>The shared PageHeader above supplies the page title and back navigation. The form action below belongs outside and after its card, never in the toolbar.
                 Submit empty to see validation; enter a name to see success. This example makes no server-side changes.</p>
             <CatalogForm />

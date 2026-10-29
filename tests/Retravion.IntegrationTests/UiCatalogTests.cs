@@ -54,6 +54,27 @@ public sealed partial class AccountManagementTests
         Assert.Contains("Example category", html);
         Assert.Contains("CreateUser.razor", html);
         Assert.Contains("docs/patterns.md", html);
+        foreach (var section in new[] { "list-template", "create-template", "edit-template", "markdown-template", "button-guide" })
+            Assert.Contains($"id=\"{section}\"", html);
+        Assert.Contains("List demonstration state", html);
+        Assert.Contains("Edit example name", html);
+        Assert.Contains("Existing example item", html);
+        Assert.Contains("Save Markdown example", html);
+        Assert.Contains("DescriptionEditor.razor.css", html);
+        Assert.Contains("min-width: 64px", html);
+        Assert.Contains("44 × 44px", WebUtility.HtmlDecode(html));
+        Assert.Contains("catalog-state-button", html);
+        Assert.Contains("&lt;DescriptionEditor", html);
+        foreach (var id in new[] { "catalog-create-form", "catalog-edit-form", "catalog-markdown-form" })
+        {
+            var templateForm = Regex.Match(html, $"<form(?=[^>]*id=\"{id}\")[^>]*>[\\s\\S]*?</form>");
+            Assert.True(templateForm.Success);
+            var action = Regex.Match(html, $"<button(?=[^>]*form=\"{id}\")[^>]*>[\\s\\S]*?</button>");
+            Assert.True(action.Success);
+            Assert.True(action.Index > templateForm.Index + templateForm.Length);
+            AssertFilledPrimaryButton(action.Value);
+            Assert.DoesNotContain(id, header);
+        }
         Assert.Contains("&lt;MudButton", html); // Snippets are encoded text, not executable markup.
         Assert.Contains("&lt;MudTable", html);
         var form = Regex.Match(html, "<form(?=[^>]*id=\"catalog-example-form\")[^>]*>[\\s\\S]*?</form>");
