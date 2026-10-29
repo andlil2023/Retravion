@@ -1,0 +1,239 @@
+@page "/development/ui-catalog"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "UiCatalogDevelopment")]
+@using Microsoft.AspNetCore.Components.Sections
+@using Retravion.Web.Components
+@using MudBlazor
+@using MudBlazor.Utilities
+@using Microsoft.AspNetCore.Components.Web
+@using Retravion.Web.Components.Layout
+@inject IWebHostEnvironment Environment
+
+@if (Environment.IsDevelopment())
+{
+    <PageTitle>UI catalog · Retravion</PageTitle>
+    <SectionContent SectionName="catalog-page-header">
+        <PageHeader Title="UI catalog" BackHref="/home" BackText="Home" />
+    </SectionContent>
+    <div class="ui-catalog">
+        <p>Living reference for humans and AI. Reuse the theme and components, not copied color values.
+            The visual foundation remains provisional; only rules in <code>docs/patterns.md</code> are established.
+            Use the shell theme toggle to inspect examples in light and dark mode.</p>
+        <nav aria-label="Catalog sections" class="catalog-links">
+            <a href="#foundations">Foundations</a><a href="#components">Components</a><a href="#page-pattern">Page pattern</a>
+        </nav>
+
+        <section id="foundations" aria-labelledby="foundations-heading">
+            <h2 id="foundations-heading">Foundations</h2>
+            <p>Source: <code>src/Retravion.Web/Components/Layout/PrototypeTheme.cs</code>.
+                Values below come directly from <code>PrototypeTheme.Value</code>, including MudBlazor defaults.</p>
+            <h3>Colors</h3>
+            <p>Use semantic <code>Color</code> parameters or <code>--mud-palette-*</code> CSS variables.
+                Do not introduce page-specific hex colors. Both palette columns remain visible for comparison.</p>
+            <div class="catalog-table" tabindex="0" role="region" aria-label="Theme palette values">
+                <table>
+                    <thead><tr><th scope="col">Token / CSS variable</th><th scope="col">Light</th><th scope="col">Dark</th></tr></thead>
+                    <tbody>
+                        @foreach (var token in Colors)
+                        {
+                            <tr>
+                                <th scope="row">@token.Name<br /><code>--mud-palette-@token.Variable</code></th>
+                                <td><span class="swatch" style="background:@token.Value(Theme.PaletteLight)" aria-hidden="true"></span><code>@token.Value(Theme.PaletteLight)</code></td>
+                                <td><span class="swatch" style="background:@token.Value(Theme.PaletteDark)" aria-hidden="true"></span><code>@token.Value(Theme.PaletteDark)</code></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <pre><code>@ColorSnippet</code></pre>
+
+            <h3>Typography</h3>
+            <p>Default font stack: <code>@string.Join(", ", Theme.Typography.Default.FontFamily ?? [])</code>.
+                The rows show each variant's actual font stack, size, weight, and line height.
+                MudText typography is not a replacement for the shell's PageHeader or existing page-specific CSS.</p>
+            <div class="catalog-table" tabindex="0" role="region" aria-label="Theme typography values">
+                <table>
+                    <thead><tr><th scope="col">Variant / live sample</th><th scope="col">Font family</th><th scope="col">Size / weight / line height</th></tr></thead>
+                    <tbody>
+                        @foreach (var sample in TypographySamples)
+                        {
+                            <tr><td><MudText Typo="@sample.Variant" HtmlTag="div">@sample.Variant</MudText></td>
+                                <td>@string.Join(", ", sample.Value.FontFamily ?? Theme.Typography.Default.FontFamily ?? [])</td>
+                                <td><code>@sample.Value.FontSize / @sample.Value.FontWeight / @sample.Value.LineHeight</code></td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <pre><code>@TypographySnippet</code></pre>
+
+            <h3>Spacing, shape, and responsive grid</h3>
+            <p>Use existing MudBlazor spacing utilities: <code>pa-4</code> for card padding and <code>mt-4</code> for actions below cards.
+                The boxes demonstrate <code>pa-2</code>, <code>pa-4</code>, and <code>pa-6</code>.
+                Theme border radius: <code>@Theme.LayoutProperties.DefaultBorderRadius</code>.
+                Standard cards here use <code>MudPaper Elevation="0"</code>; avoid adding decorative shadows without a need.</p>
+            <MudGrid Spacing="4">
+                <MudItem xs="12" sm="6" md="4"><MudPaper Class="pa-2" Elevation="0">pa-2 · xs=12, sm=6, md=4</MudPaper></MudItem>
+                <MudItem xs="12" sm="6" md="4"><MudPaper Class="pa-4" Elevation="0">pa-4 · xs=12, sm=6, md=4</MudPaper></MudItem>
+                <MudItem xs="12" sm="6" md="4"><MudPaper Class="pa-6" Elevation="0">pa-6 · xs=12, sm=6, md=4</MudPaper></MudItem>
+            </MudGrid>
+            <p>Use the 12-column grid for grouped content: full width on phones, two columns at sm, three at md.
+                This is a library example, not a newly established application layout pattern.
+                Existing shell and product breakpoints live in <code>src/Retravion.Web/wwwroot/css/app.css</code>.</p>
+            <pre><code>@GridSnippet</code></pre>
+
+            <h3>Icons</h3>
+            <div class="catalog-examples">
+                <span><MudIcon Icon="@Icons.Material.Outlined.Home" /> Home</span>
+                <span><MudIcon Icon="@Icons.Material.Outlined.Inventory2" /> Products</span>
+                <span><MudIcon Icon="@Icons.Material.Outlined.PersonAdd" /> Create user</span>
+                <MudIconButton Icon="@Icons.Material.Outlined.ArrowBack" aria-label="Back to home" title="Back to home" Href="/home" />
+            </div>
+            <p>Reuse the Material Outlined icons used in <code>Components/Layout/MainLayout.razor</code> and
+                <code>Features/Identity/Users/CreateUser.razor</code> (paths relative to <code>src/Retravion.Web/</code>).
+                Keep text with unfamiliar actions; icon-only controls require an accessible label and a meaningful destination.</p>
+            <pre><code>@IconSnippet</code></pre>
+        </section>
+
+        <section id="components" aria-labelledby="components-heading">
+            <h2 id="components-heading">Components</h2>
+            <h3>Buttons and operation states</h3>
+            <div class="catalog-examples">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="min-height:44px">Primary action (sample)</MudButton>
+                <MudButton Variant="Variant.Text" Href="/home">Back to home</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="true" Style="min-height:44px">Disabled action</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="true" Style="min-height:44px" aria-label="Saving example" aria-busy="true">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" aria-hidden="true" /> Saving…
+                </MudButton>
+            </div>
+            <p>Use Filled/Primary for the main action below its card; Text for navigation. Disable actions while busy and retain a readable loading label.
+                Destructive actions still require clear labeling and appropriate confirmation; color is not confirmation.
+                Source: <code>src/Retravion.Web/Features/Identity/Users/CreateUser.razor</code>; rule: <code>docs/patterns.md</code>.</p>
+            <pre><code>@ButtonSnippet</code></pre>
+
+            <h3>Form controls and validation</h3>
+            <MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
+                <MudTextField T="string" Label="Editable field" HelperText="Use a visible label and explain constraints." />
+                <MudTextField T="string" Label="Disabled field" Value="@("Unavailable")" Disabled="true" />
+                <MudTextField T="string" Label="Invalid field" Error="true" ErrorText="A value is required." Required="true" />
+                <MudAlert Severity="Severity.Error" role="alert" Class="my-4">Example operation error. Preserve entered values when an operation fails.</MudAlert>
+            </MudPaper>
+            <p>Use MudTextField and MudSelect as in the canonical Create User form. Show field errors for specific constraints and an alert for operation failures.
+                Never use a placeholder as the only label. The sample form below demonstrates a select and validation without persistence.</p>
+            <pre><code>@FieldSnippet</code></pre>
+
+            <h3>Basic table</h3>
+            <MudTable T="ExampleRow" Items="Rows" Dense="true" Hover="true" Elevation="0" aria-label="Example component table">
+                <HeaderContent><MudTh>Name</MudTh><MudTh>Purpose</MudTh></HeaderContent>
+                <RowTemplate><MudTd DataLabel="Name">@context.Name</MudTd><MudTd DataLabel="Purpose">@context.Purpose</MudTd></RowTemplate>
+                <NoRecordsContent><MudText>No examples available.</MudText></NoRecordsContent>
+            </MudTable>
+            <p>Use dense tables for structured lists, with column labels and responsive DataLabel values.
+                Source: <code>src/Retravion.Web/Features/Identity/Users/Users.razor</code>.
+                Sorting, paging, and filtering are outside this basic example; do not add them speculatively.</p>
+            <pre><code>@TableSnippet</code></pre>
+        </section>
+
+        <section id="page-pattern" aria-labelledby="pattern-heading">
+            <h2 id="pattern-heading">Representative form page</h2>
+            <p>The shared PageHeader above supplies the page title and back navigation. The form action below belongs outside and after its card, never in the toolbar.
+                Submit empty to see validation; enter a name to see success. This example makes no server-side changes.</p>
+            <CatalogForm />
+            <p>Sources: <code>src/Retravion.Web/Components/PageHeader.razor</code>,
+                <code>src/Retravion.Web/Features/UiCatalog/CatalogForm.razor</code>, and the canonical
+                <code>src/Retravion.Web/Features/Identity/Users/CreateUser.razor</code>.
+                Use the header section owned by the destination feature; this catalog uses <code>catalog-page-header</code>.</p>
+            <pre><code>@FormSnippet</code></pre>
+        </section>
+    </div>
+}
+
+@code {
+    private static MudTheme Theme => PrototypeTheme.Value;
+    private static readonly (string Name, string Variable, Func<Palette, MudColor> Value)[] Colors =
+    [
+        ("Primary", "primary", p => p.Primary), ("Secondary", "secondary", p => p.Secondary),
+        ("Background", "background", p => p.Background), ("Surface", "surface", p => p.Surface),
+        ("TextPrimary", "text-primary", p => p.TextPrimary), ("TextSecondary", "text-secondary", p => p.TextSecondary),
+        ("DrawerBackground", "drawer-background", p => p.DrawerBackground), ("DrawerText", "drawer-text", p => p.DrawerText),
+        ("AppbarBackground", "appbar-background", p => p.AppbarBackground), ("AppbarText", "appbar-text", p => p.AppbarText),
+        ("Info", "info", p => p.Info), ("Success", "success", p => p.Success),
+        ("Warning", "warning", p => p.Warning), ("Error", "error", p => p.Error), ("Divider", "divider", p => p.Divider)
+    ];
+    private static (Typo Variant, BaseTypography Value)[] TypographySamples =>
+    [
+        (Typo.h1, Theme.Typography.H1), (Typo.h2, Theme.Typography.H2), (Typo.h3, Theme.Typography.H3),
+        (Typo.h4, Theme.Typography.H4), (Typo.h5, Theme.Typography.H5), (Typo.h6, Theme.Typography.H6),
+        (Typo.subtitle1, Theme.Typography.Subtitle1), (Typo.subtitle2, Theme.Typography.Subtitle2),
+        (Typo.body1, Theme.Typography.Body1), (Typo.body2, Theme.Typography.Body2),
+        (Typo.button, Theme.Typography.Button), (Typo.caption, Theme.Typography.Caption), (Typo.overline, Theme.Typography.Overline)
+    ];
+    private sealed record ExampleRow(string Name, string Purpose);
+    private static readonly ExampleRow[] Rows = [new("MudButton", "Action or navigation"), new("MudTextField", "Labeled text input")];
+    private const string ColorSnippet = """
+        <MudButton Color="Color.Primary" Variant="Variant.Filled">Save</MudButton>
+        <!-- In scoped CSS: color: var(--mud-palette-text-secondary); -->
+        """;
+    private const string TypographySnippet = """
+        <MudText Typo="Typo.body1">Body text</MudText>
+        <MudText Typo="Typo.caption">Supporting text</MudText>
+        """;
+    private const string GridSnippet = """
+        <MudGrid Spacing="4">
+            <MudItem xs="12" sm="6" md="4">
+                <MudPaper Class="pa-4" Elevation="0">Content</MudPaper>
+            </MudItem>
+        </MudGrid>
+        """;
+    private const string IconSnippet = """
+        <MudIconButton Icon="@Icons.Material.Outlined.ArrowBack"
+                       Href="/home" aria-label="Back to home" title="Back to home" />
+        """;
+    private const string ButtonSnippet = """
+        <MudButton ButtonType="ButtonType.Submit" form="example-form"
+                   Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy"
+                   Style="min-height:44px">Save</MudButton>
+        <!-- While busy, retain the action label and add MudProgressCircular. -->
+        """;
+    private const string FieldSnippet = """
+        <MudTextField T="string" @bind-Value="_name" Label="Name"
+                      Required="true" Error="@(_error is not null)" ErrorText="@_error" />
+        <MudSelect T="string" @bind-Value="_category" Label="Category">
+            <MudSelectItem Value="@("General")">General</MudSelectItem>
+        </MudSelect>
+        """;
+    private const string TableSnippet = """
+        <MudTable T="ExampleRow" Items="Rows" Dense="true" Hover="true" Elevation="0">
+            <HeaderContent><MudTh>Name</MudTh><MudTh>Purpose</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Name">@context.Name</MudTd>
+                <MudTd DataLabel="Purpose">@context.Purpose</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>No examples available.</MudText></NoRecordsContent>
+        </MudTable>
+        @code {
+            private sealed record ExampleRow(string Name, string Purpose);
+            private ExampleRow[] Rows = [new("MudButton", "Action or navigation")];
+        }
+        """;
+    private const string FormSnippet = """
+        @using Microsoft.AspNetCore.Components.Sections
+        @using Microsoft.AspNetCore.Components.Web
+        @using MudBlazor
+        @using Retravion.Web.Components
+        <SectionContent SectionName="catalog-page-header">
+            <PageHeader Title="Example" BackHref="/home" BackText="Home" />
+        </SectionContent>
+        <MudPaper Class="pa-4" Elevation="0">
+            <form id="example-form" @onsubmit="Submit" @onsubmit:preventDefault>
+                <MudTextField T="string" @bind-Value="_name" Label="Name" Required="true" />
+            </form>
+        </MudPaper>
+        <div class="mt-4">
+            <MudButton ButtonType="ButtonType.Submit" form="example-form"
+                       Variant="Variant.Filled" Color="Color.Primary">Validate</MudButton>
+        </div>
+        @code {
+            private string _name = "";
+            private void Submit() { /* Validate, then invoke the approved use case. */ }
+        }
+        """;
+}

@@ -30,6 +30,7 @@ Use prompt input or confirmed conversation context; ask for missing required inp
 ## While implementing
 - Follow `docs/architecture.md` for domain modeling rules.
 - Follow established patterns and reuse shared UI components.
+- For UI work, use the development-only `/development/ui-catalog` reference (`src/Retravion.Web/Features/UiCatalog/UiCatalog.razor`) for live theme values, component examples, and copyable snippets. Read its source when the app is not running. Reuse the existing theme and shared components; consult `docs/patterns.md` and the linked canonical implementations before defining new pages. Catalog examples do not promote provisional styling into established patterns.
 - Do not introduce new packages, cross-module dependencies, persistence strategies, or public APIs without approval.
 - Do not change files outside approved scope without reporting why and requesting permission.
 - Prefer one complete, independently testable change to arbitrary micro-tasks.

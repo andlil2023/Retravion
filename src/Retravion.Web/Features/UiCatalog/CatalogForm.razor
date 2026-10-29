@@ -1,0 +1,38 @@
+@using MudBlazor
+@using Microsoft.AspNetCore.Components.Web
+
+<MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
+    <form id="catalog-example-form" @onsubmit="Submit" @onsubmit:preventDefault aria-label="Catalog example form">
+        <MudTextField T="string" @bind-Value="_name" Label="Example name" Required="true"
+                      Error="@(_error is not null)" ErrorText="@_error" HelperText="Sample only; no data is stored." />
+        <MudSelect T="string" @bind-Value="_category" Label="Example category">
+            <MudSelectItem Value="@("General")">General</MudSelectItem>
+            <MudSelectItem Value="@("Technical")">Technical</MudSelectItem>
+        </MudSelect>
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" role="alert" Class="my-4">@_error</MudAlert>
+        }
+        @if (_submitted)
+        {
+            <MudAlert Severity="Severity.Success" role="status" Class="my-4">Example validated. Nothing was saved.</MudAlert>
+        }
+    </form>
+</MudPaper>
+<div class="mt-4">
+    <MudButton ButtonType="ButtonType.Submit" form="catalog-example-form" Variant="Variant.Filled" Color="Color.Primary"
+               Style="min-height:44px" StartIcon="@Icons.Material.Outlined.Check">Validate example</MudButton>
+</div>
+
+@code {
+    private string _name = "";
+    private string _category = "General";
+    private string? _error;
+    private bool _submitted;
+
+    private void Submit()
+    {
+        _error = string.IsNullOrWhiteSpace(_name) ? "An example name is required." : null;
+        _submitted = _error is null;
+    }
+}
