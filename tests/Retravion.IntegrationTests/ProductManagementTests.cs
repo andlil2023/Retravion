@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Retravion.Application.Product;
 using Retravion.Identity.Application;
 using Retravion.Identity.Domain;
+using Retravion.Domain.Product;
 using Retravion.Web.Features.Identity.Logout;
 using Retravion.Web.Features.Product;
 using Xunit;
@@ -44,12 +45,8 @@ public sealed partial class AccountManagementTests
         Assert.Contains("href=\"/products/create\"", landing);
         Assert.Single(Regex.Matches(landing, "<h1\\b"));
         var form = await user.GetStringAsync("/products/create");
-        var generated = Regex.Match(form, "value=\"([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\"");
-        Assert.True(generated.Success, "Creation must suggest a generated ID in an editable field.");
-        var input = Regex.Match(form, "<input[^>]*value=\"" + generated.Groups[1].Value + "\"[^>]*>").Value;
-        Assert.DoesNotContain("readonly", input);
-        Assert.DoesNotContain("disabled", input);
-        Assert.DoesNotContain(generated.Value, await user.GetStringAsync("/products/create"));
+        Assert.Contains("Product ID", form);
+        Assert.Contains("Kind", form);
         Assert.Contains("Description (optional)", form);
         Assert.Contains("Description preview", form);
         Assert.Contains("aria-label=\"Side by side\"", form);
@@ -66,14 +63,14 @@ public sealed partial class AccountManagementTests
         Assert.True(submit.Index > form.IndexOf("</form>", StringComparison.Ordinal));
         AssertFilledPrimaryButton(submit.Value);
         var id = "Custom / ID ? # & + 😀";
-        var result = await operations.Create(actor, id, "<script>Product</script>", "<b>Plain description</b>");
+        var result = await operations.Create(actor, id, "<script>Product</script>", ProductKind.System, "<b>Plain description</b>");
         Assert.True(result.IsSuccess);
         Assert.Equal(id, result.Value.Id);
         Assert.True(result.Value.IsActive);
-        Assert.True((await operations.Create(actor, id, "Duplicate", "")).IsFailure);
-        Assert.True((await operations.Create(actor, "invalid", " \t", "")).IsFailure);
+        Assert.True((await operations.Create(actor, id, "Duplicate", ProductKind.System, "")).IsFailure);
+        Assert.True((await operations.Create(actor, "invalid", " \t", ProductKind.System, "")).IsFailure);
         var callsBeforeOversizedId = products.Calls;
-        var oversized = await operations.Create(actor, new string('a', 101), "Too long", "");
+        var oversized = await operations.Create(actor, new string('a', 101), "Too long", ProductKind.System, "");
         Assert.True(oversized.IsFailure);
         Assert.Equal("A Product ID must contain at most 100 Unicode characters.", oversized.Error);
         Assert.Equal(callsBeforeOversizedId, products.Calls);
@@ -83,14 +80,14 @@ public sealed partial class AccountManagementTests
         Assert.Contains("&lt;b&gt;Plain description&lt;/b&gt;", details);
         Assert.DoesNotContain("<script>Product</script>", details);
         AssertProductAction(details, "Retire");
-        Assert.True((await operations.ChangeStatus(actor, id, false)).IsSuccess);
+        Assert.True((await operations.ChangeStatus(actor, id, result.Value.InternalId, false)).IsSuccess);
         Assert.False((await operations.Retrieve(actor, id)).Value.IsActive);
         details = await user.GetStringAsync(detailPath);
         Assert.Contains("class=\"product-status\">Retired</span>", details);
         Assert.DoesNotContain("<dt>Name</dt>", details);
         Assert.DoesNotContain("max-width:40rem", details);
         AssertProductAction(details, "Reactivate");
-        Assert.True((await operations.ChangeStatus(actor, id, true)).IsSuccess);
+        Assert.True((await operations.ChangeStatus(actor, id, result.Value.InternalId, true)).IsSuccess);
         Assert.True((await operations.Retrieve(actor, id)).Value.IsActive);
         var editor = await user.GetStringAsync("/products/description?id=" + Uri.EscapeDataString(id));
         Assert.Contains("Description (Markdown)", editor);
@@ -100,14 +97,14 @@ public sealed partial class AccountManagementTests
         Assert.Contains("&lt;b&gt;Plain description&lt;/b&gt;", editor);
         Assert.DoesNotContain("_product.Description", editor);
         Assert.DoesNotContain("<select", editor);
-        Assert.True((await operations.UpdateDescription(actor, id, "<b>Plain description</b>", "# Heading\n\n**Formatted**")).IsSuccess);
+        Assert.True((await operations.UpdateDescription(actor, id, result.Value.InternalId, "<b>Plain description</b>", "# Heading\n\n**Formatted**")).IsSuccess);
         details = await user.GetStringAsync(detailPath);
         Assert.Contains("<h1>Heading</h1>", details);
         Assert.Contains("<strong>Formatted</strong>", details);
         editor = await user.GetStringAsync("/products/description?id=" + Uri.EscapeDataString(id));
         Assert.Contains("<h1>Heading</h1>", editor);
         Assert.Contains("<strong>Formatted</strong>", editor);
-        Assert.True((await operations.UpdateDescription(actor, id, "# Heading\n\n**Formatted**", "## Updated\n\n*Again*")).IsSuccess);
+        Assert.True((await operations.UpdateDescription(actor, id, result.Value.InternalId, "# Heading\n\n**Formatted**", "## Updated\n\n*Again*")).IsSuccess);
         details = await user.GetStringAsync(detailPath);
         Assert.Contains("<h2>Updated</h2>", details);
         Assert.Contains("<em>Again</em>", details);
@@ -117,10 +114,10 @@ public sealed partial class AccountManagementTests
         // A retained circuit principal must not bypass revocation.
         await factory.Services.GetRequiredService<SessionTicketStore>().RemoveAsync(actor.FindFirstValue(SessionTicketStore.SessionClaim)!);
         var calls = products.Calls;
-        Assert.True((await operations.Create(actor, "revoked", "No", "")).IsFailure);
+        Assert.True((await operations.Create(actor, "revoked", "No", ProductKind.System, "")).IsFailure);
         Assert.True((await operations.Retrieve(actor, id)).IsFailure);
-        Assert.True((await operations.ChangeStatus(actor, id, false)).IsFailure);
-        Assert.True((await operations.UpdateDescription(actor, id, "", "denied")).IsFailure);
+        Assert.True((await operations.ChangeStatus(actor, id, result.Value.InternalId, false)).IsFailure);
+        Assert.True((await operations.UpdateDescription(actor, id, result.Value.InternalId, "", "denied")).IsFailure);
         Assert.Equal(calls, products.Calls);
     }
 
@@ -147,10 +144,10 @@ public sealed partial class AccountManagementTests
         var operations = scope.ServiceProvider.GetRequiredService<ProductOperations>();
         foreach (var actor in new[] { new ClaimsPrincipal(new ClaimsIdentity()), restricted })
         {
-            Assert.True((await operations.Create(actor, "denied", "Denied", "")).IsFailure);
+            Assert.True((await operations.Create(actor, "denied", "Denied", ProductKind.System, "")).IsFailure);
             Assert.True((await operations.Retrieve(actor, "anything")).IsFailure);
-            Assert.True((await operations.ChangeStatus(actor, "anything", false)).IsFailure);
-            Assert.True((await operations.UpdateDescription(actor, "anything", "", "denied")).IsFailure);
+            Assert.True((await operations.ChangeStatus(actor, "anything", Guid.NewGuid(), false)).IsFailure);
+            Assert.True((await operations.UpdateDescription(actor, "anything", Guid.NewGuid(), "", "denied")).IsFailure);
         }
         Assert.Equal(0, products.Calls);
     }
@@ -188,7 +185,7 @@ public sealed partial class AccountManagementTests
 
     private sealed class ProductStoreDouble : IProductStore
     {
-        private readonly Dictionary<string, ProductState> products = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ProductState> products = new(StringComparer.OrdinalIgnoreCase);
         public int Calls;
         public Task<Result> Create(ProductState product, CancellationToken cancellationToken = default)
         {
@@ -200,18 +197,13 @@ public sealed partial class AccountManagementTests
             Calls++;
             return Task.FromResult(Result.Success(Maybe<ProductState>.From(products.GetValueOrDefault(id))));
         }
-        public Task<Result> UpdateDescription(ProductState expected, ProductState replacement, CancellationToken cancellationToken = default)
+        public Task<Result> Update(ProductState expected, ProductState replacement, CancellationToken cancellationToken = default)
         {
             Calls++;
-            if (products.GetValueOrDefault(expected.Id)?.Description != expected.Description)
-                return Task.FromResult(Result.Failure("Stale description."));
-            products[expected.Id] = replacement;
-            return Task.FromResult(Result.Success());
-        }
-        public Task<Result> ChangeStatus(ProductState expected, ProductState replacement, CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            products[expected.Id] = replacement;
+            if (products.GetValueOrDefault(expected.Id) != expected)
+                return Task.FromResult(Result.Failure("Stale Product."));
+            products.Remove(expected.Id);
+            products[replacement.Id] = replacement;
             return Task.FromResult(Result.Success());
         }
     }
