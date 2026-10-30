@@ -19,6 +19,7 @@ Use prompt input or confirmed conversation context; ask for missing required inp
 - Each PBI must include **What**, **Why**, **Implementation Guide**, **Requirements**, and **Acceptance Criteria** sections. Reference implemented requirements by ID only. If none apply, use `N/A` with a brief explanation. When acceptance criteria do not apply, use `N/A` or explain their omission in that section.
 - Before any change task, fetch `origin` and create a new branch and git worktree from the latest `origin/main`; make all changes there, never on `main`. Default to one PBI per worktree.
 - Keep acceptance criteria in the PBI; report their verification in the PR.
+- Each PBI must include an explicit audit decision and verification plan in its Implementation Guide for every new or changed business-record write operation, using the audit checklist below. If no such operations are affected, state `N/A` and explain why.
 
 ## Before editing
 - Identify the owning feature/module and the smallest coherent change.
@@ -26,6 +27,14 @@ Use prompt input or confirmed conversation context; ask for missing required inp
 - Inspect explicitly named files first. State a reason before reading directly related files; request permission for broader exploration.
 - State uncertainties that affect correctness. Ask at most the few essential questions; defer speculative questions.
 - Do not create ADRs, design documents, or new patterns automatically.
+
+## Audit checklist
+- Identify each affected write operation/path and reference applicable audit requirements by ID in the PBI's Requirements section, including REQ-SYS-AUDIT-003 where applicable.
+- For each operation, specify expected events and their actor, time, action, target/immutable identity, outcome, and initial or old/new values as required. Explain any decision that no event is required; do not silently omit paths or exceptions.
+- Address successful changes, unauthorized attempts, no-op saves, and uncertain commit outcomes as applicable. State whether reads and validation failures require events; do not assume they all do.
+- Specify change/audit commit consistency, behavior when audit submission or commit fails, uncertain-outcome reporting and retry behavior, and safe operational logging without sensitive submitted values, as required by the applicable requirements.
+- Identify focused tests and a verification plan for required events, excluded events, failure behavior, and transaction outcomes; report actual verification evidence in the PR. Explain any inapplicable case or test omission.
+- Use the Product audit requirements established by PBI #103 (REQ-SW-AUDIT-007–009) as the source for Product-specific behavior, not as an automatic policy for every feature. This checklist is a planning and review gate, not an automatic auditing framework, a claim that existing features have been audited, or evidence of compliance with any specific regulation.
 
 ## While implementing
 - Follow `docs/architecture.md` for domain modeling rules.
