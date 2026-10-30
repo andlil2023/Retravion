@@ -1,6 +1,6 @@
 # Domain Model — Working Draft
 
-Interview checkpoints: Products, versioned traceability, and Documents. This is not the complete domain. The original rules were confirmed during the interview; additions labeled **Review proposal** and aggregate boundaries remain proposals. Review proposals clarify the intended structure but are not established domain rules. This document does not establish implementation invariants or replace [domain.md](domain.md). Feature design must confirm applicable rules before implementation.
+Interview checkpoints: Products, versioned traceability, and Documents. This is not the complete domain. The original rules were confirmed during the interview; additions labeled **Review proposal** and aggregate boundaries remain proposals, except for the direction explicitly approved under [PBI #108](https://github.com/andlil2023/Retravion/issues/108) in sections 7.1 and 8.1. That approval covers domain design only, not application implementation or the unresolved lifecycle decisions in section 10. This document does not establish implementation invariants or replace [domain.md](domain.md). Feature design must confirm applicable rules before implementation.
 
 ## 1. Products and revisions
 
@@ -23,7 +23,7 @@ classDiagram
 
 **Product kinds:** System/platform, Software application, Hardware device, Firmware.
 
-- Product IDs are stable.
+- Product internal identities are stable. In the implemented Product model, `Product.InternalId` is the immutable identity used for relationships; the user-visible `Product.Id` is editable and must not be used as a relationship key.
 - Revision labels need not be unique; references use revision IDs.
 - A system revision references constituent revisions; it does not own their Products.
 
@@ -146,6 +146,28 @@ flowchart LR
 - Need–Feature, Need–Requirement, Feature–Requirement, and Requirement–Test Case links can be many-to-many. A Test Case usually verifies one Requirement; a Requirement may need several Test Cases.
 - User Needs, Features, Requirements, and Test Cases can be shared across Products and have independent version histories.
 
+### 7.1 Approved design direction — shared User Needs (#108)
+
+**Design approval only:** The following conceptual contracts distinguish documentation ownership, system composition, and need applicability. They are not approved public APIs, persistence entities, aggregate boundaries, or permission to implement application behavior.
+
+| Concept | Responsibility |
+|---|---|
+| User Need | Stable `UserNeedId`, one responsible Product identified by its immutable internal identity, and an independent version history. |
+| User Need Version | Immutable `UserNeedVersionId`, parent `UserNeedId`, and versioned title and need statement. Editing content creates a new version; earlier versions remain retrievable and unchanged. |
+| Requirement Version | An exact immutable version of a verifiable requirement; its detailed lifecycle remains separate design work. |
+| Applicability entry | An exact User Need version and exact target Product Revision, scoped to the baseline recording the applicability decision. |
+| Addresses link | An exact Requirement version addressing an exact User Need version, scoped to a baseline. |
+| Revision baseline | Exact composition, selected documentation versions, applicability entries, and traceability relationships. |
+
+- **Ownership** assigns responsibility for maintaining a need. For a shared c4D need, the owner is the c4D system Product.
+- **Composition** identifies exact constituent Product Revisions. The system does not own the constituent Products.
+- **Applicability** explicitly identifies which selected need versions apply to which exact Product Revisions. Ownership does not imply applicability, and composition does not automatically apply every system need to every component.
+- Sharing a need neither duplicates its identity nor transfers ownership. c4D is a Product of kind System; no separate bundle entity is introduced.
+- Addresses links are many-to-many: a need version can be addressed by several requirement versions, and a requirement version can address several need versions. A Requirement can exist without a User Need.
+- References use immutable identities, not editable Product IDs, revision labels, or a pointer to the latest version.
+
+**Comparison with the current model:** `src/Retravion.Domain/Product/Product.cs` implements Product identity and active/retired lifecycle, not Product Revisions. User Need, Requirement, Product Revision, and baseline models are not implemented. Sections 7 and 8 provide the existing draft direction for independently versioned documentation and exact-version baselines. REQ-PRODUCT-001 and REQ-PRODUCT-005 constrain Product identity and editing, but do not specify this new capability; no new requirement IDs are assigned by this design.
+
 ## 8. Product Revision baselines
 
 ```mermaid
@@ -167,6 +189,43 @@ flowchart LR
 - Referencing a component Product Revision does not automatically import or flatten its selected items and traceability links into the parent baseline. Component baselines retain their own context. Items needed for parent-level traceability must be explicitly selected, with links satisfying the same endpoint rule. Different component baselines may retain different versions of a shared item; this does not silently resolve them into one parent selection.
 - These consistency rules do not require every Requirement to have a User Need or Feature, and do not make optional Documents mandatory.
 
+### 8.1 Approved design direction — applicability and historical traceability (#108)
+
+For User Needs and Requirements, the following consistency rules are approved as domain design. The corresponding rules above for Features and Test Cases, and other unrelated Review proposals, remain proposals.
+
+- Within one baseline, select at most one version of each logical User Need or Requirement. Every baseline-local addresses link has both exact endpoint versions selected in that baseline.
+- Constituent baselines retain their own selections and traceability. Referencing a constituent revision does not automatically import, flatten, or reconcile its documentation. Different constituents can retain different versions of a shared need; eligibility of such divergence for a new system release remains undecided.
+- Parent-level traceability explicitly selects the relevant need and requirement versions and preserves the exact constituent baseline context from which a requirement was selected. It does not substitute for or modify constituent traceability.
+- Applicability changes are baseline changes, not edits to previously approved applicability. Approved/released baseline contents and relationships cannot change in place.
+- Approval identifies the exact baseline being approved, not merely a status. It preserves constituent revision identities, selected documentation versions, applicability decisions, addresses links, and approval identity, actor, time, and decision.
+- The approved baseline preserves release-time Product labels or equivalent historical display information, so later Product renaming does not misrepresent the approved configuration.
+- Later compatibility assessments remain separate from frozen Product contents, as described in section 5. This approval does not resolve the detailed release or compatibility approval workflows.
+
+#### Worked example: one need, two client Products
+
+The following labels and behaviors are illustrative, not allocated requirement IDs or approved application requirements. Notification details and thresholds would need separate approval.
+
+**Shared need N, version 1:** Operators need to recognize a loss of connection to the system. Its responsible Product is c4D.
+
+| Constituent baseline | Selected need | Addressing requirement |
+|---|---|---|
+| Catalyst Client revision C7 | N/v1 | Catalyst requirement A/v1: display a persistent connection-loss banner. |
+| Sentinel Client revision S4 | N/v1 | Sentinel requirement B/v2: display a connection-loss indicator and audible notification. |
+
+Each client baseline selects its exact requirement and N/v1, records applicability to that client revision, and retains its addresses link. Both requirements address the same need version without duplicating the need.
+
+An approved **c4D revision D3** preserves:
+
+- Exact constituent references to C7 and S4, together with its other selected component revisions.
+- Explicit parent-level selections of N/v1, A/v1, and B/v2.
+- Applicability of N/v1 to C7 and S4.
+- Parent-level addresses links A/v1 → N/v1 and B/v2 → N/v1, with C7 and S4 respectively retained as their constituent baseline contexts.
+- Its exact-baseline approval record and historical Product display information.
+
+These parent selections are explicit, not an automatic import of component documentation. Omission of another component from this illustrative applicability set does not decide whether it is inapplicable or whether release coverage is sufficient; coverage policy remains open.
+
+If N/v2 is later created and Catalyst C8 adopts it, D3 still references C7, S4, and N/v1, with its original applicability and links. A subsequent c4D revision makes new selections explicitly. New need versions, constituent revisions, or applicability decisions never advance an earlier approved baseline automatically.
+
 ## 9. Optional, versioned Documents
 
 ```mermaid
@@ -187,7 +246,15 @@ flowchart LR
 
 ## 10. Open questions and scope limits
 
-- Confirmation of the Review proposals above during feature design; they are not implementation invariants.
+- Confirmation of the remaining Review proposals during feature design; the #108 design approval is limited to sections 7.1 and 8.1 and is not application implementation approval.
+- User Need ownership transfer: one responsible Product is the approved direction, but transfer behavior remains undecided.
+- Whether User Need versions require separate approval before baseline selection.
+- Release coverage: whether every applicable need must have an addressing requirement and how justified gaps are represented.
+- Whether a new system release may retain different need versions across constituents, and what assessment is required.
+- Retirement, withdrawal, deletion, and exceptional correction of needs or their versions without losing historical references.
+- Implementation boundaries for this design: aggregate ownership, authorization, retention, atomic approval, and concurrency validation. These must be resolved by the affected implementation slices rather than inferred here.
+- Audit decision for #108: N/A — this documentation-only task introduces no business-record write operations. Future write operations require explicit audit decisions and verification plans; Product-specific audit policy is not automatically a policy for User Needs or revision baselines.
+- Change / ControlledChange is outside #108's scope.
 - Coordination workflow for shared hardware revision adoption across new Product Revisions.
 - Detailed matrix and release approval workflows within the proposed historical boundaries; detailed Document lifecycle, evidence retention, and storage model.
 - Aggregate boundaries and approval lifecycles for User Needs, Features, Requirements, Test Cases, and Documents.
