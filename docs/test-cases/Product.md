@@ -20,6 +20,10 @@ This design specifies verification intent, not implemented tests or successful v
 | TC-PRODUCT-010 | REQ-PRODUCT-003, REQ-PRODUCT-005 | UI/end-to-end and integration | A retired Product exists. | Open its edit view and try changing fields. Select Reactivate, change fields, and Save; cancel confirmation and verify persisted state. Save again and confirm. | Only reactivation is available initially; after selection fields become editable. Cancellation retains pending edits and leaves persisted state retired. Confirmation saves reactivation and edits together. | Yes |
 | TC-PRODUCT-011 | REQ-PRODUCT-003, REQ-PRODUCT-005 | Integration | A retired Product exists. | Attempt to modify Product ID, name, kind, and description without reactivation. | The persisted Product remains unchanged. | Yes |
 
+## Product Audit Verification
+
+REQ-PRODUCT-006 and the audit aspects of REQ-PRODUCT-001, REQ-PRODUCT-002, REQ-PRODUCT-003, and REQ-PRODUCT-005 are verified by TC-AUDIT-025–031 in [Audit Trail](Audit%20Trail.md). These cover creation values, old/new edited values, single-event reactivation with edits, immutable identity across ID changes/reuse, transactional audit failure, uncertain commits, denied attempts, and exclusions for reads, no-op saves, and validation failures. Automated counterparts are in `ProductAuditTransactionTests` and `ProductAuditBehaviorTests`; this specification itself is not execution evidence.
+
 ## Coverage Gaps and Unresolved Ambiguities
 
 - The requirements do not specify what happens if a Product cannot be retrieved, saved, or updated, or what feedback a user receives.
@@ -31,5 +35,5 @@ This design specifies verification intent, not implemented tests or successful v
 ## Deferred Tests
 
 - Authorization and product-specific access await agreed access requirements.
-- Regulatory information, linked entities, compatibility, Product Revisions, readiness checks, status-change reasons, and audit history are outside this increment.
+- Regulatory information, linked entities, compatibility, Product Revisions, readiness checks, status-change reasons, and a Product-specific history UI are outside this increment. Audit recording is specified above; pre-existing historical gaps remain as-is.
 - Configurable kinds, Product ID generation templates, and deletion are not specified in this increment.

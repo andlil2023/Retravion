@@ -62,7 +62,7 @@ else
             <MudTd DataLabel="Actor">@(context.Actor is AuditActor.Identified actor ? $"Identified: {actor.Identifier}" : "Unknown")</MudTd>
             <MudTd DataLabel="Time (UTC)"><time datetime="@context.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)" title="@context.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)">@context.OccurredAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</time></MudTd>
             <MudTd DataLabel="Action">@context.Action</MudTd>
-            <MudTd DataLabel="Target">@(context.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</MudTd>
+            <MudTd DataLabel="Target">@(context.ProductChange is { } product ? $"Identified: {product.After.Id}" : context.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</MudTd>
             <MudTd DataLabel="Outcome">@context.Outcome</MudTd>
         </RowTemplate>
         <NoRecordsContent><p>No audit events found.</p></NoRecordsContent>

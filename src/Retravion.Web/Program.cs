@@ -80,6 +80,9 @@ builder.Services.AddSingleton<IAdministratorStore>(_ => new PostgresAdministrato
 builder.Services.AddSingleton<IProductStore>(_ => new PostgresProductStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<IProductChangeTransaction>(_ => new PostgresProductStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddSingleton<CreateProduct>();
 builder.Services.AddSingleton<EditProduct>();
 builder.Services.AddSingleton<RetrieveProduct>();

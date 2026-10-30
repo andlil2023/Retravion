@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
 using Retravion.Application.AuditTrail;
@@ -16,7 +17,8 @@ public sealed class PostgresAuditQuery(string connectionString) : IAuditQuery
             if (!(bool)(await exists.ExecuteScalarAsync(cancellationToken))!) return [];
 
         await using var command = new NpgsqlCommand("""
-            SELECT actor_kind, actor_identifier, occurred_at_utc_ticks, action, target_kind, target_identifier, outcome
+            SELECT actor_kind, actor_identifier, occurred_at_utc_ticks, action, target_kind, target_identifier, outcome,
+                to_jsonb(event)->>'product_change'
             FROM retravion_audit.event
             WHERE ($1::bigint IS NULL OR occurred_at_utc_ticks >= $1)
               AND ($2::bigint IS NULL OR occurred_at_utc_ticks <= $2)
@@ -59,7 +61,8 @@ public sealed class PostgresAuditQuery(string connectionString) : IAuditQuery
                 "failure" => AuditActionOutcome.Failure,
                 _ => throw new InvalidOperationException("Invalid stored outcome.")
             };
-            events.Add(new AuditInformation(actor, new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero), reader.GetString(3), target, outcome));
+            events.Add(new AuditInformation(actor, new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero), reader.GetString(3), target, outcome,
+                reader.IsDBNull(7) ? null : JsonSerializer.Deserialize<ProductAuditDetails>(reader.GetString(7))));
         }
         return events;
     }

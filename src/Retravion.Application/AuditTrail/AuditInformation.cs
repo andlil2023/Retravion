@@ -8,13 +8,15 @@ public sealed record AuditInformation
     public string Action { get; }
     public AuditTarget Target { get; }
     public AuditActionOutcome Outcome { get; }
+    public ProductAuditDetails? ProductChange { get; }
 
     public AuditInformation(
         AuditActor actor,
         DateTimeOffset occurredAt,
         string action,
         AuditTarget target,
-        AuditActionOutcome outcome)
+        AuditActionOutcome outcome,
+        ProductAuditDetails? productChange = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
@@ -29,5 +31,6 @@ public sealed record AuditInformation
         Action = action;
         Target = target;
         Outcome = outcome;
+        ProductChange = productChange;
     }
 }
