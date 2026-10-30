@@ -77,6 +77,19 @@ The requirements below describe the agreed Product behavior. The identity, kind,
 - Retired Product fields remain read-only until reactivation is selected, as specified in REQ-PRODUCT-003.
 - Field changes take effect on Save; reactivation with edits is saved together as specified in REQ-PRODUCT-003.
 
+### REQ-PRODUCT-006 — Trace Product Changes
+
+**Parent needs:** UN-PRODUCT-001, UN-AUDIT-01, UN-AUDIT-02
+
+**Requirement:** The system shall audit Product creation, actual edits (including description), retirement, reactivation, and unauthorized Product-change attempts as specified in REQ-SW-AUDIT-007–009.
+
+**Acceptance criteria:**
+- Successful changes retain immutable identity and initial or old/new values, including the Product ID at the event.
+- Reactivation with edits commits as one Product change and one audit event.
+- Product changes and their audit events commit together; unconfirmed commit outcomes are reported as uncertain.
+- Reads, no-op saves, and ordinary validation failures produce no Product change event.
+- Unauthorized changes remain denied; their audit records and audit-failure operational logs omit submitted field values.
+
 ## Scope
 
-The description is free-form Markdown; users may include intended use and intended users, but these are not required or validated as separate fields. Product deletion, Product Revisions, compatibility matrices and entity linking, regulatory information objects, configurable kinds, Product ID generation templates, readiness checks, and new roles or permissions are outside this increment. Status-change reasons and audit history are deferred; changes made before history is implemented may not be recorded retrospectively. The effect of retirement on future linking is undecided. No migration is required for this increment: development uses a new empty database.
+The description is free-form Markdown; users may include intended use and intended users, but these are not required or validated as separate fields. Product deletion, Product Revisions, compatibility matrices and entity linking, regulatory information objects, configurable kinds, Product ID generation templates, readiness checks, and new roles or permissions are outside this increment. Status-change reasons and a Product-specific history UI remain deferred. Product audit recording is covered by REQ-PRODUCT-006; earlier historical gaps remain as-is and are not filled retrospectively. The effect of retirement on future linking is undecided. No migration is required for this increment: development uses a new empty database.

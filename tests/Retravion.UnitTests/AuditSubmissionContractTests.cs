@@ -153,6 +153,25 @@ public sealed class AuditSubmissionContractTests
         Assert.Equal("outcome", exception.ParamName);
     }
 
+    [Fact]
+    public void ProductDetailsRetainInitialAndChangedValuesWithoutRequiringDetailsOnExistingEvents()
+    {
+        var id = Guid.NewGuid();
+        var initial = new ProductAuditValues("original", "Name", "System", "# Initial 😀", true);
+        var changed = new ProductAuditValues("renamed", "New name", "Firmware", "", false);
+        var created = new AuditInformation(new AuditActor.Identified("author"), OccurredAt, "product.create",
+            new AuditTarget.Identified(id.ToString()), AuditActionOutcome.Success, new ProductAuditDetails(id, null, initial));
+        var edited = new AuditInformation(created.Actor, OccurredAt, "product.retire", created.Target,
+            AuditActionOutcome.Success, new ProductAuditDetails(id, initial, changed));
+        var legacy = new AuditInformation(created.Actor, OccurredAt, "login", new AuditTarget.NotApplicable(), AuditActionOutcome.Success);
+        Assert.Equal(id, created.ProductChange!.InternalId);
+        Assert.Null(created.ProductChange.Before);
+        Assert.Equal(initial, created.ProductChange.After);
+        Assert.Equal(initial, edited.ProductChange!.Before);
+        Assert.Equal(changed, edited.ProductChange.After);
+        Assert.Null(legacy.ProductChange);
+    }
+
     private sealed class SubmissionDouble(AuditSubmissionResult result) : IAuditSubmission
     {
         public AuditInformation? ReceivedInformation { get; private set; }

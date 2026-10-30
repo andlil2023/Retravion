@@ -17,6 +17,7 @@
 - What action was performed or attempted.
 - What the action affected or targeted.
 - Whether the action succeeded or failed.
+- Optional Product-change details: immutable internal identity and initial or old/new values, including the Product ID at the event. Existing non-Product events may omit these details.
 
 **Acceptance criteria:**
 - The contract supports an unknown actor.
@@ -30,7 +31,7 @@
 **Requirement:** The system shall provide a working implementation of the common audit submission contract that durably records submitted audit information.
 
 **Acceptance criteria:**
-- A successful submission stores the supplied actor, occurrence time, action, target, and action outcome.
+- A successful submission stores the supplied actor, occurrence time, action, target, action outcome, and any supplied Product-change details.
 - Unknown actors and the different target variants remain distinguishable after storage.
 - Occurrence time preserves the supplied instant; storage may normalize it to UTC.
 - Submission reports success only after the database transaction has committed.
@@ -156,6 +157,66 @@ These requirements are approved for future implementation; their inclusion is no
 
 An unsuccessful or uncertain submission cannot guarantee that an event was recorded. Operational logging reports the failure; it does not replace the audit record.
 
+## Product Changes and Future Business-Record Coverage
+
+### REQ-SYS-AUDIT-003 — Trace Business-Record Changes
+
+**Type:** System requirement
+
+**Parent needs:** UN-AUDIT-01, UN-AUDIT-02
+
+**Requirement:** The system shall make business-record creation and changes attributable and preserve the initial values or old and new values against an immutable record identity.
+
+This is a cross-cutting expectation for future features. The present increment implements Product coverage only; it does not assert coverage of other business records or repair historical gaps.
+
+### REQ-SW-AUDIT-007 — Record Product Changes
+
+**Type:** Software requirement
+
+**Parent needs:** UN-AUDIT-01, UN-AUDIT-02, UN-PRODUCT-001
+
+**Parent requirement:** REQ-SYS-AUDIT-003
+
+**Requirement:** The software shall durably audit successful Product creation, actual field edits, retirement, and reactivation with actor, occurrence time, action, target, outcome, and Product values.
+
+**Acceptance criteria:**
+- The target is the immutable internal UUID. Creation records initial Product ID, name, kind, description, and active status; subsequent changes retain complete old and new values of these fields.
+- The Product ID is retained as it was at the event, even if subsequently changed or reused. The internal UUID remains an internal identifier, not an editable Product field.
+- Actions distinguish creation, edit, retirement, and reactivation. Reactivation with edits is one event containing both changes.
+- Reads, no-op saves, ordinary validation failures, uniqueness conflicts, and stale writes produce no Product change event.
+- Existing events without Product details remain readable and unchanged; historical gaps remain as-is.
+
+### REQ-SW-AUDIT-008 — Commit Product Changes with Audit Events
+
+**Type:** Software requirement
+
+**Parent needs:** UN-AUDIT-01, UN-PRODUCT-001
+
+**Parent requirement:** REQ-SYS-AUDIT-003
+
+**Requirement:** The software shall commit a successful Product change and its required audit event together, so neither commits without the other.
+
+**Acceptance criteria:**
+- Audit write failure prevents the Product change from committing.
+- Success is reported only after confirmed commit. Failure or cancellation after commit is attempted is reported as an unconfirmed outcome, not as confirmed rollback or success; the user is told to retrieve the Product before retrying.
+- No automatic retry is performed for an uncertain outcome.
+
+### REQ-SW-AUDIT-009 — Audit Unauthorized Product-Change Attempts
+
+**Type:** Software requirement
+
+**Parent needs:** UN-AUDIT-01, UN-AUDIT-02
+
+**Parent requirement:** REQ-SYS-AUDIT-003
+
+**Requirement:** The software shall deny unauthorized Product-change attempts and submit an audit event without submitted Product field values.
+
+**Acceptance criteria:**
+- Each denied mutation callback records the attempted action, actor if known (otherwise unknown), occurrence time, failure outcome, and an unknown target; submitted identifiers and expected or proposed field snapshots are not retained.
+- Coverage includes anonymous, password-restricted, and revoked-session callbacks for creation, editing, description changes, retirement, and reactivation. Denied page reads are not change attempts.
+- If submission fails or throws, the change remains denied and the audit failure is operationally logged without submitted values, provider exception details, or credentials.
+- An unsuccessful or uncertain submission cannot guarantee an event was stored; operational logging does not replace an audit record.
+
 ## Approved Architectural Direction
 
 Place the audit submission interface and information types in `src/Retravion.Application/AuditTrail/`, without creating a separate project.
@@ -167,5 +228,7 @@ Implement PostgreSQL persistence under `src/Retravion.Infrastructure/AuditTrail/
 REQ-AUDIT-01 defines the submission interface and audit information types; REQ-AUDIT-02 adds durable submission and database storage; REQ-AUDIT-03 integrates login decisions. A successful login event records the authentication decision at the initial credential recheck, not proof of session creation. A later recheck may deny a session after that event has been submitted. Defining or resolving the contract alone does not claim that audit information has been stored.
 
 The original REQ-AUDIT-01–03 increment excludes integration of other application operations and audit browsing/search UI. The later inspection and account-administration requirements above specify additional future behavior, not evidence of its implementation. Retention, export, tamper-evidence mechanisms, retry queues, and duplicate-submission guarantees remain outside the original increment. Audit storage and session creation are not atomic: a failed or uncertain submission may have committed an event even when access is denied. Automatic retries are not provided.
+
+The Product increment adds optional structured Product details to the common contract and audit table, preserving existing consumers and events. Product mutation orchestration uses an explicit transaction contract; Product persistence and audit insertion share the existing PostgreSQL transaction. The audit query returns supplied details; a new field-history UI is not included.
 
 These requirements are incremental contributions to UN-AUDIT-01, not delivery of a complete audit trail or evidence of compliance with a particular regulatory standard.

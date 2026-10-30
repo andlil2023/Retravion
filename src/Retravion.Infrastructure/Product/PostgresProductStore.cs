@@ -1,13 +1,42 @@
 using CSharpFunctionalExtensions;
 using Npgsql;
+using Retravion.Application.AuditTrail;
+using Retravion.Infrastructure.AuditTrail;
 using Retravion.Application.Product;
 using Retravion.Domain.Product;
 using ProductState = Retravion.Domain.Product.Product;
 
 namespace Retravion.Infrastructure.Product;
 
-public sealed class PostgresProductStore(string connectionString) : IProductStore
+public sealed class PostgresProductStore(string connectionString,
+    Func<NpgsqlTransaction, CancellationToken, Task>? commit = null) : IProductStore, IProductChangeTransaction
 {
+    private NpgsqlConnection? enlistedConnection;
+    private NpgsqlTransaction? enlistedTransaction;
+    private AuditActor? actor;
+    private DateTimeOffset occurredAt;
+
+    public Task<Result<ProductState>> Execute(AuditActor actor, DateTimeOffset occurredAt,
+        Func<IProductStore, Task<Result<ProductState>>> change, CancellationToken cancellationToken = default) =>
+        Execute((connection, transaction) => change(new PostgresProductStore(connectionString)
+        {
+            enlistedConnection = connection, enlistedTransaction = transaction,
+            actor = actor, occurredAt = occurredAt
+        }), cancellationToken);
+
+    private async Task Audit(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        ProductState? before, ProductState after, CancellationToken cancellationToken)
+    {
+        // Raw stores support bootstrap/test setup. Production mutations use IProductChangeTransaction.
+        if (actor is null) return;
+        static ProductAuditValues Values(ProductState p) => new(p.Id, p.Name, p.Kind.ToString(), p.Description, p.IsActive);
+        var action = before is null ? "product.create" : before.IsActive != after.IsActive
+            ? after.IsActive ? "product.reactivate" : "product.retire" : "product.edit";
+        await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
+            new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(after.InternalId.ToString()),
+                AuditActionOutcome.Success, new ProductAuditDetails(after.InternalId,
+                    before is null ? null : Values(before), Values(after))), cancellationToken);
+    }
     public async Task<Result> Create(ProductState product, CancellationToken cancellationToken = default)
     {
         var result = await Execute(async (connection, transaction) =>
@@ -22,8 +51,10 @@ public sealed class PostgresProductStore(string connectionString) : IProductStor
             command.Parameters.AddWithValue((int)product.Kind);
             command.Parameters.AddWithValue(product.Description);
             command.Parameters.AddWithValue(product.IsActive);
-            return await command.ExecuteNonQueryAsync(cancellationToken) == 1
-                ? Result.Success(true) : Result.Failure<bool>("That Product ID is already in use.");
+            if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+                return Result.Failure<bool>("That Product ID is already in use.");
+            await Audit(connection, transaction, null, product, cancellationToken);
+            return Result.Success(true);
         }, cancellationToken);
         return result.IsSuccess ? Result.Success() : Result.Failure(result.Error);
     }
@@ -87,8 +118,10 @@ public sealed class PostgresProductStore(string connectionString) : IProductStor
             command.Parameters.AddWithValue((int)expected.Kind);
             command.Parameters.AddWithValue(expected.Description);
             command.Parameters.AddWithValue(expected.IsActive);
-            return await command.ExecuteNonQueryAsync(cancellationToken) == 1
-                ? Result.Success(true) : Result.Failure<bool>("The Product changed or no longer exists. Retrieve it again.");
+            if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+                return Result.Failure<bool>("The Product changed or no longer exists. Retrieve it again.");
+            if (expected != replacement) await Audit(connection, transaction, expected, replacement, cancellationToken);
+            return Result.Success(true);
         }, cancellationToken);
         return result.IsSuccess ? Result.Success() : Result.Failure(result.Error);
     }
@@ -96,6 +129,9 @@ public sealed class PostgresProductStore(string connectionString) : IProductStor
     private async Task<Result<T>> Execute<T>(Func<NpgsqlConnection, NpgsqlTransaction, Task<Result<T>>> operation,
         CancellationToken cancellationToken)
     {
+        if (enlistedConnection is not null)
+            return await operation(enlistedConnection, enlistedTransaction!);
+        var commitStarted = false;
         try
         {
             await using var connection = new NpgsqlConnection(connectionString);
@@ -117,8 +153,17 @@ public sealed class PostgresProductStore(string connectionString) : IProductStor
                 """, connection, transaction))
                 await setup.ExecuteNonQueryAsync(cancellationToken);
             var result = await operation(connection, transaction);
-            if (result.IsSuccess) await transaction.CommitAsync(cancellationToken);
+            if (result.IsSuccess)
+            {
+                commitStarted = true;
+                if (commit is null) await transaction.CommitAsync(cancellationToken);
+                else await commit(transaction, cancellationToken);
+            }
             return result;
+        }
+        catch (Exception) when (commitStarted)
+        {
+            return Result.Failure<T>("The Product change outcome could not be confirmed. Retrieve the Product before retrying.");
         }
         catch (PostgresException exception) when (!cancellationToken.IsCancellationRequested && exception.SqlState == PostgresErrorCodes.UniqueViolation)
         {

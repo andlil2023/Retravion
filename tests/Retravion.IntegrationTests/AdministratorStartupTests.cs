@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Retravion.Application.AuditTrail;
+using Retravion.Application.Product;
 using Retravion.Identity.Application;
 using Retravion.Identity.Domain;
 using Retravion.Identity.Infrastructure;
@@ -85,10 +86,18 @@ internal sealed class AdministratorWebFactory(
             services.AddSingleton<IAdministratorStore>(store);
             services.RemoveAll<IAccountAuditTransaction>();
             services.AddSingleton<IAccountAuditTransaction, InMemoryAccountAuditTransaction>();
+            services.RemoveAll<IProductChangeTransaction>();
+            services.AddSingleton<IProductChangeTransaction, InMemoryProductChangeTransaction>();
             services.RemoveAll<IAuditSubmission>();
             services.AddSingleton<IAuditSubmission, SuccessfulAuditSubmission>();
         });
     }
+}
+
+internal sealed class InMemoryProductChangeTransaction(IProductStore store) : IProductChangeTransaction
+{
+    public Task<Result<Retravion.Domain.Product.Product>> Execute(AuditActor actor, DateTimeOffset occurredAt,
+        Func<IProductStore, Task<Result<Retravion.Domain.Product.Product>>> change, CancellationToken cancellationToken = default) => change(store);
 }
 
 // Existing web tests use an in-memory Identity store; real atomicity is tested against PostgreSQL.

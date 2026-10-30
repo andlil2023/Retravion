@@ -11,7 +11,7 @@ using ProductState = Retravion.Domain.Product.Product;
 
 namespace Retravion.IntegrationTests;
 
-public sealed class PostgresProductTests
+public sealed partial class PostgresProductTests
 {
     [PostgresFact]
     public async Task ProductAcceptanceCasesPersistAcrossStoresAndRejectDuplicateIdsAndMissingNames()
