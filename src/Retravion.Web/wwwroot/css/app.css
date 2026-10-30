@@ -137,10 +137,15 @@ a, button, input { -webkit-tap-highlight-color: transparent; }
 .product-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
 .product-heading h2 { margin: 0; font-size: 26px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; min-width: 0; }
 .product-status { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; background: var(--mud-palette-action-default-hover); }
+.product-kind { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
+.product-kind dt { color: var(--mud-palette-text-secondary); font-size: 0.875rem; font-weight: 600; }
+.product-kind dd { margin: 2px 0 0; font-size: 1rem; }
 .product-document { padding: 28px 32px; min-height: 260px; }
 .product-markdown { overflow: auto; overflow-wrap: anywhere; }
 .product-markdown img { max-width: 100%; }
 .product-markdown p { max-width: 75ch; }
+/* Keep outside markers inside the scrollable document, including nested lists. */
+.product-markdown ul, .product-markdown ol { padding-inline-start: 1.5rem; }
 .product-empty { color: var(--mud-palette-text-secondary); }
 .product-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 20px; }
 .product-status-action { margin-left: auto; }

@@ -84,6 +84,7 @@ public sealed partial class AccountManagementTests
         Assert.Contains("&lt;script&gt;Product&lt;/script&gt;", details);
         Assert.Contains("&lt;b&gt;Plain description&lt;/b&gt;", details);
         Assert.DoesNotContain("<script>Product</script>", details);
+        Assert.Contains("<dl class=\"product-kind\"><dt>Kind</dt><dd>System</dd></dl>", details);
         Assert.Contains("/products/edit?id=", details);
         Assert.DoesNotContain(result.Value.InternalId.ToString(), details);
         Assert.DoesNotContain(">Retire</button>", details);
@@ -131,10 +132,14 @@ public sealed partial class AccountManagementTests
         editor = await user.GetStringAsync("/products/description?id=" + Uri.EscapeDataString(id));
         Assert.Contains("<h1>Heading</h1>", editor);
         Assert.Contains("<strong>Formatted</strong>", editor);
-        Assert.True((await operations.UpdateDescription(actor, id, result.Value.InternalId, "# Heading\n\n**Formatted**", "## Updated\n\n*Again*")).IsSuccess);
+        Assert.True((await operations.UpdateDescription(actor, id, result.Value.InternalId, "# Heading\n\n**Formatted**", "## Updated\n\n*Again*\n\n- One\n- Two\n\n1. First\n2. Second")).IsSuccess);
         details = await user.GetStringAsync(detailPath);
         Assert.Contains("<h2>Updated</h2>", details);
         Assert.Contains("<em>Again</em>", details);
+        Assert.Contains("<ul>", details);
+        Assert.Contains("<li>One</li>", details);
+        Assert.Contains("<ol>", details);
+        Assert.Contains("<li>First</li>", details);
         Assert.DoesNotContain("<h1>Heading</h1>", details);
         Assert.Contains("Product not found.", await user.GetStringAsync("/products/details?id=missing"));
         Assert.Contains("A Product ID is required.", await user.GetStringAsync("/products/details"));
