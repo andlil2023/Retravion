@@ -100,7 +100,9 @@ public sealed partial class AccountManagementTests
         Assert.Contains("Identified: &lt;script&gt;event-time &amp; ID&lt;/script&gt;", page);
         Assert.DoesNotContain("<script>event-time", page);
         Assert.DoesNotContain(id.ToString(), page);
-        Assert.DoesNotContain("prior-id-not-for-display", page);
+        // Historical IDs belong only to the disclosure, never the list target cell.
+        Assert.DoesNotContain("prior-id-not-for-display", System.Text.RegularExpressions.Regex.Replace(page, "<details\\b[\\s\\S]*?</details>", ""));
+        if (previous is not null) Assert.Contains("prior-id-not-for-display", page);
         Assert.Contains("Identified: legacy-account-target", page);
         Assert.Contains("Unknown", page);
         Assert.Contains("Not applicable", page);

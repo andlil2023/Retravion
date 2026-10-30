@@ -1,0 +1,36 @@
+.audit-event-details {
+    min-width: 7rem;
+    text-align: left;
+}
+
+summary {
+    cursor: pointer;
+    color: var(--mud-palette-primary);
+    padding: 0.5rem 0;
+}
+
+summary:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 2px;
+}
+
+.event-content {
+    width: min(32rem, 65vw);
+    max-width: 100%;
+    padding: 0.5rem;
+}
+
+dt {
+    font-weight: 600;
+    color: var(--mud-palette-text-secondary);
+}
+
+dd {
+    margin: 0 0 0.75rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.field-change {
+    margin-top: 1rem;
+}
