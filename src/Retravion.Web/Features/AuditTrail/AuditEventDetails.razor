@@ -1,0 +1,60 @@
+@using System.Globalization
+@using Retravion.Application.AuditTrail
+
+<details class="audit-event-details">
+    <summary>View details</summary>
+    <div class="event-content">
+        <h3>Recorded event</h3>
+        <dl>
+            <dt>Actor</dt><dd>@(Event.Actor is AuditActor.Identified actor ? $"Identified: {actor.Identifier}" : "Unknown")</dd>
+            <dt>Time (UTC)</dt><dd><time datetime="@Event.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)">@Event.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)</time></dd>
+            <dt>Action</dt><dd>@Event.Action</dd>
+            <dt>Target</dt><dd>@(Event.ProductChange is { } product ? $"Identified: {product.After.Id}" : Event.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</dd>
+            <dt>Outcome</dt><dd>@Event.Outcome</dd>
+        </dl>
+        @if (Event.ProductChange is { } change)
+        {
+            <h3>@(change.Before is null ? "Initial Product values" : "Changed Product fields")</h3>
+            @foreach (var field in Fields(change))
+            {
+                <section class="field-change" aria-label="@field.Name">
+                    <h4>@field.Name</h4>
+                    <dl>
+                        @if (change.Before is not null)
+                        {
+                            <dt>Old value</dt><dd class="recorded-value">@(field.Old == "" ? "(empty)" : field.Old)</dd>
+                        }
+                        <dt>@(change.Before is null ? "Initial value" : "New value")</dt><dd class="recorded-value">@(field.New == "" ? "(empty)" : field.New)</dd>
+                    </dl>
+                </section>
+            }
+            @if (!Fields(change).Any())
+            {
+                <p>No recorded field changes.</p>
+            }
+        }
+        else
+        {
+            <p>No recorded field changes.</p>
+        }
+    </div>
+</details>
+
+@code {
+    [Parameter, EditorRequired] public AuditInformation Event { get; set; } = default!;
+
+    private static IEnumerable<(string Name, string? Old, string New)> Fields(ProductAuditDetails change)
+    {
+        var before = change.Before;
+        var after = change.After;
+        (string Name, string? Old, string New)[] fields =
+        [
+            ("Product ID", before?.Id, after.Id),
+            ("Name", before?.Name, after.Name),
+            ("Kind", before?.Kind, after.Kind),
+            ("Description", before?.Description, after.Description),
+            ("Active", before?.IsActive.ToString(), after.IsActive.ToString())
+        ];
+        return fields.Where(field => before is null || field.Old != field.New);
+    }
+}

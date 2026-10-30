@@ -93,7 +93,7 @@ These requirements are approved for future implementation; their inclusion is no
 **Requirement:** The software shall restrict access to audit-event viewing to administrators.
 
 **Acceptance criteria:**
-- Non-administrators cannot retrieve audit events through the view or by direct requests.
+- Non-administrators cannot retrieve audit events, including their details, through the view or by direct requests. Anonymous, password-restricted, and revoked-session users cannot retrieve details either.
 
 ### REQ-SW-AUDIT-003 — Filter Audit Events
 
@@ -217,6 +217,24 @@ This is a cross-cutting expectation for future features. The present increment i
 - If submission fails or throws, the change remains denied and the audit failure is operationally logged without submitted values, provider exception details, or credentials.
 - An unsuccessful or uncertain submission cannot guarantee an event was stored; operational logging does not replace an audit record.
 
+### REQ-SW-AUDIT-010 — Inspect Individual Audit Events
+
+**Type:** Software requirement
+
+**Parent need:** UN-AUDIT-02
+
+**Parent requirement:** REQ-SYS-AUDIT-001
+
+**Requirement:** The software shall allow administrators to open individual recorded events from the audit list and inspect their available details.
+
+**Acceptance criteria:**
+- Details show recorded actor, exact occurrence time in UTC, action, event-time target, and outcome, preserving unknown and not-applicable states.
+- Product creation shows initial Product ID, name, kind, description, and active status. Subsequent Product events show changed fields with their exact old and new values; unchanged fields are omitted.
+- Product targets display the event-time Product ID, not the internal UUID. Historical values are not replaced by current Product values.
+- Events without Product details or differing fields remain viewable with an explicit no-recorded-field-changes message. Empty recorded values remain distinguishable from missing prior values on creation.
+- Values, including Markdown, are displayed as encoded plain text, without executing HTML or creating active links. Long values wrap, preserve line breaks, and are not truncated.
+- Opening details does not mutate audit records or discard list filters.
+
 ## Approved Architectural Direction
 
 Place the audit submission interface and information types in `src/Retravion.Application/AuditTrail/`, without creating a separate project.
@@ -229,6 +247,6 @@ REQ-AUDIT-01 defines the submission interface and audit information types; REQ-A
 
 The original REQ-AUDIT-01–03 increment excludes integration of other application operations and audit browsing/search UI. The later inspection and account-administration requirements above specify additional future behavior, not evidence of its implementation. Retention, export, tamper-evidence mechanisms, retry queues, and duplicate-submission guarantees remain outside the original increment. Audit storage and session creation are not atomic: a failed or uncertain submission may have committed an event even when access is denied. Automatic retries are not provided.
 
-The Product increment adds optional structured Product details to the common contract and audit table, preserving existing consumers and events. Product mutation orchestration uses an explicit transaction contract; Product persistence and audit insertion share the existing PostgreSQL transaction. The audit query returns supplied details; a new field-history UI is not included.
+The Product increment adds optional structured Product details to the common contract and audit table, preserving existing consumers and events. Product mutation orchestration uses an explicit transaction contract; Product persistence and audit insertion share the existing PostgreSQL transaction. The audit query returns supplied details. The individual-event inspection increment adds inline details to the existing authorized list using those returned values; it introduces no new retrieval endpoint or persistence contract. A separate field-history view remains outside scope.
 
 These requirements are incremental contributions to UN-AUDIT-01, not delivery of a complete audit trail or evidence of compliance with a particular regulatory standard.

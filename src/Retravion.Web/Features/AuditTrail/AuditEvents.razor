@@ -57,13 +57,14 @@ else if (_events is null) { <p role="status">Loading audit activity…</p> }
 else
 {
     <MudTable Items="_events" Dense="true" Hover="true" Elevation="0" aria-label="Audit activity">
-        <HeaderContent><MudTh>Actor</MudTh><MudTh>Time (UTC)</MudTh><MudTh>Action</MudTh><MudTh>Target</MudTh><MudTh>Outcome</MudTh></HeaderContent>
+        <HeaderContent><MudTh>Actor</MudTh><MudTh>Time (UTC)</MudTh><MudTh>Action</MudTh><MudTh>Target</MudTh><MudTh>Outcome</MudTh><MudTh>Details</MudTh></HeaderContent>
         <RowTemplate>
             <MudTd DataLabel="Actor">@(context.Actor is AuditActor.Identified actor ? $"Identified: {actor.Identifier}" : "Unknown")</MudTd>
             <MudTd DataLabel="Time (UTC)"><time datetime="@context.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)" title="@context.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)">@context.OccurredAt.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</time></MudTd>
             <MudTd DataLabel="Action">@context.Action</MudTd>
             <MudTd DataLabel="Target">@(context.ProductChange is { } product ? $"Identified: {product.After.Id}" : context.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</MudTd>
             <MudTd DataLabel="Outcome">@context.Outcome</MudTd>
+            <MudTd DataLabel="Details"><AuditEventDetails Event="context" /></MudTd>
         </RowTemplate>
         <NoRecordsContent><p>No audit events found.</p></NoRecordsContent>
     </MudTable>

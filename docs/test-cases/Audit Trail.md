@@ -61,6 +61,18 @@ The following specify the Product increment. Automated counterparts are in `Audi
 | TC-AUDIT-030 | REQ-SW-AUDIT-009, REQ-PRODUCT-006 | Integration/security | Anonymous, password-restricted, and revoked actors; audit recorder and operational logger | Attempt all mutation callbacks and reads; make audit submission return failure and throw | Mutation attempts remain denied and submit actor/time/action/failure with unknown target and no Product values; reads produce no change events; failed submissions log a safe error without submitted values or exception details |
 | TC-AUDIT-031 | REQ-AUDIT-02, REQ-SW-AUDIT-007, REQ-SW-AUDIT-008 | PostgreSQL | Audit table predating Product details; concurrent edit fixture | Read legacy events, submit Product events, race edits from the same prior snapshot | Additive upgrade preserves legacy events with absent details; only one concurrent edit succeeds and has one matching audit event |
 
+## Individual Event Inspection Cases
+
+These cases specify the individual-event details increment. Execution evidence belongs in the PR. UI automation inspects the native disclosure markup and its rendered contents; browser checks additionally verify native keyboard interaction and visual wrapping.
+
+| Test ID | Verifies | Level | Preconditions | Steps/stimulus | Expected result |
+|---|---|---|---|---|---|
+| TC-AUDIT-032 | REQ-SW-AUDIT-001, REQ-SW-AUDIT-010 | UI/integration | Authorized administrator; creation and change events with historical values | Open an event's View details disclosure in the list | Recorded metadata and event-time Product ID appear; creation has all initial values; later events have only differing fields with exact old/new values; no internal UUID is displayed |
+| TC-AUDIT-033 | REQ-SW-AUDIT-010 | UI | Legacy, denied, and identical-snapshot events; unknown and not-applicable metadata | Inspect each event's details | Each remains viewable; metadata states remain distinct; no recorded field changes is explicit; an empty value is distinguishable from no prior value |
+| TC-AUDIT-034 | REQ-SW-AUDIT-002, REQ-SW-AUDIT-010 | Integration/security | Sensitive event and query spy; anonymous, ordinary, password-restricted, and revoked-session actors | Request audit page and invoke the audit operation directly | No event details are returned; unauthorized calls do not reach the query |
+| TC-AUDIT-035 | REQ-SW-AUDIT-010 | UI/security | Long multiline Markdown and HTML/script/link-like values in metadata and old/new fields | Inspect rendered details; review wrapping rules | Exact values are encoded plain text, not executable HTML or active links; no truncation; wrapping and preserved whitespace rules apply |
+| TC-AUDIT-036 | REQ-SW-AUDIT-010 | Manual/browser | Filtered list in a browser | Open and close details with mouse and keyboard; inspect long values at narrow width in light/dark themes | Native disclosure works; list filters remain intact; values remain readable without widening the page; no mutation occurs |
+
 ## Coverage and Limits
 
 TC-AUDIT-001–TC-AUDIT-004 cover the original contract information and result representations. TC-AUDIT-005 checks the architectural direction and boundary of that original increment; its expectation that no working submission, storage, or operation integration is introduced applies to that increment only, not to later work.
