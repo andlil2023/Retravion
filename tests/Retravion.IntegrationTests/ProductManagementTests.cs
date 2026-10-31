@@ -4,8 +4,12 @@ using System.Security.Claims;
 using System.Text.RegularExpressions;
 using CSharpFunctionalExtensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using Retravion.Application.Product;
 using Retravion.Identity.Application;
 using Retravion.Identity.Domain;
@@ -39,7 +43,12 @@ public sealed partial class AccountManagementTests
         var actor = await ProductPrincipal(user, factory.Services, "product-user", Replacement, "/home");
         using var scope = factory.Services.CreateScope();
         var operations = scope.ServiceProvider.GetRequiredService<ProductOperations>();
-        Assert.Contains("href=\"/products\"", await user.GetStringAsync("/home"));
+        var home = await user.GetStringAsync("/home");
+        Assert.Contains("href=\"/products\"", home);
+        Assert.Contains("aria-controls=\"product-navigation-list\"", home);
+        Assert.True(home.IndexOf("aria-controls=\"product-navigation-list\"", StringComparison.Ordinal) <
+                    home.IndexOf("href=\"/products\"", StringComparison.Ordinal));
+        Assert.Contains("No products found.", home);
         var landing = await user.GetStringAsync("/products");
         Assert.Contains("Search Product ID or name", landing);
         Assert.Contains("Status", landing);
@@ -81,6 +90,8 @@ public sealed partial class AccountManagementTests
         Assert.Equal(callsBeforeOversizedId, products.Calls);
         var detailPath = "/products/details?id=" + Uri.EscapeDataString(id);
         var details = await user.GetStringAsync(detailPath);
+        Assert.Contains("class=\"navigation-node product-navigation-item selected\"", details);
+        Assert.Contains("href=\"/products/details?id=" + Uri.EscapeDataString(id) + "\"", details);
         Assert.Contains("&lt;script&gt;Product&lt;/script&gt;", details);
         Assert.Contains("&lt;b&gt;Plain description&lt;/b&gt;", details);
         Assert.DoesNotContain("<script>Product</script>", details);
@@ -222,9 +233,94 @@ public sealed partial class AccountManagementTests
         return (await options.SessionStore!.RetrieveAsync(key))!.Principal;
     }
 
+    [Fact]
+    public async Task ProductNavigationRefreshesAfterProductCreationAndRenameInTheSameCircuit()
+    {
+        var products = new ProductStoreDouble();
+        var useCircuitNavigation = false;
+        await using var baseFactory = new AdministratorWebFactory(new StartupAdministratorStore(), "admin", Initial);
+        await using var factory = baseFactory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            services.AddSingleton<IProductStore>(products);
+            var original = services.Last(descriptor => descriptor.ServiceType == typeof(NavigationManager));
+            services.AddScoped<NavigationManager>(provider => useCircuitNavigation
+                ? new ProductCircuitNavigation()
+                : (NavigationManager)(original.ImplementationFactory?.Invoke(provider)
+                    ?? ActivatorUtilities.CreateInstance(provider, original.ImplementationType!)));
+        }));
+        using var user = Client(factory);
+        await Login(user, "admin", Initial);
+        await Replace(user, Initial, Replacement);
+        var actor = await ProductPrincipal(user, factory.Services, "admin", Replacement, "/home");
+        useCircuitNavigation = true;
+        await using var scope = factory.Services.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        ((IHostEnvironmentAuthenticationStateProvider)services.GetRequiredService<AuthenticationStateProvider>())
+            .SetAuthenticationState(Task.FromResult(new AuthenticationState(actor)));
+        var operations = services.GetRequiredService<ProductOperations>();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<ProductNavigation>();
+            Assert.Contains("No products found.", component.ToHtmlString());
+            var created = await operations.Create(actor, "nav-id", "First name", ProductKind.System, "");
+            Assert.True(created.IsSuccess);
+            services.GetRequiredService<NavigationManager>().NavigateTo("/products/details?id=nav-id");
+            Assert.Contains("First name", component.ToHtmlString());
+            var renamed = await operations.Edit(actor, created.Value, "nav-id", "Renamed", ProductKind.System, "", false);
+            Assert.True(renamed.IsSuccess);
+            services.GetRequiredService<NavigationManager>().NavigateTo("/products/edit?id=nav-id");
+            services.GetRequiredService<NavigationManager>().NavigateTo("/products/details?id=nav-id");
+            var html = component.ToHtmlString();
+            Assert.Contains("Renamed", html);
+            Assert.DoesNotContain("First name", html);
+            products.FailList = true;
+            services.GetRequiredService<NavigationManager>().NavigateTo("/home");
+            Assert.Contains("Could not load products.", component.ToHtmlString());
+        });
+    }
+
+    private sealed class ProductCircuitNavigation : NavigationManager
+    {
+        public ProductCircuitNavigation() => Initialize("https://localhost/", "https://localhost/home");
+        protected override void NavigateToCore(string uri, bool forceLoad)
+        {
+            Uri = ToAbsoluteUri(uri).ToString();
+            NotifyLocationChanged(false);
+        }
+    }
+
+    [Fact]
+    public async Task ProductNavigationShowsFailureWithoutDisclosingStoreErrorAndRecoversOnNextRequest()
+    {
+        var products = new ProductStoreDouble { ThrowList = true };
+        await using var baseFactory = new AdministratorWebFactory(new StartupAdministratorStore(), "admin", Initial);
+        await using var factory = baseFactory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddSingleton<IProductStore>(products)));
+        using var user = Client(factory);
+        await Login(user, "admin", Initial);
+        await Replace(user, Initial, Replacement);
+
+        var failed = await user.GetStringAsync("/home");
+        Assert.Contains("Could not load products.", failed);
+        Assert.Contains(">Retry</button>", failed);
+        Assert.DoesNotContain("sensitive provider details", failed);
+        products.ThrowList = false;
+        products.FailList = true;
+        var expectedFailure = await user.GetStringAsync("/home");
+        Assert.Contains("Could not load products.", expectedFailure);
+        Assert.DoesNotContain("Product list unavailable.", expectedFailure);
+        products.FailList = false;
+        var recovered = await user.GetStringAsync("/home");
+        Assert.Contains("No products found.", recovered);
+        Assert.DoesNotContain("Could not load products.", recovered);
+    }
+
     private sealed class ProductStoreDouble : IProductStore
     {
         private readonly Dictionary<string, ProductState> products = new(StringComparer.OrdinalIgnoreCase);
+        public bool FailList { get; set; }
+        public bool ThrowList { get; set; }
         public int Calls;
         public Task<Result> Create(ProductState product, CancellationToken cancellationToken = default)
         {
@@ -234,7 +330,10 @@ public sealed partial class AccountManagementTests
         public Task<Result<IReadOnlyList<ProductState>>> List(CancellationToken cancellationToken = default)
         {
             Calls++;
-            return Task.FromResult(Result.Success<IReadOnlyList<ProductState>>(products.Values.ToArray()));
+            if (ThrowList) throw new InvalidOperationException("sensitive provider details");
+            return Task.FromResult(FailList
+                ? Result.Failure<IReadOnlyList<ProductState>>("Product list unavailable.")
+                : Result.Success<IReadOnlyList<ProductState>>(products.Values.ToArray()));
         }
         public Task<Result<Maybe<ProductState>>> Find(string id, CancellationToken cancellationToken = default)
         {

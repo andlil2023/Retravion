@@ -1,0 +1,100 @@
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.WebUtilities
+@implements IDisposable
+@inject ProductOperations Operations
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+@inject ILogger<ProductNavigation> Logger
+
+<div class="product-navigation-heading">
+    <button type="button" class="product-navigation-toggle" aria-label="@(_expanded ? "Collapse products" : "Expand products")" aria-expanded="@_expanded" aria-controls="product-navigation-list" @onclick="Toggle"><MudIcon Icon="@(_expanded ? Icons.Material.Outlined.ExpandMore : Icons.Material.Outlined.ChevronRight)" /></button>
+    <a class="navigation-node @(IsProductList ? "selected" : "")" href="/products" aria-current="@(IsProductList ? "page" : null)"><MudIcon Icon="@Icons.Material.Outlined.Inventory2" /><span>Products</span></a>
+</div>
+<div id="product-navigation-list" class="product-navigation-list" hidden="@(!_expanded)">
+    @if (_loading)
+    {
+        <p class="product-navigation-message" role="status">Loading products…</p>
+    }
+    else if (_error is not null)
+    {
+        <p class="product-navigation-message" role="alert">Could not load products.</p>
+        <button type="button" class="product-navigation-retry" @onclick="Load">Retry</button>
+    }
+    else if (_products.Count == 0)
+    {
+        <p class="product-navigation-message">No products found.</p>
+    }
+    else
+    {
+        @foreach (var product in _products)
+        {
+            var selected = IsSelected(product.Id);
+            <a class="navigation-node product-navigation-item @(selected ? "selected" : "")" href="@($"/products/details?id={Uri.EscapeDataString(product.Id)}")" aria-current="@(selected ? "page" : null)"><span>@product.Id – @product.Name</span></a>
+        }
+    }
+</div>
+
+@code {
+    private IReadOnlyList<Retravion.Domain.Product.Product> _products = [];
+    private string? _error;
+    private bool _loading = true, _expanded = true, _disposed;
+    private int _loadVersion;
+    private bool IsProductList
+    {
+        get
+        {
+            var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/');
+            return (path.Equals("products", StringComparison.OrdinalIgnoreCase) || path.StartsWith("products/", StringComparison.OrdinalIgnoreCase))
+                && !path.Equals("products/details", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += LocationChanged;
+        await Load();
+    }
+
+    private bool IsSelected(string id)
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        return uri.AbsolutePath.TrimEnd('/').EndsWith("/products/details", StringComparison.OrdinalIgnoreCase)
+            && QueryHelpers.ParseQuery(uri.Query).TryGetValue("id", out var value)
+            && string.Equals(value.ToString(), id, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task Load()
+    {
+        var version = ++_loadVersion;
+        _loading = true;
+        _error = null;
+        try
+        {
+            var result = await Operations.List((await Authentication.GetAuthenticationStateAsync()).User);
+            if (_disposed || version != _loadVersion) return;
+            _products = result.IsSuccess ? result.Value : [];
+            _error = result.IsFailure ? result.Error : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Provider exceptions can contain sensitive connection details.
+            Logger.LogError("Product navigation failed to load.");
+            if (_disposed || version != _loadVersion) return;
+            _products = [];
+            _error = "Product navigation failed to load.";
+        }
+        _loading = false;
+    }
+
+    private void LocationChanged(object? sender, LocationChangedEventArgs args) => _ = InvokeAsync(async () =>
+    {
+        if (_disposed) return;
+        var loading = Load();
+        StateHasChanged();
+        await loading;
+        if (!_disposed) StateHasChanged();
+    });
+
+    private void Toggle() => _expanded = !_expanded;
+    public void Dispose() { _disposed = true; Navigation.LocationChanged -= LocationChanged; }
+}

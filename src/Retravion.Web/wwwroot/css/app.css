@@ -118,6 +118,16 @@ a, button, input { -webkit-tap-highlight-color: transparent; }
 .navigation-node:hover { background: #1b4056; }
 .navigation-node.selected { border-color: #518da1; background: var(--selection); color: #fff; }
 .navigation-node .mud-icon-root { font-size: 21px; }
+.sidebar { overflow-y: auto; }
+.product-navigation-heading { display: flex; align-items: center; }
+.product-navigation-heading .navigation-node { flex: 1; min-width: 0; }
+.product-navigation-toggle, .product-navigation-retry { border: 0; border-radius: 7px; color: #e5edf3; background: transparent; cursor: pointer; min-height: 44px; }
+.product-navigation-toggle { width: 44px; flex: 0 0 44px; }
+.product-navigation-toggle:hover, .product-navigation-retry:hover { background: #1b4056; }
+.product-navigation-list { margin-left: 21px; padding-left: 9px; border-left: 1px solid #518da1; }
+.product-navigation-item { overflow-wrap: anywhere; font-size: 13px; text-decoration: none; }
+.product-navigation-message { padding: 0 12px; color: #e5edf3; font-size: 13px; }
+.product-navigation-retry { padding: 0 12px; }
 .sidebar-footer { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; margin: auto 12px 0; padding-top: 32px; font-size: 12px; }
 .prototype-badge { color: var(--sidebar-muted); font-size: 9px; letter-spacing: .16em; }
 .sidebar-footer a { color: #d2e2ed; text-underline-offset: 4px; }
