@@ -21,7 +21,7 @@
         <nav aria-label="Main navigation">
             <a class="navigation-node" href="/home"><MudIcon Icon="@Icons.Material.Outlined.Home" /><span>Home</span></a>
             <AuthorizeView Policy="CompletedPasswordReplacement">
-                <a class="navigation-node @(IsProduct ? "selected" : "")" href="/products" aria-current="@(IsProduct ? "page" : null)"><MudIcon Icon="@Icons.Material.Outlined.Inventory2" /><span>Products</span></a>
+                <Retravion.Web.Features.Product.ProductNavigation />
             </AuthorizeView>
         </nav>
         <div class="sidebar-bottom">

@@ -86,12 +86,24 @@ internal sealed class AdministratorWebFactory(
             services.AddSingleton<IAdministratorStore>(store);
             services.RemoveAll<IAccountAuditTransaction>();
             services.AddSingleton<IAccountAuditTransaction, InMemoryAccountAuditTransaction>();
+            services.RemoveAll<IProductStore>();
+            services.AddSingleton<IProductStore, EmptyProductStore>();
             services.RemoveAll<IProductChangeTransaction>();
             services.AddSingleton<IProductChangeTransaction, InMemoryProductChangeTransaction>();
             services.RemoveAll<IAuditSubmission>();
             services.AddSingleton<IAuditSubmission, SuccessfulAuditSubmission>();
         });
     }
+}
+
+internal sealed class EmptyProductStore : IProductStore
+{
+    public Task<Result<IReadOnlyList<Retravion.Domain.Product.Product>>> List(CancellationToken cancellationToken = default) =>
+        Task.FromResult(Result.Success<IReadOnlyList<Retravion.Domain.Product.Product>>([]));
+    public Task<Result<Maybe<Retravion.Domain.Product.Product>>> Find(string id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Result.Success(Maybe<Retravion.Domain.Product.Product>.None));
+    public Task<Result> Create(Retravion.Domain.Product.Product product, CancellationToken cancellationToken = default) => Task.FromResult(Result.Failure("Not supported."));
+    public Task<Result> Update(Retravion.Domain.Product.Product expected, Retravion.Domain.Product.Product replacement, CancellationToken cancellationToken = default) => Task.FromResult(Result.Failure("Not supported."));
 }
 
 internal sealed class InMemoryProductChangeTransaction(IProductStore store) : IProductChangeTransaction
