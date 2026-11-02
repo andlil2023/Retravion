@@ -126,6 +126,7 @@ a, button, input { -webkit-tap-highlight-color: transparent; }
 .product-navigation-toggle:hover, .product-navigation-retry:hover { background: #1b4056; }
 .product-navigation-list { margin-left: 21px; padding-left: 9px; border-left: 1px solid #518da1; }
 .product-navigation-item { overflow-wrap: anywhere; font-size: 13px; text-decoration: none; }
+.product-navigation-child { margin-left: 1rem; }
 .product-navigation-message { padding: 0 12px; color: #e5edf3; font-size: 13px; }
 .product-navigation-retry { padding: 0 12px; }
 .sidebar-footer { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; margin: auto 12px 0; padding-top: 32px; font-size: 12px; }

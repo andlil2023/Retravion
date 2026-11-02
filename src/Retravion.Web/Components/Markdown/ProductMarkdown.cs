@@ -2,7 +2,7 @@ using Markdig;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
-namespace Retravion.Web.Features.Product.Description;
+namespace Retravion.Web.Components.Markdown;
 
 internal static class ProductMarkdown
 {
@@ -10,7 +10,7 @@ internal static class ProductMarkdown
 
     public static string Render(string markdown)
     {
-        var document = Markdown.Parse(markdown, Pipeline);
+        var document = Markdig.Markdown.Parse(markdown, Pipeline);
         foreach (var link in document.Descendants<LinkInline>())
         {
             if (!SafeUrl(link.Url)) link.Url = "";

@@ -9,6 +9,7 @@ public sealed record AuditInformation
     public AuditTarget Target { get; }
     public AuditActionOutcome Outcome { get; }
     public ProductAuditDetails? ProductChange { get; }
+    public UserNeedAuditDetails? UserNeedChange { get; }
 
     public AuditInformation(
         AuditActor actor,
@@ -16,7 +17,8 @@ public sealed record AuditInformation
         string action,
         AuditTarget target,
         AuditActionOutcome outcome,
-        ProductAuditDetails? productChange = null)
+        ProductAuditDetails? productChange = null,
+        UserNeedAuditDetails? userNeedChange = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
@@ -32,5 +34,6 @@ public sealed record AuditInformation
         Target = target;
         Outcome = outcome;
         ProductChange = productChange;
+        UserNeedChange = userNeedChange;
     }
 }

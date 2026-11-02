@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 using MudBlazor.Services;
-using Retravion.Web.Features.Product.Description;
+using Retravion.Web.Components.Markdown;
 using Xunit;
 
 namespace Retravion.IntegrationTests;

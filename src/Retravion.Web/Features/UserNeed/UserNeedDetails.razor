@@ -1,0 +1,86 @@
+@page "/user-needs/details"
+@inject UserNeedOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>User Need · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="User Need" BackHref="@BackPath" BackText="User Needs" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_need is not null && _product is not null)
+{
+    <MudPaper Class="pa-4" Elevation="0">
+        <h2>@_need.Need.Id – @_need.Need.Title</h2>
+        <p>Product: @_product.Id – @_product.Name</p>
+        <p>Status: @_need.Need.Status @(!_product.IsActive ? "(Product retired)" : "")</p>
+        <h3>Statement</h3><ProductMarkdownView Markdown="@_need.Need.Statement" />
+        <h3>Review history</h3>
+        @if (_history is null) { <p role="status">Loading review history…</p> }
+        else if (_history.Count == 0) { <p>No review decisions yet.</p> }
+        else
+        {
+            @foreach (var item in _history)
+            {
+                <details><summary>@item.Decision — @item.OccurredAt.ToString("u") — @((item.Actor as Retravion.Application.AuditTrail.AuditActor.Identified)?.Identifier)</summary>
+                    <p>Title: @item.Title</p><p>Comment: @(item.Comment ?? "None")</p>
+                    <h4>Statement at decision</h4><ProductMarkdownView Markdown="@item.Statement" />
+                </details>
+            }
+        }
+    </MudPaper>
+    @if (_product.IsActive)
+    {
+        <div class="mt-4">
+            @if (_need.Need.Status == UserNeedStatus.Draft)
+            {
+                <MudButton Href="@($"/user-needs/edit?id={_need.Need.InternalId}")">Edit</MudButton>
+                <MudTextField @bind-Value="_comment" Label="Review comment (optional)" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("InReview"))'>Submit for review</MudButton>
+            }
+            else
+            {
+                <MudTextField @bind-Value="_comment" Label="Review comment (optional)" />
+                @if (_need.Need.Status == UserNeedStatus.InReview)
+                { <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton> }
+                <MudButton Disabled="_busy" OnClick='@(() => Review("Draft"))'>Return to Draft</MudButton>
+            }
+        </div>
+    }
+}
+@code {
+    [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    private UserNeedSnapshot? _need;
+    private Retravion.Domain.Product.Product? _product;
+    private IReadOnlyList<UserNeedReview>? _history;
+    private string? _error, _comment;
+    private bool _busy;
+    private string BackPath => _product is null ? "/products" : $"/user-needs?product={Uri.EscapeDataString(_product.Id)}";
+    protected override async Task OnParametersSetAsync() => await Load();
+    private async Task Load()
+    {
+        _need = null; _product = null; _history = null; _error = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var result = await Operations.Find(actor, Id);
+        if (result.IsFailure) { _error = result.Error; return; }
+        if (result.Value.HasNoValue) { _error = "User Need not found."; return; }
+        _need = result.Value.Value;
+        var products = await Products.List(actor);
+        if (products.IsFailure) { _error = products.Error; return; }
+        _product = products.Value.SingleOrDefault(p => p.InternalId == _need.Need.ProductInternalId);
+        if (_product is null) { _error = "Product not found."; return; }
+        var history = await Operations.History(actor, Id);
+        if (history.IsFailure) _error = history.Error; else _history = history.Value;
+    }
+    private async Task Review(string decision)
+    {
+        if (_busy || _need is null) return;
+        _busy = true; _error = null;
+        try
+        {
+            var result = await Operations.Review((await Authentication.GetAuthenticationStateAsync()).User, _need, decision, _comment);
+            if (result.IsFailure) _error = result.Error;
+            else { _comment = null; await Load(); }
+        }
+        finally { _busy = false; }
+    }
+}

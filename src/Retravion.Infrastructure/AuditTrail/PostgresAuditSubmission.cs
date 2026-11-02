@@ -65,14 +65,15 @@ public sealed class PostgresAuditSubmission(string connectionString) : IAuditSub
                         OR (target_kind IN ('unknown', 'not_applicable') AND target_identifier IS NULL))
                 );
                 ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS product_change jsonb;
+                ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS user_need_change jsonb;
                 """, connection, transaction))
                 await setup.ExecuteNonQueryAsync(cancellationToken);
 
             await using var command = new NpgsqlCommand("""
                 INSERT INTO retravion_audit.event
                     (actor_kind, actor_identifier, occurred_at_utc_ticks, action,
-                        target_kind, target_identifier, outcome, product_change)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        target_kind, target_identifier, outcome, product_change, user_need_change)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 """, connection, transaction);
             command.Parameters.AddWithValue(information.Actor is AuditActor.Identified ? "identified" : "unknown");
             command.Parameters.AddWithValue(NpgsqlDbType.Text,
@@ -92,6 +93,8 @@ public sealed class PostgresAuditSubmission(string connectionString) : IAuditSub
             command.Parameters.AddWithValue(information.Outcome == AuditActionOutcome.Success ? "success" : "failure");
             command.Parameters.AddWithValue(NpgsqlDbType.Jsonb,
                 information.ProductChange is null ? DBNull.Value : JsonSerializer.Serialize(information.ProductChange));
+            command.Parameters.AddWithValue(NpgsqlDbType.Jsonb,
+                information.UserNeedChange is null ? DBNull.Value : JsonSerializer.Serialize(information.UserNeedChange));
             await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

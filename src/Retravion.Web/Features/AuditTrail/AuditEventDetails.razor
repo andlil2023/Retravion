@@ -9,7 +9,7 @@
             <dt>Actor</dt><dd>@(Event.Actor is AuditActor.Identified actor ? $"Identified: {actor.Identifier}" : "Unknown")</dd>
             <dt>Time (UTC)</dt><dd><time datetime="@Event.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)">@Event.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)</time></dd>
             <dt>Action</dt><dd>@Event.Action</dd>
-            <dt>Target</dt><dd>@(Event.ProductChange is { } product ? $"Identified: {product.After.Id}" : Event.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</dd>
+            <dt>Target</dt><dd>@(Event.ProductChange is { } product ? $"Identified: {product.After.Id}" : Event.UserNeedChange is { } need ? $"Identified: {need.After.Id}" : Event.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</dd>
             <dt>Outcome</dt><dd>@Event.Outcome</dd>
         </dl>
         @if (Event.ProductChange is { } change)
@@ -33,6 +33,33 @@
                 <p>No recorded field changes.</p>
             }
         }
+        else if (Event.UserNeedChange is { } needChange)
+        {
+            <h3>@(needChange.Before is null ? "Initial User Need values" : "Changed User Need fields")</h3>
+            @foreach (var field in NeedFields(needChange))
+            {
+                <section class="field-change" aria-label="@field.Name">
+                    <h4>@field.Name</h4>
+                    <dl>
+                        @if (needChange.Before is not null)
+                        {
+                            <dt>Old value</dt><dd class="recorded-value">@(field.Old == "" ? "(empty)" : field.Old)</dd>
+                        }
+                        <dt>@(needChange.Before is null ? "Initial value" : "New value")</dt><dd class="recorded-value">@(field.New == "" ? "(empty)" : field.New)</dd>
+                    </dl>
+                </section>
+            }
+            @if (needChange.Decision is not null)
+            {
+                <h3>Review decision</h3>
+                <dl><dt>Decision</dt><dd class="recorded-value">@needChange.Decision</dd>
+                    <dt>Comment</dt><dd class="recorded-value">@(needChange.Comment is null ? "(not provided)" : needChange.Comment == "" ? "(empty)" : needChange.Comment)</dd></dl>
+            }
+            @if (!NeedFields(needChange).Any() && needChange.Decision is null)
+            {
+                <p>No recorded field changes.</p>
+            }
+        }
         else
         {
             <p>No recorded field changes.</p>
@@ -42,6 +69,21 @@
 
 @code {
     [Parameter, EditorRequired] public AuditInformation Event { get; set; } = default!;
+
+    private static IEnumerable<(string Name, string? Old, string New)> NeedFields(UserNeedAuditDetails change)
+    {
+        var before = change.Before;
+        var after = change.After;
+        (string Name, string? Old, string New)[] fields =
+        [
+            ("User Need ID", before?.Id, after.Id),
+            ("Title", before?.Title, after.Title),
+            ("Statement", before?.Statement, after.Statement),
+            ("Status", before?.Status, after.Status)
+        ];
+        // Product internal IDs are retained in the audit payload but are not displayed to users (REQ-PRODUCT-001).
+        return fields.Where(field => before is null || field.Old != field.New);
+    }
 
     private static IEnumerable<(string Name, string? Old, string New)> Fields(ProductAuditDetails change)
     {

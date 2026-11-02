@@ -22,6 +22,9 @@ using Retravion.Web.Components;
 using Retravion.Application.AuditTrail;
 using Retravion.Infrastructure.AuditTrail;
 using Retravion.Web.Features.AuditTrail;
+using Retravion.Application.UserNeed;
+using Retravion.Infrastructure.UserNeed;
+using Retravion.Web.Features.UserNeed;
 
 var recoveryMode = args.Length == 1 && args[0] == "--recover-initial-administrator";
 var builder = WebApplication.CreateBuilder(recoveryMode ? [] : args);
@@ -89,6 +92,13 @@ builder.Services.AddSingleton<RetrieveProduct>();
 builder.Services.AddSingleton<ChangeProductStatus>();
 builder.Services.AddSingleton<UpdateProductDescription>();
 builder.Services.AddScoped<ProductOperations>();
+builder.Services.AddSingleton<IUserNeedStore>(_ => new PostgresUserNeedStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<IUserNeedChangeTransaction>(_ => new PostgresUserNeedStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddScoped<UserNeedOperations>();
 builder.Services.AddSingleton<AccountCreation>();
 builder.Services.AddScoped<UserOperations>();
 builder.Services.AddScoped<AccountAudit>();

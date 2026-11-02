@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.RegularExpressions;
-using Retravion.Web.Features.Product.Description;
+using Retravion.Web.Components.Markdown;
 using Xunit;
 
 namespace Retravion.IntegrationTests;

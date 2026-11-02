@@ -60,7 +60,7 @@
     <li><strong>Loading:</strong> operation in progress; disable repeat submission, keep a readable action label, and show status. The create/edit templates below demonstrate a held busy state.</li>
     <li><strong>Selected / highlighted:</strong> persistent choice, not hover, focus, or an operation's momentary pressed state. In the live Markdown example, Side by side / Stacked uses <code>aria-pressed="true"</code>, Primary icons, and the existing selected background. Switch between them to inspect selection.</li>
 </ul>
-<p>Selected styling source: <code>src/Retravion.Web/Features/Product/Description/DescriptionEditor.razor</code> and its
+<p>Selected styling source: <code>src/Retravion.Web/Components/Markdown/DescriptionEditor.razor</code> and its
     <code>.razor.css</code> rule <code>[aria-pressed="true"]</code>. Preserve that contract rather than inventing another highlight style.</p>
 
 @code {

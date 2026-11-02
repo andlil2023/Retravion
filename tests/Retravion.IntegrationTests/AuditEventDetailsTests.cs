@@ -104,6 +104,38 @@ public sealed class AuditEventDetailsTests
         Assert.DoesNotContain("<img", html);
     }
 
+    [Fact]
+    public async Task UserNeedDetailsShowExactEncodedEventTimeValuesAndReviewDecision()
+    {
+        var needId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+        var before = new UserNeedAuditValues(productId, "Need-1", "<b>Old</b>", "# Before", "Draft");
+        var after = before with { Id = "Need-2", Title = "<script>new</script>", Statement = "# After\n<img src=x>", Status = "InReview" };
+        var change = new UserNeedAuditDetails(needId, before, after, "InReview", "<script>comment</script>");
+        var information = new AuditInformation(new AuditActor.Identified("author"), DateTimeOffset.UnixEpoch, "need.review.InReview",
+            new AuditTarget.Identified(needId.ToString()), AuditActionOutcome.Success, userNeedChange: change);
+        var html = await Render(information);
+        Assert.Contains("Identified: Need-2", html);
+        Assert.Contains("Changed User Need fields", html);
+        foreach (var field in new[] { "User Need ID", "Title", "Statement", "Status" }) Assert.Contains($"aria-label=\"{field}\"", html);
+        Assert.Contains("&lt;b&gt;Old&lt;/b&gt;", html);
+        Assert.Contains("&lt;script&gt;new&lt;/script&gt;", html);
+        Assert.Contains("&lt;img src=x&gt;", html);
+        Assert.Contains("&lt;script&gt;comment&lt;/script&gt;", html);
+        Assert.Contains("Review decision", html);
+        Assert.DoesNotContain("<script", html);
+        Assert.DoesNotContain("<img", html);
+        Assert.DoesNotContain(needId.ToString(), html);
+        Assert.DoesNotContain(productId.ToString(), html);
+        Assert.DoesNotContain("No recorded field changes", html);
+        var initial = await Render(new AuditInformation(information.Actor, information.OccurredAt, "need.create", information.Target,
+            information.Outcome, userNeedChange: new(needId, null, before, null, null)));
+        Assert.Contains("Initial User Need values", initial);
+        Assert.DoesNotContain("Old value", initial);
+        Assert.DoesNotContain("Review decision", initial);
+        Assert.DoesNotContain(productId.ToString(), initial);
+    }
+
     private static AuditInformation Event(ProductAuditDetails? details, string action = "product.edit") =>
         new(new AuditActor.Unknown(), DateTimeOffset.UnixEpoch, action, new AuditTarget.Unknown(), AuditActionOutcome.Success, details);
 
