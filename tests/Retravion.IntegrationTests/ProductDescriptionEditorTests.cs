@@ -59,6 +59,36 @@ public sealed class ProductDescriptionEditorTests
     }
 
     [Fact]
+    public async Task TableAndMermaidPreviewUpdatesWithoutChangingSubmittedMarkdown()
+    {
+        var js = new RecordingJS();
+        await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton<IJSRuntime>(js).AddSingleton<NavigationManager, TestNavigation>().BuildServiceProvider();
+        await using var renderer = new EditorRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var saved = new List<string>();
+        const string markdown = "Paragraph.\n\n| Name |\n| --- |\n| Product |\n\n```mermaid\nflowchart LR\nA --> B\n```";
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.Mount(new Dictionary<string, object?>
+            {
+                [nameof(DescriptionEditor.InitialDescription)] = "Original",
+                [nameof(DescriptionEditor.OnSave)] = EventCallback.Factory.Create<string>(saved, (string value) => saved.Add(value))
+            });
+            await renderer.Event("textarea", "oninput", new ChangeEventArgs { Value = markdown });
+            Assert.Contains("<p>Paragraph.</p>", renderer.Markup());
+            Assert.Contains("<table>", renderer.Markup());
+            Assert.Contains("class=\"language-mermaid\"", renderer.Markup());
+            Assert.Contains(js.Calls, call => call.Name == "render");
+            Assert.Empty(saved);
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Stacked");
+            Assert.Contains("<table>", renderer.Markup());
+            await renderer.Event("form", "onsubmit", EventArgs.Empty);
+            Assert.Equal(new[] { markdown }, saved);
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    [Fact]
     public async Task FullscreenRetainsEditorDraftArrangementSaveErrorsAndBusyGuards()
     {
         var js = new RecordingJS();

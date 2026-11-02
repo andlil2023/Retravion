@@ -40,7 +40,7 @@
                  title="Drag to resize; use Left/Right arrow keys, Home or End"></div>
             <section aria-label="Description preview" class="description-preview">
                 <h3>Preview</h3>
-                @((MarkupString)ProductMarkdown.Render(_markdown))
+                <ProductMarkdownView Markdown="@_markdown" />
             </section>
         </div>
     </form>
