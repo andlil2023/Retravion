@@ -153,7 +153,7 @@ flowchart LR
 | Concept | Responsibility |
 |---|---|
 | User Need | Stable `UserNeedId`, one responsible Product identified by its immutable internal identity, and an independent version history. |
-| User Need Version | Immutable `UserNeedVersionId`, parent `UserNeedId`, and versioned title and need statement. Editing content creates a new version; earlier versions remain retrievable and unchanged. |
+| User Need Version | Exact version identity and versioned title and statement for future baseline references. PBI #117 revises #108: ordinary Draft edits do not create a new version; review decisions retain their decision-time content. Versions referenced by released Product revisions must be protected from in-place modification when revision integration is implemented. |
 | Requirement Version | An exact immutable version of a verifiable requirement; its detailed lifecycle remains separate design work. |
 | Applicability entry | An exact User Need version and exact target Product Revision, scoped to the baseline recording the applicability decision. |
 | Addresses link | An exact Requirement version addressing an exact User Need version, scoped to a baseline. |
@@ -248,7 +248,7 @@ flowchart LR
 
 - Confirmation of the remaining Review proposals during feature design; the #108 design approval is limited to sections 7.1 and 8.1 and is not application implementation approval.
 - User Need ownership transfer: one responsible Product is the approved direction, but transfer behavior remains undecided.
-- Whether User Need versions require separate approval before baseline selection.
+- How approved User Needs are selected for future Product revision baselines, including version identity and protection; #117 specifies the User Need review workflow but not revision integration.
 - Release coverage: whether every applicable need must have an addressing requirement and how justified gaps are represented.
 - Whether a new system release may retain different need versions across constituents, and what assessment is required.
 - Retirement, withdrawal, deletion, and exceptional correction of needs or their versions without losing historical references.
