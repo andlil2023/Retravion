@@ -1,0 +1,55 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div @key="Markdown" @ref="_root" class="product-markdown-content">
+    @((MarkupString)ProductMarkdown.Render(Markdown))
+</div>
+@if (_unavailable)
+{
+    <p role="status">Diagram preview is unavailable. The Markdown source is unchanged.</p>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Markdown { get; set; } = "";
+    private ElementReference _root;
+    private Task<IJSObjectReference>? _moduleTask;
+    private string? _rendered;
+    private bool _disposed;
+    private bool _unavailable;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed || _rendered == Markdown) return;
+        _rendered = Markdown;
+        var root = _root;
+        try
+        {
+            _moduleTask ??= JS.InvokeAsync<IJSObjectReference>("import", "./js/productMarkdown.js").AsTask();
+            var module = await _moduleTask;
+            if (_disposed) return;
+            await module.InvokeVoidAsync("render", root);
+            if (_unavailable)
+            {
+                _unavailable = false;
+                StateHasChanged();
+            }
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException)
+        {
+            if (_moduleTask?.IsFaulted == true) _moduleTask = null;
+            _unavailable = true;
+            if (!_disposed) StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        if (_moduleTask is null) return;
+        try { await (await _moduleTask).DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+    }
+}

@@ -17,7 +17,7 @@
         <MudPaper id="product-details-card" Class="product-card product-document" Elevation="0">
             <article aria-label="Product description" class="product-markdown">
                 @if (string.IsNullOrEmpty(_product.Description)) { <p class="product-empty">No description yet.</p> }
-                else { @((MarkupString)ProductMarkdown.Render(_product.Description)) }
+                else { <ProductMarkdownView Markdown="@_product.Description" /> }
             </article>
         </MudPaper>
         <div class="product-actions"><MudButton Href="@($"/products/edit?id={Uri.EscapeDataString(_product.Id)}")" Variant="Variant.Filled" Color="Color.Primary" Class="product-button">Edit</MudButton></div>

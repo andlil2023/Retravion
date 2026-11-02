@@ -6,7 +6,7 @@ namespace Retravion.Web.Features.Product.Description;
 
 internal static class ProductMarkdown
 {
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder().DisableHtml().Build();
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder().UsePipeTables().DisableHtml().Build();
 
     public static string Render(string markdown)
     {

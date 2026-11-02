@@ -1,0 +1,7 @@
+.product-markdown-content ::deep table { border-collapse: collapse; margin-block: 1rem; }
+.product-markdown-content ::deep th, .product-markdown-content ::deep td {
+    border: 1px solid var(--mud-palette-divider);
+    padding: 0.5rem 0.75rem;
+    text-align: start;
+}
+.product-markdown-content ::deep iframe.product-mermaid { display: block; max-width: 100%; margin-block: 1rem; }

@@ -23,6 +23,31 @@ public sealed class ProductMarkdownTests
         Assert.Equal("", ProductMarkdown.Render(""));
     }
 
+    [Fact]
+    public void TablesAndMermaidFencesPreserveParagraphsAndEscapeUntrustedContent()
+    {
+        var html = ProductMarkdown.Render("Before paragraph.\n\n| Name | Detail |\n| --- | --- |\n| **Product** | <script>alert(1)</script> |\n\n```mermaid\nflowchart LR\n    A[Start] --> B[Finish]\n```\n\nAfter paragraph.");
+        Assert.Contains("<p>Before paragraph.</p>", html);
+        Assert.Contains("<table>", html);
+        Assert.Contains("<thead>", html);
+        Assert.Contains("<th>Name</th>", html);
+        Assert.Contains("<td><strong>Product</strong></td>", html);
+        Assert.Contains("<pre><code class=\"language-mermaid\">", html);
+        Assert.Contains("A[Start] --&gt; B[Finish]", html);
+        Assert.Contains("<p>After paragraph.</p>", html);
+        Assert.DoesNotContain("<script>", html);
+    }
+
+    [Fact]
+    public void MermaidAndOtherCodeFencesRemainEscapedUntilClientRendering()
+    {
+        var html = ProductMarkdown.Render("```mermaid\n<script>alert(1)</script>\n```\n\n```text\nflowchart LR\nA --> B\n```");
+        Assert.Contains("class=\"language-mermaid\"", html);
+        Assert.Contains("class=\"language-text\"", html);
+        Assert.Contains("&lt;script&gt;", html);
+        Assert.DoesNotContain("<script>", html);
+    }
+
     [Theory]
     [InlineData("<script>alert(1)</script>")]
     [InlineData("<img src=x onerror=alert(1)>")]
