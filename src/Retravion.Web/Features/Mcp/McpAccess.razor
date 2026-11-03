@@ -1,0 +1,29 @@
+@page "/mcp-access"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "CompletedPasswordReplacement")]
+@using Microsoft.AspNetCore.Components.Sections
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Web
+@using MudBlazor
+@using Retravion.Web.Components
+
+<PageTitle>Local MCP access · Retravion</PageTitle>
+<SectionContent SectionName="mcp-page-header">
+    <PageHeader Title="Local MCP access" BackHref="/home" BackText="Home" />
+</SectionContent>
+<MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
+    <p>Connect Claude Code or Pi on this machine to <code>/mcp</code> using a bearer credential for your signed-in user.</p>
+    <p>Creating a credential replaces this browser session's previous credential. It expires after 30 minutes, or earlier when this session ends. Log out to end the session and its MCP access.</p>
+    <p>The result opens as JSON. Copy the token privately to your terminal, then return here. Do not paste it into prompts, source files, shared configuration, or logs.</p>
+    <p>MCP can read all User Need statuses and create or edit Draft content under active Products. It cannot make review decisions. Remote access is not supported.</p>
+    <form id="mcp-issue-form" method="post" action="/identity/mcp-token" data-enhance="false">
+        <AntiforgeryToken />
+    </form>
+</MudPaper>
+<div class="mt-4">
+    <MudButton ButtonType="ButtonType.Submit" form="mcp-issue-form" Variant="Variant.Filled" Color="Color.Primary">Create MCP credential</MudButton>
+</div>
+<form method="post" action="/identity/mcp-token/revoke" data-enhance="false" class="mt-4">
+    <AntiforgeryToken />
+    <label><input type="checkbox" required /> Confirm revoking this session's MCP credential</label>
+    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary">Revoke MCP credential</MudButton>
+</form>

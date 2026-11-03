@@ -25,6 +25,8 @@ using Retravion.Web.Features.AuditTrail;
 using Retravion.Application.UserNeed;
 using Retravion.Infrastructure.UserNeed;
 using Retravion.Web.Features.UserNeed;
+using Retravion.Web.Features.Mcp;
+using ModelContextProtocol.AspNetCore;
 
 var recoveryMode = args.Length == 1 && args[0] == "--recover-initial-administrator";
 var builder = WebApplication.CreateBuilder(recoveryMode ? [] : args);
@@ -36,6 +38,11 @@ builder.Services.AddMudServices();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SessionTicketStore>();
+builder.Services.AddSingleton<McpCredentials>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = "Retravion", Version = "1.0.0" })
+    .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<UserNeedMcpTools>();
 builder.Services.AddScoped<AuthenticationStateProvider, SessionAuthenticationStateProvider>();
 builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
     .Configure<SessionTicketStore, TimeProvider>((options, store, time) =>
@@ -157,6 +164,7 @@ catch (Exception exception) when (exception is DbException or ArgumentException)
 }
 
 app.UseAuthentication();
+app.UseMcpAccessGate();
 // Default-deny application requests. Only login, replacement, mapped public assets,
 // and the Blazor transport (whose routed content is guarded separately) are exceptions.
 app.Use(async (context, next) =>
@@ -220,6 +228,9 @@ app.MapLogin();
 app.MapLogout();
 app.MapPasswordReplacement();
 app.MapUsers();
+app.MapMcpCredentials();
+// The request gate requires a bearer credential and checks authorization on every request.
+app.MapMcp("/mcp").AllowAnonymous();
 app.MapStaticAssets().AllowAnonymous();
 // SessionTicketStore expires and revokes circuit principals. A transport-level
 // ticket deadline would disconnect active users at their original sign-in expiry.
