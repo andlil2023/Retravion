@@ -233,6 +233,79 @@ A real Windows/Podman smoke test must also
 verify certificate trust, container builds/startup, a second run preserving secrets and
 data, an explicit reset, and `-UpdateImages` on the target machine.
 
+## Local MCP access (Claude Code and Pi)
+
+Run the app with the local Podman setup above. Keep its published port bound to
+`127.0.0.1`; this increment supports trusted clients on the same machine only,
+not remote deployment or an OAuth authorization server. The `/mcp` endpoint uses
+Streamable HTTP and accepts bearer credentials, not browser cookies. Non-loopback
+Host names and requests with an Origin header are rejected. Do not expose this
+endpoint through a remote proxy or publish the container port on all interfaces.
+
+1. Sign in in your browser, complete any required password replacement, and open
+   **https://localhost:8443/mcp-access** (adjust the port if configured differently).
+2. Select **Create MCP credential**. The JSON result contains `token` and
+   `expiresAt`; keep the token private and return to the page afterward. Creating
+   another credential replaces the previous one for this browser session.
+3. In PowerShell 7, set the token without putting it in shell history:
+
+   ```powershell
+   $env:RETRAVION_MCP_TOKEN = Read-Host 'MCP token' -MaskInput
+   # Node clients must trust the local certificate. Use the Windows trust store;
+   # current Node 22.19+/24 clients support this option. Never disable TLS checks.
+   $env:NODE_USE_SYSTEM_CA = '1'
+   ```
+
+4. Configure the client using an environment-variable reference, not a literal token:
+
+   ```powershell
+   # Claude Code: local scope is private user configuration for this working directory.
+   claude mcp add --transport http --scope local retravion https://localhost:8443/mcp --header 'Authorization: Bearer ${RETRAVION_MCP_TOKEN}'
+   claude mcp list
+
+   # Pi: user-level configuration, not a committed project configuration.
+   pi mcp add retravion --url https://localhost:8443/mcp --bearer-token-env-var RETRAVION_MCP_TOKEN
+   pi mcp list
+   ```
+
+   Start the client from that terminal. In an already running Pi session, use
+   `/reload` after changing configuration; restart it if its inherited environment
+   does not contain the token. A project-scoped Claude configuration may require
+   explicit MCP-server approval in Claude before connecting. If a client uses a
+   different Node runtime, configure its trusted CA using that client's documented
+   mechanism rather than bypassing certificate verification.
+
+Available tools:
+
+| Tool | Input / behavior |
+| --- | --- |
+| `list_user_needs` | `productId` (the Product's manual ID); all statuses, including retired Products |
+| `read_user_need` | `internalId` (need GUID); full content, revision token and review history |
+| `create_draft_user_need` | `productId`, `id`, `title`, `statement` (Markdown); active Products only |
+| `edit_draft_user_need` | `internalId`, `expectedRevision`, `id`, `title`, `statement`; Draft content under active Products only |
+
+Read before editing and supply the returned `revision` as `expectedRevision`.
+There are no status, review, deletion or new-version tools. Extra arguments such as
+`status` and `actor` are rejected. Product retirement and concurrent status/content
+changes are checked at the same transactional write boundary as web changes. Writes
+use the authenticated Retravion user and the same atomic audit rules as web writes.
+
+A credential expires 30 minutes after issuance and cannot outlive its browser
+session. Logout, session expiry, account-session revocation, application restart,
+credential replacement and **Revoke MCP credential** end its access. Revocation
+on the page requires confirmation. This does not log out the browser. An expired
+credential requires returning to the authenticated browser flow; there is no
+refresh token. Clear the terminal variable when finished:
+
+```powershell
+Remove-Item Env:RETRAVION_MCP_TOKEN -ErrorAction SilentlyContinue
+```
+
+Never put credentials into prompts, source control, URLs or shared logs. Do not
+retry a write automatically. If the result says the commit outcome could not be
+confirmed, list/read the need and inspect its values before deciding whether to
+retry manually. A lost response likewise does not prove the write rolled back.
+
 ## Repository structure
 
 ```text

@@ -2,6 +2,7 @@
   <ItemGroup>
     <PackageReference Include="MudBlazor" />
     <PackageReference Include="Markdig" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <ProjectReference Include="../Retravion.Application/Retravion.Application.csproj" />
     <ProjectReference Include="../Retravion.Infrastructure/Retravion.Infrastructure.csproj" />
     <ProjectReference Include="../Retravion.Identity.Application/Retravion.Identity.Application.csproj" />
