@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Retravion.Web.Features.Identity.Logout;
 using Retravion.Web.Features.UserNeed;
+using Retravion.Web.Features.Requirement;
 
 namespace Retravion.Web.Features.Mcp;
 
@@ -15,7 +16,11 @@ internal static class McpEndpoints
         ["list_user_needs"] = ["productId"],
         ["read_user_need"] = ["internalId"],
         ["create_draft_user_need"] = ["productId", "id", "title", "statement"],
-        ["edit_draft_user_need"] = ["internalId", "expectedRevision", "id", "title", "statement"]
+        ["edit_draft_user_need"] = ["internalId", "expectedRevision", "id", "title", "statement"],
+        ["list_requirements"] = ["productId"],
+        ["read_requirement"] = ["internalId"],
+        ["create_draft_requirement"] = ["productId", "id", "title", "statement", "type", "rationale"],
+        ["edit_draft_requirement"] = ["internalId", "expectedRevision", "id", "title", "statement", "type", "rationale"]
     };
 
     internal static void MapMcpCredentials(this WebApplication app)
@@ -90,6 +95,9 @@ internal static class McpEndpoints
                 if (tool is "create_draft_user_need" or "edit_draft_user_need")
                     await context.RequestServices.GetRequiredService<UserNeedOperations>().DeniedMcpMutation(context.User,
                         tool == "create_draft_user_need" ? "need.create" : "need.edit", context.RequestAborted);
+                if (tool is "create_draft_requirement" or "edit_draft_requirement")
+                    await context.RequestServices.GetRequiredService<RequirementOperations>().DeniedMcpMutation(context.User,
+                        tool == "create_draft_requirement" ? "requirement.create" : "requirement.edit", context.RequestAborted);
                 context.Response.StatusCode = transportAllowed ? 401 : 403;
                 return;
             }

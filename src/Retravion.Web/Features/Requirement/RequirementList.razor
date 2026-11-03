@@ -1,0 +1,62 @@
+@page "/requirements"
+@inject RequirementOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Requirements · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Requirements" BackHref="@ProductPath" BackText="Product details">
+        <Actions>@if (_product?.IsActive == true) { <MudButton Href="@CreatePath" StartIcon="@Icons.Material.Outlined.Add">Create Requirement</MudButton> }</Actions>
+    </PageHeader>
+</SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+else if (_requirements is null) { <p role="status">Loading Requirements…</p> }
+else
+{
+    <p>@_product!.Id – @_product.Name @(!_product.IsActive ? "(Retired)" : "")</p>
+    @if (!_product.IsActive) { <p>Requirements are read-only while this Product is retired.</p> }
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" sm="4"><MudTextField @bind-Value="_search" Label="Search ID or title" Immediate="true" Clearable="true" /></MudItem>
+        <MudItem xs="12" sm="4">
+            <MudSelect T="RequirementType?" @bind-Value="_type" Label="Type" Clearable="true" Placeholder="All types">
+                @foreach (var type in Enum.GetValues<RequirementType>()) { <MudSelectItem T="RequirementType?" Value="@((RequirementType?)type)">@type</MudSelectItem> }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudSelect T="RequirementStatus?" @bind-Value="_status" Label="Status" Clearable="true" Placeholder="All statuses">
+                @foreach (var status in Enum.GetValues<RequirementStatus>()) { <MudSelectItem T="RequirementStatus?" Value="@((RequirementStatus?)status)">@(status == RequirementStatus.InReview ? "In Review" : status.ToString())</MudSelectItem> }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+    <MudTable Items="Filtered" Dense="true" Hover="true" Elevation="0" aria-label="Requirements">
+        <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Type</MudTh><MudTh>Status</MudTh></HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="ID"><MudLink Href="@($"/requirements/details?id={context.Requirement.InternalId}")">@context.Requirement.Id</MudLink></MudTd>
+            <MudTd DataLabel="Title">@context.Requirement.Title</MudTd>
+            <MudTd DataLabel="Type">@context.Requirement.Type</MudTd>
+            <MudTd DataLabel="Status">@(context.Requirement.Status == RequirementStatus.InReview ? "In Review" : context.Requirement.Status.ToString())</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><p>@(_requirements.Count == 0 ? "No Requirements yet." : "No Requirements match the current filters.")</p></NoRecordsContent>
+    </MudTable>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private IReadOnlyList<RequirementSnapshot>? _requirements;
+    private string? _error, _search;
+    private RequirementType? _type;
+    private RequirementStatus? _status;
+    private IReadOnlyList<RequirementSnapshot> Filtered => Retravion.Application.Requirement.RequirementList.Filter(_requirements ?? [], _type, _status, _search);
+    private string ProductPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
+    private string CreatePath => $"/requirements/create?product={Uri.EscapeDataString(ProductId ?? "")}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _requirements = null; _product = null; _error = null; _search = null; _type = null; _status = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, ProductId);
+        if (product.IsFailure) { _error = product.Error; return; }
+        _product = product.Value;
+        var result = await Operations.List(actor, _product.InternalId);
+        if (result.IsFailure) _error = result.Error; else _requirements = result.Value;
+    }
+}
