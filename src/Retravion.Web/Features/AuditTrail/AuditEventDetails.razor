@@ -60,6 +60,14 @@
                 <p>No recorded field changes.</p>
             }
         }
+        else if (Event.AiWorkflowChange is { } settings)
+        {
+            <h3>AI Workflow settings</h3>
+            <section class="field-change" aria-label="MCP enabled">
+                <h4>MCP enabled</h4>
+                <dl><dt>Old value</dt><dd>@settings.Before</dd><dt>New value</dt><dd>@settings.After</dd></dl>
+            </section>
+        }
         else if (Event.RequirementChange is { } requirementChange)
         {
             <h3>@(requirementChange.Before is null ? "Initial Requirement values" : "Changed Requirement fields")</h3>

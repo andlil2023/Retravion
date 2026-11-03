@@ -30,6 +30,8 @@ using Retravion.Application.Requirement;
 using Retravion.Infrastructure.Requirement;
 using Retravion.Web.Features.Requirement;
 using ModelContextProtocol.AspNetCore;
+using Retravion.Application.AiWorkflow;
+using Retravion.Infrastructure.AiWorkflow;
 
 var recoveryMode = args.Length == 1 && args[0] == "--recover-initial-administrator";
 var builder = WebApplication.CreateBuilder(recoveryMode ? [] : args);
@@ -46,6 +48,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = "Retravion", Version = "1.0.0" })
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
     .WithTools<UserNeedMcpTools>()
+    .WithTools<ProductMcpTools>()
     .WithTools<RequirementMcpTools>();
 builder.Services.AddScoped<AuthenticationStateProvider, SessionAuthenticationStateProvider>();
 builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -110,6 +113,10 @@ builder.Services.AddSingleton<IUserNeedChangeTransaction>(_ => new PostgresUserN
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddScoped<UserNeedOperations>();
+builder.Services.AddScoped<AiWorkflowOperations>();
+builder.Services.AddSingleton<IAiWorkflowSettingsStore>(_ => new PostgresAiWorkflowSettingsStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddSingleton<IRequirementStore>(_ => new PostgresRequirementStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
@@ -240,6 +247,7 @@ app.MapLogout();
 app.MapPasswordReplacement();
 app.MapUsers();
 app.MapMcpCredentials();
+app.MapAiWorkflow();
 // The request gate requires a bearer credential and checks authorization on every request.
 app.MapMcp("/mcp").AllowAnonymous();
 app.MapStaticAssets().AllowAnonymous();

@@ -13,6 +13,8 @@ internal static class McpEndpoints
     private const int MaxBodyBytes = 1024 * 1024;
     private static readonly Dictionary<string, string[]> Arguments = new(StringComparer.Ordinal)
     {
+        ["list_products"] = [],
+        ["read_product"] = ["productId"],
         ["list_user_needs"] = ["productId"],
         ["read_user_need"] = ["internalId"],
         ["create_draft_user_need"] = ["productId", "id", "title", "statement"],
@@ -33,7 +35,7 @@ internal static class McpEndpoints
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             try { await antiforgery.ValidateRequestAsync(context); }
             catch (AntiforgeryValidationException) { return Results.BadRequest(); }
-            var issued = await credentials.Issue(context.User, authorization);
+            var issued = await credentials.Issue(context.User, authorization, context.RequestAborted);
             return issued is null ? Results.StatusCode(403) : Results.Json(issued);
         }).RequireAuthorization("CompletedPasswordReplacement");
         app.MapPost("/identity/mcp-token/revoke", async (HttpContext context, IAntiforgery antiforgery, McpCredentials credentials) =>
@@ -42,13 +44,14 @@ internal static class McpEndpoints
             try { await antiforgery.ValidateRequestAsync(context); }
             catch (AntiforgeryValidationException) { return Results.BadRequest(); }
             credentials.Revoke(context.User);
-            return Results.LocalRedirect("/mcp-access?revoked=true");
+            return Results.LocalRedirect("/settings/ai-workflow?revoked=true");
         }).RequireAuthorization("CompletedPasswordReplacement");
     }
 
     internal static void UseMcpAccessGate(this WebApplication app) => app.Use(async (context, next) =>
     {
-        if (context.Request.Path.StartsWithSegments("/mcp-access")) context.Response.Headers.CacheControl = "no-store";
+        if (context.Request.Path.StartsWithSegments("/mcp-access") || context.Request.Path.StartsWithSegments("/settings/ai-workflow"))
+            context.Response.Headers.CacheControl = "no-store";
         if (!context.Request.Path.StartsWithSegments("/mcp")) { await next(context); return; }
         context.Response.Headers.CacheControl = "no-store";
         // Terminal clients send no Origin. Reject browser-origin traffic and unexpected hosts (DNS rebinding).
@@ -58,7 +61,7 @@ internal static class McpEndpoints
         var header = context.Request.Headers.Authorization.ToString();
         var credentials = context.RequestServices.GetRequiredService<McpCredentials>();
         context.User = credentials.Resolve(header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..] : null);
-        var allowed = credentials.IsActive(context.User) &&
+        var allowed = await credentials.IsAllowed(context.User, context.RequestAborted) &&
             (await context.RequestServices.GetRequiredService<IAuthorizationService>()
                 .AuthorizeAsync(context.User, "CompletedPasswordReplacement")).Succeeded;
 

@@ -15,7 +15,7 @@ internal sealed class UserNeedOperations(IAuthorizationService authorization, Se
 {
     private async Task<bool> Allowed(ClaimsPrincipal principal) =>
         sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
-        (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || mcpCredentials.IsActive(principal)) &&
+        (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || await mcpCredentials.IsAllowed(principal)) &&
         (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
 
     private static AuditActor Actor(ClaimsPrincipal principal) =>

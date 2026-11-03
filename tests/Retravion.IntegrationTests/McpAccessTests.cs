@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Retravion.Application.AuditTrail;
+using Retravion.Application.AiWorkflow;
 using Retravion.Application.UserNeed;
 using Retravion.Web.Features.Identity.Logout;
 using Retravion.Web.Features.Mcp;
@@ -27,19 +28,19 @@ public sealed partial class AccountManagementTests
         await host.Login();
         using (var restricted = await host.Issue()) Assert.Equal("/password-replacement", restricted.Headers.Location?.OriginalString);
         using (var pageDenied = await host.Browser.GetAsync("/mcp-access")) Assert.Equal("/password-replacement", pageDenied.Headers.Location?.OriginalString);
-        Assert.DoesNotContain("href=\"/mcp-access\"", await host.Browser.GetStringAsync("/password-replacement"));
+        Assert.DoesNotContain("href=\"/settings/ai-workflow\"", await host.Browser.GetStringAsync("/password-replacement"));
         await host.Replace();
         using (var csrf = await host.Browser.PostAsync("/identity/mcp-token", new FormUrlEncodedContent([])))
             Assert.Equal(HttpStatusCode.BadRequest, csrf.StatusCode);
         using (var cookieOnly = await McpTestHost.Send(host.Browser, "tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, cookieOnly.StatusCode);
-        Assert.Contains("href=\"/mcp-access\"", await host.Browser.GetStringAsync("/home"));
+        Assert.Contains("href=\"/settings/ai-workflow\"", await host.Browser.GetStringAsync("/home"));
         using var pageResponse = await host.Browser.GetAsync("/mcp-access?revoked=true");
         Assert.True(pageResponse.Headers.CacheControl?.NoStore);
         var page = await pageResponse.Content.ReadAsStringAsync();
-        Assert.Matches("<h1[^>]*>Local MCP access</h1>", page);
+        Assert.Matches("<h1[^>]*>AI Workflow</h1>", page);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(page, "<h1\\b"));
-        Assert.Contains("aria-label=\"Local MCP access content\"", page);
-        Assert.Matches("href=\"/mcp-access\"[^>]*aria-current=\"page\"", page);
+        Assert.Contains("aria-label=\"AI Workflow content\"", page);
+        Assert.Matches("href=\"/settings/ai-workflow\"[^>]*aria-current=\"page\"", page);
         Assert.Contains("href=\"/home\"", page);
         Assert.Contains("navigation-toggle", page);
         Assert.Contains("Create MCP credential", page);
@@ -48,7 +49,7 @@ public sealed partial class AccountManagementTests
         var token = await host.Authenticate();
         Assert.Equal(64, token.Length);
         var tools = await host.Rpc("tools/list");
-        Assert.Equal(new[] { "create_draft_requirement", "create_draft_user_need", "edit_draft_requirement", "edit_draft_user_need", "list_requirements", "list_user_needs", "read_requirement", "read_user_need" },
+        Assert.Equal(new[] { "create_draft_requirement", "create_draft_user_need", "edit_draft_requirement", "edit_draft_user_need", "list_products", "list_requirements", "list_user_needs", "read_product", "read_requirement", "read_user_need" },
             tools.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).Order().ToArray());
         using (var origin = await host.Send("tools/list", origin: "https://evil.invalid")) Assert.Equal(HttpStatusCode.Forbidden, origin.StatusCode);
         host.Mcp.DefaultRequestHeaders.Host = "evil.invalid";
@@ -179,16 +180,18 @@ public sealed partial class AccountManagementTests
         await using var factory = new AdministratorWebFactory(new StartupAdministratorStore(), "admin", Initial);
         using var admin = Client(factory);
         await Login(admin, "admin", Initial); await Replace(admin, Initial, Replacement);
+        var settings = factory.Services.GetRequiredService<IAiWorkflowSettingsStore>();
+        Assert.True((await settings.Save((await settings.Load()).Value, true, new AuditActor.Identified("admin"), DateTimeOffset.UtcNow)).IsSuccess);
         using var created = await Create(admin, "mcp-user", "MCP user", Retravion.Identity.Domain.AccountType.Ordinary);
         using var document = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
         var temporary = document.RootElement.GetProperty("temporaryPassword").GetString()!;
         using var user = Client(factory);
         await Login(user, "mcp-user", temporary); await Replace(user, temporary, Replacement);
         var home = await user.GetStringAsync("/home");
-        Assert.Contains("href=\"/mcp-access\"", home);
+        Assert.Contains("href=\"/settings/ai-workflow\"", home);
         Assert.DoesNotContain("Administration navigation", home);
         var page = await user.GetStringAsync("/mcp-access");
-        Assert.Matches("<h1[^>]*>Local MCP access</h1>", page);
+        Assert.Matches("<h1[^>]*>AI Workflow</h1>", page);
         using var issued = await user.PostAsync("/identity/mcp-token", new FormUrlEncodedContent(new Dictionary<string, string>
         { ["__RequestVerificationToken"] = Token(page) }));
         Assert.Equal(HttpStatusCode.OK, issued.StatusCode);
@@ -213,7 +216,11 @@ internal sealed class McpTestHost : IAsyncDisposable
     internal McpTestHost(Action<IServiceCollection>? configure = null)
     {
         original = new(new StartupAdministratorStore(), "admin", "InitialPass123!");
-        Factory = original.WithWebHostBuilder(builder => builder.ConfigureServices(services => configure?.Invoke(services)));
+        Factory = original.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            services.AddSingleton<IAiWorkflowSettingsStore>(new InMemoryAiWorkflowSettingsStore(true));
+            configure?.Invoke(services);
+        }));
         Browser = Factory.CreateClient(new() { AllowAutoRedirect = false, BaseAddress = new Uri("https://localhost") });
         Mcp = Factory.CreateClient(new() { AllowAutoRedirect = false, HandleCookies = false, BaseAddress = new Uri("https://localhost") });
     }

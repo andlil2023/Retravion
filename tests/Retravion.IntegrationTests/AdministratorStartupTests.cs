@@ -86,6 +86,8 @@ internal sealed class AdministratorWebFactory(
             services.AddSingleton<IAdministratorStore>(store);
             services.RemoveAll<IAccountAuditTransaction>();
             services.AddSingleton<IAccountAuditTransaction, InMemoryAccountAuditTransaction>();
+            services.RemoveAll<Retravion.Application.AiWorkflow.IAiWorkflowSettingsStore>();
+            services.AddSingleton<Retravion.Application.AiWorkflow.IAiWorkflowSettingsStore>(new InMemoryAiWorkflowSettingsStore());
             services.RemoveAll<IProductStore>();
             services.AddSingleton<IProductStore, EmptyProductStore>();
             services.RemoveAll<IProductChangeTransaction>();

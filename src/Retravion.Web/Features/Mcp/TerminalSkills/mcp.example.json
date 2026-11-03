@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "retravion": {
+      "type": "http",
+      "url": "https://localhost:8443/mcp",
+      "headers": {
+        "Authorization": "Bearer ${RETRAVION_MCP_TOKEN}"
+      }
+    }
+  }
+}

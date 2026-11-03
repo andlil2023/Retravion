@@ -3,27 +3,34 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Retravion.Web.Features.Identity.Logout;
+using Retravion.Application.AiWorkflow;
 
 namespace Retravion.Web.Features.Mcp;
 
 // Process-local, like browser sessions. Store only credential digests; one credential per session.
-internal sealed class McpCredentials(SessionTicketStore sessions, TimeProvider time)
+internal sealed class McpCredentials(SessionTicketStore sessions, TimeProvider time, IAiWorkflowSettingsStore settings)
 {
     internal static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(30);
     internal const string CredentialClaim = "Retravion.McpCredential";
+    private const string SettingsRevisionClaim = "Retravion.McpSettingsRevision";
     private readonly object gate = new();
     private readonly Dictionary<string, Credential> credentials = [];
 
-    internal async Task<IssuedMcpCredential?> Issue(ClaimsPrincipal principal, IAuthorizationService authorization)
+    internal async Task<IssuedMcpCredential?> Issue(ClaimsPrincipal principal, IAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
     {
         var session = principal.FindFirstValue(SessionTicketStore.SessionClaim);
         if (!sessions.IsActive(session) ||
             !(await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded)
             return null;
+        var configuration = await settings.Load(cancellationToken);
+        if (configuration.IsFailure || !configuration.Value.Enabled) return null;
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var expires = time.GetUtcNow() + Lifetime;
         var identity = principal.Clone();
         ((ClaimsIdentity)identity.Identity!).AddClaim(new Claim(CredentialClaim, Guid.NewGuid().ToString("N")));
+        ((ClaimsIdentity)identity.Identity!).AddClaim(new Claim(SettingsRevisionClaim,
+            configuration.Value.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         lock (gate)
         {
             foreach (var key in credentials.Where(p => p.Value.Expires <= time.GetUtcNow() || !sessions.IsActive(p.Value.Session)).Select(p => p.Key).ToArray())
@@ -53,6 +60,15 @@ internal sealed class McpCredentials(SessionTicketStore sessions, TimeProvider t
             return session is not null && credentials.TryGetValue(session, out var credential) &&
                 credential.Expires > time.GetUtcNow() && sessions.IsActive(session) &&
                 credential.Principal.FindFirstValue(CredentialClaim) == principal.FindFirstValue(CredentialClaim);
+    }
+
+    internal async Task<bool> IsAllowed(ClaimsPrincipal principal, CancellationToken token = default)
+    {
+        if (!IsActive(principal)) return false;
+        var configuration = await settings.Load(token);
+        return configuration.IsSuccess && configuration.Value.Enabled &&
+            long.TryParse(principal.FindFirstValue(SettingsRevisionClaim), out var revision) &&
+            configuration.Value.Revision == revision;
     }
 
     internal void Revoke(ClaimsPrincipal principal)

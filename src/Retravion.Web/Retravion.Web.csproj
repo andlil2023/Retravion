@@ -8,5 +8,8 @@
     <ProjectReference Include="../Retravion.Identity.Application/Retravion.Identity.Application.csproj" />
     <ProjectReference Include="../Retravion.Identity.Infrastructure/Retravion.Identity.Infrastructure.csproj" />
     <InternalsVisibleTo Include="Retravion.IntegrationTests" />
+    <EmbeddedResource Include="Features/Mcp/TerminalSkills/SKILL.md" LogicalName="Retravion.TerminalSkills.SKILL.md" />
+    <EmbeddedResource Include="Features/Mcp/TerminalSkills/README.md" LogicalName="Retravion.TerminalSkills.README.md" />
+    <EmbeddedResource Include="Features/Mcp/TerminalSkills/mcp.example.json" LogicalName="Retravion.TerminalSkills.mcp.example.json" />
   </ItemGroup>
 </Project>

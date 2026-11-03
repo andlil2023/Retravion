@@ -18,7 +18,8 @@ public sealed class PostgresAuditQuery(string connectionString) : IAuditQuery
 
         await using var command = new NpgsqlCommand("""
             SELECT actor_kind, actor_identifier, occurred_at_utc_ticks, action, target_kind, target_identifier, outcome,
-                to_jsonb(event)->>'product_change', to_jsonb(event)->>'user_need_change', to_jsonb(event)->>'requirement_change'
+                to_jsonb(event)->>'product_change', to_jsonb(event)->>'user_need_change',
+                to_jsonb(event)->>'requirement_change', to_jsonb(event)->>'ai_workflow_change'
             FROM retravion_audit.event
             WHERE ($1::bigint IS NULL OR occurred_at_utc_ticks >= $1)
               AND ($2::bigint IS NULL OR occurred_at_utc_ticks <= $2)
@@ -64,7 +65,8 @@ public sealed class PostgresAuditQuery(string connectionString) : IAuditQuery
             events.Add(new AuditInformation(actor, new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero), reader.GetString(3), target, outcome,
                 reader.IsDBNull(7) ? null : JsonSerializer.Deserialize<ProductAuditDetails>(reader.GetString(7)),
                 reader.IsDBNull(8) ? null : JsonSerializer.Deserialize<UserNeedAuditDetails>(reader.GetString(8)),
-                reader.IsDBNull(9) ? null : JsonSerializer.Deserialize<RequirementAuditDetails>(reader.GetString(9))));
+                reader.IsDBNull(9) ? null : JsonSerializer.Deserialize<RequirementAuditDetails>(reader.GetString(9)),
+                reader.IsDBNull(10) ? null : JsonSerializer.Deserialize<AiWorkflowAuditDetails>(reader.GetString(10))));
         }
         return events;
     }
