@@ -1,29 +1,97 @@
+@page "/settings/ai-workflow"
 @page "/mcp-access"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "CompletedPasswordReplacement")]
 @using Microsoft.AspNetCore.Components.Sections
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@using Retravion.Application.AiWorkflow
 @using MudBlazor
 @using Retravion.Web.Components
+@inject AiWorkflowOperations Operations
+@inject AuthenticationStateProvider Authentication
 
-<PageTitle>Local MCP access · Retravion</PageTitle>
+<PageTitle>AI Workflow · Retravion</PageTitle>
 <SectionContent SectionName="mcp-page-header">
-    <PageHeader Title="Local MCP access" BackHref="/home" BackText="Home" />
+    <PageHeader Title="AI Workflow" BackHref="/home" BackText="Home" />
 </SectionContent>
 <MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
-    <p>Connect Claude Code or Pi on this machine to <code>/mcp</code> using a bearer credential for your signed-in user.</p>
+    <MudText Typo="Typo.h2">Application-wide MCP access</MudText>
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+    }
+    else if (_settings is not null)
+    {
+        <p>MCP is <strong>@(_settings.Enabled ? "Enabled" : "Disabled")</strong> for all users.</p>
+        <p>Only administrators can change this setting. It survives application restarts and starts disabled.</p>
+        <p>Disabling invalidates all MCP credentials. Re-enabling requires fresh credentials. Requests already executing when disabling begins may complete; requests starting after confirmed disabling are denied. Browser access is unaffected.</p>
+        @if (_administrator)
+        {
+            <form id="ai-workflow-settings-form" method="post" action="/settings/ai-workflow/save" data-enhance="false">
+                <AntiforgeryToken />
+                <input type="hidden" name="before" value="@_settings.Enabled.ToString()" />
+                <input type="hidden" name="revision" value="@_settings.Revision" />
+                <input type="hidden" name="enabled" value="@((!_settings.Enabled).ToString())" />
+                <label><input type="checkbox" name="confirm" value="true" required /> Confirm @(_settings.Enabled ? "disabling" : "enabling") MCP for all users</label>
+            </form>
+        }
+    }
+</MudPaper>
+@if (_administrator && _settings is not null)
+{
+    <div class="mt-4">
+        <MudButton ButtonType="ButtonType.Submit" form="ai-workflow-settings-form" Variant="Variant.Filled" Color="Color.Primary">@(_settings.Enabled ? "Disable MCP" : "Enable MCP")</MudButton>
+    </div>
+}
+<MudPaper Class="pa-4 mt-4" Elevation="0" Style="max-width:40rem">
+    <MudText Typo="Typo.h2">Your terminal credential</MudText>
+    <p>Connect Pi or Claude Code on this machine to <code>/mcp</code> using a bearer credential for your signed-in user.</p>
     <p>Creating a credential replaces this browser session's previous credential. It expires after 30 minutes, or earlier when this session ends. Log out to end the session and its MCP access.</p>
-    <p>The result opens as JSON. Copy the token privately to your terminal, then return here. Do not paste it into prompts, source files, shared configuration, or logs.</p>
-    <p>MCP can read all User Need statuses and create or edit Draft content under active Products. It cannot make review decisions. Remote access is not supported.</p>
-    <form id="mcp-issue-form" method="post" action="/identity/mcp-token" data-enhance="false">
-        <AntiforgeryToken />
-    </form>
+    <p>The result opens as JSON. Copy the token privately to your terminal, then return here. Do not paste it into prompts, source files, shared configuration, or logs. Disabling MCP or an unavailable setting prevents credential issuance.</p>
+    <p>MCP can read Products and all User Need statuses, and create or edit Draft needs under active Products. It cannot modify Products or make review decisions. Remote access is not supported.</p>
+    <form id="mcp-issue-form" method="post" action="/identity/mcp-token" data-enhance="false"><AntiforgeryToken /></form>
 </MudPaper>
 <div class="mt-4">
-    <MudButton ButtonType="ButtonType.Submit" form="mcp-issue-form" Variant="Variant.Filled" Color="Color.Primary">Create MCP credential</MudButton>
+    <MudButton ButtonType="ButtonType.Submit" form="mcp-issue-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_settings?.Enabled != true)">Create MCP credential</MudButton>
 </div>
 <form method="post" action="/identity/mcp-token/revoke" data-enhance="false" class="mt-4">
     <AntiforgeryToken />
     <label><input type="checkbox" required /> Confirm revoking this session's MCP credential</label>
     <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary">Revoke MCP credential</MudButton>
 </form>
+
+<MudText Typo="Typo.h2" Class="mt-6 mb-4">Terminal skill downloads</MudText>
+<p>Install your chosen terminal separately. Downloads contain instructions and configuration examples, not credentials or permissions. Review the ZIP and merge only the Retravion files/entry; preserve unrelated client configuration. Updates and removal are manual.</p>
+@if (_packagesUnavailable)
+{
+    <MudAlert Severity="Severity.Warning">Terminal skill download files are unavailable.</MudAlert>
+}
+@foreach (var bundle in _bundles)
+{
+    <MudPaper Class="pa-4 mb-4" Elevation="0" Style="max-width:40rem">
+        <MudText Typo="Typo.h3">@(bundle.Client == "pi" ? "Pi" : "Claude Code")</MudText>
+        <p>Integration @TerminalPackages.Version — @bundle.FileName</p>
+        <p>Extract and read the bundled README. It explains installation, connection, updating and removal. Use the native MCP connection and @(bundle.Client == "pi" ? "/skill:retravion" : "/retravion") skill.</p>
+        <MudButton Href="@bundle.DownloadPath" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.Download">Download @(bundle.Client == "pi" ? "Pi" : "Claude Code") skills</MudButton>
+        <MudText Typo="Typo.caption" Class="mt-2" Style="overflow-wrap:anywhere">SHA-256 (integrity, not publisher authentication): @bundle.Sha256</MudText>
+    </MudPaper>
+}
+
+@code {
+    private AiWorkflowSettings? _settings;
+    private string? _error;
+    private bool _administrator;
+    private bool _packagesUnavailable;
+    private TerminalBundle[] _bundles = [];
+    protected override async Task OnInitializedAsync()
+    {
+        var principal = (await Authentication.GetAuthenticationStateAsync()).User;
+        var result = await Operations.Read(principal);
+        if (result.IsFailure) _error = result.Error;
+        else _settings = result.Value;
+        _administrator = await Operations.CanConfigure(principal);
+        try { _bundles = [TerminalPackages.Get("pi")!, TerminalPackages.Get("claude")!]; }
+        catch (IOException) { _packagesUnavailable = true; }
+    }
+}

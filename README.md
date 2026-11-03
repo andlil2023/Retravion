@@ -233,7 +233,7 @@ A real Windows/Podman smoke test must also
 verify certificate trust, container builds/startup, a second run preserving secrets and
 data, an explicit reset, and `-UpdateImages` on the target machine.
 
-## Local MCP access (Claude Code and Pi)
+## AI Workflow settings and local MCP (Claude Code and Pi)
 
 Run the app with the local Podman setup above. Keep its published port bound to
 `127.0.0.1`; this increment supports trusted clients on the same machine only,
@@ -242,8 +242,20 @@ Streamable HTTP and accepts bearer credentials, not browser cookies. Non-loopbac
 Host names and requests with an Origin header are rejected. Do not expose this
 endpoint through a remote proxy or publish the container port on all interfaces.
 
+MCP starts **disabled**, including when upgrading from the earlier always-available
+MCP host. In **Settings → AI Workflow**, only an administrator can enable or disable
+it for all users. The setting is stored in PostgreSQL and survives restarts. Disabling
+invalidates all issued MCP credentials; re-enabling requires fresh credentials. Requests
+already executing when disabling begins may complete; requests starting after confirmed
+disabling are denied. Browser access, setup instructions and downloads remain available.
+Configuration failures deny MCP access and credential issuance rather than assuming enabled.
+A settings save requires confirmation. On an uncertain settings save, reload the page
+before deciding whether to retry manually; no automatic retry is performed.
+
 1. Sign in in your browser, complete any required password replacement, and open
-   **https://localhost:8443/mcp-access** (adjust the port if configured differently).
+   **https://localhost:8443/settings/ai-workflow** (adjust the port if configured differently).
+   `/mcp-access` remains a compatibility route to the same page. Ask an administrator
+   to enable MCP if it is disabled.
 2. Select **Create MCP credential**. The JSON result contains `token` and
    `expiresAt`; keep the token private and return to the page afterward. Creating
    another credential replaces the previous one for this browser session.
@@ -279,6 +291,8 @@ Available tools:
 
 | Tool | Input / behavior |
 | --- | --- |
+| `list_products` | No arguments; read-only Products, including retired Products |
+| `read_product` | `productId`; ID, name, kind, full Markdown description and active/retired status |
 | `list_user_needs` | `productId` (the Product's manual ID); all statuses, including retired Products |
 | `read_user_need` | `internalId` (need GUID); full content, revision token and review history |
 | `create_draft_user_need` | `productId`, `id`, `title`, `statement` (Markdown); active Products only |
@@ -292,7 +306,7 @@ use the authenticated Retravion user and the same atomic audit rules as web writ
 
 A credential expires 30 minutes after issuance and cannot outlive its browser
 session. Logout, session expiry, account-session revocation, application restart,
-credential replacement and **Revoke MCP credential** end its access. Revocation
+credential replacement, globally disabling MCP and **Revoke MCP credential** end its access. Revocation
 on the page requires confirmation. This does not log out the browser. An expired
 credential requires returning to the authenticated browser flow; there is no
 refresh token. Clear the terminal variable when finished:
@@ -305,6 +319,27 @@ Never put credentials into prompts, source control, URLs or shared logs. Do not
 retry a write automatically. If the result says the commit outcome could not be
 confirmed, list/read the need and inspect its values before deciding whether to
 retry manually. A lost response likewise does not prove the write rolled back.
+
+### Download and install terminal skills
+
+The AI Workflow page offers authenticated Pi and Claude Code ZIP downloads, with
+integration version and SHA-256. These fixed packages contain only a portable
+`skills/retravion/SKILL.md`, a client-specific README and `mcp.example.json`; no
+credentials, user records, terminal client, installer or companion bridge is included.
+A hash checks file integrity, not publisher identity. Downloading grants no access.
+
+Follow the bundled README to copy the skill into `.pi/skills/retravion/` or
+`.claude/skills/retravion/`, and merge just the `retravion` server entry into
+`.pi/mcp.json` or `.mcp.json`. Keep the environment-variable credential reference,
+adjust the localhost port and review the client's normal trust/approval prompts.
+Restart the client and invoke `/skill:retravion` (Pi) or `/retravion` (Claude Code).
+The skill reads Products and User Needs and requires explicit conversation approval
+before Draft writes; it does not confer lifecycle approval or new permissions.
+
+Updates are manual: review the new ZIP, back up the previous skill/config entry and
+replace only Retravion's files/entry. Removal likewise deletes only that skill and
+server entry, leaving all unrelated configuration and the other client intact.
+Future entity support requires an explicitly shipped new integration version.
 
 ## Repository structure
 
