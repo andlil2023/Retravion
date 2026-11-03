@@ -1,0 +1,44 @@
+@page "/user-needs"
+@inject UserNeedOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>User Needs · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="User Needs" BackHref="@ProductPath" BackText="Product details">
+        <Actions>@if (_product?.IsActive == true) { <MudButton Href="@CreatePath" StartIcon="@Icons.Material.Outlined.Add">Create User Need</MudButton> }</Actions>
+    </PageHeader>
+</SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+else if (_needs is null) { <p role="status">Loading User Needs…</p> }
+else
+{
+    <p>@_product!.Id – @_product.Name @(!_product.IsActive ? "(Retired)" : "")</p>
+    @if (!_product.IsActive) { <p>Needs are read-only while this Product is retired.</p> }
+    <MudTable Items="_needs" Dense="true" Hover="true" Elevation="0" aria-label="User Needs">
+        <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Status</MudTh></HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="ID"><MudLink Href="@($"/user-needs/details?id={context.Need.InternalId}")">@context.Need.Id</MudLink></MudTd>
+            <MudTd DataLabel="Title">@context.Need.Title</MudTd><MudTd DataLabel="Status">@context.Need.Status</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><p>No User Needs yet.</p></NoRecordsContent>
+    </MudTable>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private IReadOnlyList<UserNeedSnapshot>? _needs;
+    private string? _error;
+    private string ProductPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
+    private string CreatePath => $"/user-needs/create?product={Uri.EscapeDataString(ProductId ?? "")}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _needs = null; _product = null; _error = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, ProductId);
+        if (product.IsFailure) { _error = product.Error; return; }
+        _product = product.Value;
+        var result = await Operations.List(actor, _product.InternalId);
+        if (result.IsFailure) _error = result.Error; else _needs = result.Value;
+    }
+}

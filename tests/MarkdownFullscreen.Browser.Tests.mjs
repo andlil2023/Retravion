@@ -16,7 +16,7 @@ const executable = process.env.RETRAVION_TEST_BROWSER || [
 ].find(existsSync);
 assert.ok(executable, 'Set RETRAVION_TEST_BROWSER to an installed Chromium executable.');
 const moduleSource = await readFile(new URL('../src/Retravion.Web/wwwroot/js/markdownFullscreen.js', import.meta.url), 'utf8');
-const editorCss = (await readFile(new URL('../src/Retravion.Web/Features/Product/Description/DescriptionEditor.razor.css', import.meta.url), 'utf8')).replaceAll('::deep', '');
+const editorCss = (await readFile(new URL('../src/Retravion.Web/Components/Markdown/DescriptionEditor.razor.css', import.meta.url), 'utf8')).replaceAll('::deep', '');
 const appCss = await readFile(new URL('../src/Retravion.Web/wwwroot/css/app.css', import.meta.url), 'utf8');
 const fixture = `<!doctype html><html><head><meta charset="utf-8"><style>
 :root { --mud-palette-background:white; --mud-palette-text-primary:black; --mud-palette-divider:gray; }

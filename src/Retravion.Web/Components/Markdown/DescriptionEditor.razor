@@ -9,7 +9,7 @@
     <form id="@FormId" @onsubmit="Save" @onsubmit:preventDefault aria-label="@SubmitText">
         @ChildContent
         <div class="description-toolbar">
-            <h2>@(Optional ? "Description (optional)" : "Description")</h2>
+            <h2>@(Optional ? $"{Label} (optional)" : Label)</h2>
             <div class="description-tools" role="group" aria-label="Editor controls">
                 <div class="description-arrangement" role="group" aria-label="Editor and preview arrangement">
                     <MudIconButton Icon="@Icons.Material.Outlined.VerticalSplit" Class="product-button" Size="Size.Small"
@@ -31,14 +31,14 @@
         </div>
         <div class="description-layout @_arrangement">
             <div class="description-source">
-                <label for="product-markdown">Description (Markdown)</label>
+                <label for="product-markdown">@Label (Markdown)</label>
                 <textarea id="product-markdown" value="@_markdown" @oninput="Edit" disabled="@(Busy || ReadOnly)" rows="12" spellcheck="true"></textarea>
             </div>
             <div class="description-splitter" role="separator" tabindex="0" aria-orientation="vertical"
                  aria-label="Resize Markdown and preview panes" aria-controls="product-markdown"
                  aria-valuemin="25" aria-valuemax="75" aria-valuenow="50"
                  title="Drag to resize; use Left/Right arrow keys, Home or End"></div>
-            <section aria-label="Description preview" class="description-preview">
+            <section aria-label="@(Label + " preview")" class="description-preview">
                 <h3>Preview</h3>
                 <ProductMarkdownView Markdown="@_markdown" />
             </section>
@@ -74,6 +74,7 @@
     [Parameter] public string SubmitText { get; set; } = "Save description";
     [Parameter] public string? CancelHref { get; set; }
     [Parameter] public bool Optional { get; set; }
+    [Parameter] public string Label { get; set; } = "Description";
     private string _markdown = "";
     private string _arrangement = "side-by-side";
     private bool _initialized;

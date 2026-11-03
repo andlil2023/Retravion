@@ -117,7 +117,7 @@ public sealed class UiCatalogFormTests
         await renderer.Dispatcher.InvokeAsync(async () =>
         {
             await renderer.Mount(typeof(CatalogMarkdownExample));
-            Assert.Single(renderer.Components<Retravion.Web.Features.Product.Description.DescriptionEditor>());
+            Assert.Single(renderer.Components<Retravion.Web.Components.Markdown.DescriptionEditor>());
             Assert.Contains("<strong>Markdown</strong>", renderer.Text());
             await renderer.Event("oninput", new ChangeEventArgs { Value = "## Changed\n\n**Live**\n\n<script>alert(1)</script>" });
             Assert.Contains("<strong>Live</strong>", renderer.Text());
