@@ -11,6 +11,29 @@ namespace Retravion.IntegrationTests;
 
 public sealed class AuditEventDetailsTests
 {
+    [Fact]
+    public async Task RequirementDetailsShowEventTimeValuesAsPlainTextAndPreserveMissingRationale()
+    {
+        var id = Guid.NewGuid(); var product = Guid.NewGuid();
+        var initial = new RequirementAuditValues(product, "REQ-old", "Title", "# <script>statement</script>", "Software", null, "Draft");
+        var created = new AuditInformation(new AuditActor.Identified("author"), DateTimeOffset.UnixEpoch, "requirement.create",
+            new AuditTarget.Identified(id.ToString()), AuditActionOutcome.Success,
+            requirementChange: new(id, null, initial, null, null));
+        var html = await Render(created);
+        Assert.Contains("Initial Requirement values", html); Assert.Contains("Identified: REQ-old", html);
+        foreach (var field in new[] { "Requirement ID", "Title", "Statement", "Type", "Rationale", "Status" }) Assert.Contains($"aria-label=\"{field}\"", html);
+        Assert.Contains("(not provided)", html); Assert.Contains("# &lt;script&gt;statement&lt;/script&gt;", html);
+        Assert.DoesNotContain(id.ToString(), html); Assert.DoesNotContain(product.ToString(), html); Assert.DoesNotContain("<script", html);
+        var after = initial with { Id = "REQ-new", Type = "Safety", Rationale = "", Status = "InReview" };
+        html = await Render(new(new AuditActor.Identified("author"), DateTimeOffset.UnixEpoch, "requirement.review.InReview",
+            new AuditTarget.Identified(id.ToString()), AuditActionOutcome.Success,
+            requirementChange: new(id, initial, after, "InReview", "<b>comment</b>")));
+        Assert.Contains("REQ-old", html); Assert.Contains("REQ-new", html); Assert.Contains("Software", html); Assert.Contains("Safety", html);
+        Assert.Contains("(not provided)", html); Assert.Contains("(empty)", html); Assert.Contains("&lt;b&gt;comment&lt;/b&gt;", html);
+        Assert.DoesNotContain("aria-label=\"Title\"", html); Assert.DoesNotContain("aria-label=\"Statement\"", html);
+        Assert.Contains("Review decision", html); Assert.DoesNotContain("<b>comment", html);
+    }
+
     private static readonly ProductAuditValues Initial = new("historical-id", "Original name", "System", "", true);
 
     [Fact]

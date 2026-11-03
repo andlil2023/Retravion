@@ -283,6 +283,17 @@ Available tools:
 | `read_user_need` | `internalId` (need GUID); full content, revision token and review history |
 | `create_draft_user_need` | `productId`, `id`, `title`, `statement` (Markdown); active Products only |
 | `edit_draft_user_need` | `internalId`, `expectedRevision`, `id`, `title`, `statement`; Draft content under active Products only |
+| `list_requirements` | `productId` (the Product's manual ID); all statuses, including retired Products |
+| `read_requirement` | `internalId` (Requirement GUID); full content, revision token and exact review history |
+| `create_draft_requirement` | `productId`, `id`, `title`, `statement` (Markdown), `type`, optional `rationale` (plain text); active Products only |
+| `edit_draft_requirement` | `internalId`, `expectedRevision`, `id`, `title`, `statement`, `type`, optional `rationale`; Draft content under active Products only. Omitted/null rationale clears it. |
+
+Requirement types are `System`, `Software`, `Hardware`, `Safety`, `Usability`, and
+`Regulatory` (case-insensitive names). A type must be explicitly supplied. Manual
+Requirement IDs are trimmed, limited to 100 Unicode characters, and unique
+case-insensitively within the Product using the existing database collation.
+The web Requirements list combines type/status filters with case-insensitive
+substring search over ID/title.
 
 Read before editing and supply the returned `revision` as `expectedRevision`.
 There are no status, review, deletion or new-version tools. Extra arguments such as
@@ -303,7 +314,7 @@ Remove-Item Env:RETRAVION_MCP_TOKEN -ErrorAction SilentlyContinue
 
 Never put credentials into prompts, source control, URLs or shared logs. Do not
 retry a write automatically. If the result says the commit outcome could not be
-confirmed, list/read the need and inspect its values before deciding whether to
+confirmed, list/read the affected record and inspect its values before deciding whether to
 retry manually. A lost response likewise does not prove the write rolled back.
 
 ## Repository structure

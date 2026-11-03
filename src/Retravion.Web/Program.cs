@@ -26,6 +26,9 @@ using Retravion.Application.UserNeed;
 using Retravion.Infrastructure.UserNeed;
 using Retravion.Web.Features.UserNeed;
 using Retravion.Web.Features.Mcp;
+using Retravion.Application.Requirement;
+using Retravion.Infrastructure.Requirement;
+using Retravion.Web.Features.Requirement;
 using ModelContextProtocol.AspNetCore;
 
 var recoveryMode = args.Length == 1 && args[0] == "--recover-initial-administrator";
@@ -42,7 +45,8 @@ builder.Services.AddSingleton<McpCredentials>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = "Retravion", Version = "1.0.0" })
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
-    .WithTools<UserNeedMcpTools>();
+    .WithTools<UserNeedMcpTools>()
+    .WithTools<RequirementMcpTools>();
 builder.Services.AddScoped<AuthenticationStateProvider, SessionAuthenticationStateProvider>();
 builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
     .Configure<SessionTicketStore, TimeProvider>((options, store, time) =>
@@ -106,6 +110,13 @@ builder.Services.AddSingleton<IUserNeedChangeTransaction>(_ => new PostgresUserN
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddScoped<UserNeedOperations>();
+builder.Services.AddSingleton<IRequirementStore>(_ => new PostgresRequirementStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<IRequirementChangeTransaction>(_ => new PostgresRequirementStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddScoped<RequirementOperations>();
 builder.Services.AddSingleton<AccountCreation>();
 builder.Services.AddScoped<UserOperations>();
 builder.Services.AddScoped<AccountAudit>();

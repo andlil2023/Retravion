@@ -1,0 +1,82 @@
+@page "/requirements/create"
+@page "/requirements/edit"
+@inject RequirementOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>@(_editing ? "Edit" : "Create") Requirement · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="@(_editing ? "Edit Requirement" : "Create Requirement")" BackHref="@BackPath" BackText="Requirements" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_ready)
+{
+    <DescriptionEditor InitialDescription="@_statement" Busy="_busy" OnSave="Save" FormId="requirement-form" SubmitText="Save" CancelHref="@BackPath" Label="Statement">
+        <ChildContent>
+            <MudTextField @bind-Value="_id" Label="Requirement ID" HelperText="Product-unique ID, at most 100 Unicode characters. Surrounding whitespace is removed." Required="true" Immediate="true" Disabled="_busy" />
+            <MudTextField @bind-Value="_title" Label="Title" Required="true" Immediate="true" Disabled="_busy" />
+            <MudSelect T="RequirementType?" @bind-Value="_type" Label="Type" Required="true" Disabled="_busy">
+                @foreach (var type in Enum.GetValues<RequirementType>()) { <MudSelectItem T="RequirementType?" Value="@((RequirementType?)type)">@type</MudSelectItem> }
+            </MudSelect>
+            <MudTextField @bind-Value="_rationale" Label="Rationale (optional, plain text)" Lines="3" Immediate="true" Disabled="_busy" />
+        </ChildContent>
+    </DescriptionEditor>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    private Guid _productInternalId;
+    private RequirementSnapshot? _existing;
+    private string _id = "", _title = "", _statement = "";
+    private RequirementType? _type;
+    private string? _rationale, _error;
+    private bool _busy, _ready, _editing;
+    private string BackPath => _existing is not null ? $"/requirements/details?id={_existing.Requirement.InternalId}" : $"/requirements?product={Uri.EscapeDataString(ProductId ?? "")}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _ready = false; _error = null; _existing = null;
+        _id = ""; _title = ""; _statement = ""; _type = null; _rationale = null;
+        _editing = Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.EndsWith("/edit", StringComparison.OrdinalIgnoreCase);
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        if (_editing)
+        {
+            var result = await Operations.Find(actor, Id);
+            if (result.IsFailure) { _error = result.Error; return; }
+            if (result.Value.HasNoValue) { _error = "Requirement not found."; return; }
+            _existing = result.Value.Value;
+            _productInternalId = _existing.Requirement.ProductInternalId;
+            if (_existing.Requirement.Status != RequirementStatus.Draft) { _error = "Only Draft Requirements can be edited."; return; }
+            _id = _existing.Requirement.Id; _title = _existing.Requirement.Title; _statement = _existing.Requirement.Statement;
+            _type = _existing.Requirement.Type; _rationale = _existing.Requirement.Rationale;
+        }
+        Retravion.Domain.Product.Product? product;
+        if (_editing)
+        {
+            var products = await Products.List(actor);
+            if (products.IsFailure) { _error = products.Error; return; }
+            product = products.Value.SingleOrDefault(p => p.InternalId == _productInternalId);
+        }
+        else
+        {
+            var found = await Products.Retrieve(actor, ProductId);
+            if (found.IsFailure) { _error = found.Error; return; }
+            product = found.Value;
+        }
+        if (product is null || !product.IsActive) { _error = "The responsible Product is retired or no longer exists."; return; }
+        _productInternalId = product.InternalId;
+        _ready = true;
+    }
+    private async Task Save(string statement)
+    {
+        if (_busy || !_ready) return;
+        _busy = true; _error = null;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var result = _existing is null ? await Operations.Create(actor, _productInternalId, _id, _title, statement, _type, _rationale)
+                : await Operations.Edit(actor, _existing, _id, _title, statement, _type, _rationale);
+            if (result.IsFailure) _error = result.Error;
+            else Navigation.NavigateTo($"/requirements/details?id={result.Value.Requirement.InternalId}");
+        }
+        finally { _busy = false; }
+    }
+}

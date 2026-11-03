@@ -1,0 +1,108 @@
+using System.Security.Claims;
+using CSharpFunctionalExtensions;
+using Microsoft.AspNetCore.Authorization;
+using Retravion.Application.AuditTrail;
+using Retravion.Application.Requirement;
+using Retravion.Domain.Requirement;
+using Retravion.Web.Features.Identity.Logout;
+using Retravion.Web.Features.Mcp;
+using RequirementState = Retravion.Domain.Requirement.Requirement;
+
+namespace Retravion.Web.Features.Requirement;
+
+internal sealed class RequirementOperations(IAuthorizationService authorization, SessionTicketStore sessions,
+    IRequirementStore store, IRequirementChangeTransaction changes, IAuditSubmission audit, TimeProvider time,
+    ILogger<RequirementOperations> logger, McpCredentials mcpCredentials)
+{
+    private async Task<bool> Allowed(ClaimsPrincipal principal) =>
+        sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
+        (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || mcpCredentials.IsActive(principal)) &&
+        (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
+
+    private static AuditActor Actor(ClaimsPrincipal principal) =>
+        principal.Identity?.IsAuthenticated == true && principal.FindFirstValue(ClaimTypes.NameIdentifier) is { Length: > 0 } id
+            ? new AuditActor.Identified(id) : new AuditActor.Unknown();
+
+    private async Task<Result<RequirementSnapshot>> Change(ClaimsPrincipal principal, string action,
+        Func<AuditActor, DateTimeOffset, Task<Result<RequirementSnapshot>>> operation, CancellationToken token)
+    {
+        var actor = Actor(principal);
+        var now = time.GetUtcNow();
+        if (await Allowed(principal) && actor is AuditActor.Identified) return await operation(actor, now);
+        return await Deny(actor, now, action, token);
+    }
+
+    private async Task<Result<RequirementSnapshot>> Deny(AuditActor actor, DateTimeOffset now, string action, CancellationToken token)
+    {
+        try
+        {
+            if (await audit.SubmitAsync(new AuditInformation(actor, now, action, new AuditTarget.Unknown(),
+                    AuditActionOutcome.Failure), token) == AuditSubmissionResult.Success)
+                return Result.Failure<RequirementSnapshot>("Access denied.");
+        }
+        catch (Exception) { /* No submitted values or provider details in operational logging. */ }
+        logger.LogError("Unauthorized Requirement change audit submission failed.");
+        return Result.Failure<RequirementSnapshot>("Access denied.");
+    }
+
+    internal Task<Result<RequirementSnapshot>> DeniedMcpMutation(ClaimsPrincipal principal, string action, CancellationToken token) =>
+        Deny(Actor(principal), time.GetUtcNow(), action, token);
+
+    public Task<Result<RequirementSnapshot>> Create(ClaimsPrincipal principal, Guid product, string? id, string? title,
+        string? statement, RequirementType? type, string? rationale, CancellationToken token = default) =>
+        Change(principal, "requirement.create", (actor, now) =>
+        {
+            var requirement = RequirementState.Create(product, id, title, statement, type, rationale);
+            return requirement.IsSuccess ? changes.Create(requirement.Value, actor, now, token)
+                : Task.FromResult(Result.Failure<RequirementSnapshot>(requirement.Error));
+        }, token);
+
+    public Task<Result<RequirementSnapshot>> Edit(ClaimsPrincipal principal, RequirementSnapshot expected, string? id,
+        string? title, string? statement, RequirementType? type, string? rationale, CancellationToken token = default) =>
+        Change(principal, "requirement.edit", (actor, now) =>
+        {
+            var requirement = expected.Requirement.Edit(id, title, statement, type, rationale);
+            return requirement.IsSuccess ? changes.Update(expected, requirement.Value, actor, now, cancellationToken: token)
+                : Task.FromResult(Result.Failure<RequirementSnapshot>(requirement.Error));
+        }, token);
+
+    internal Task<Result<RequirementSnapshot>> EditDraft(ClaimsPrincipal principal, Guid internalId, long expectedRevision,
+        string? id, string? title, string? statement, RequirementType? type, string? rationale, CancellationToken token = default) =>
+        Change(principal, "requirement.edit", async (actor, now) =>
+        {
+            var found = await store.Find(internalId, token);
+            if (found.IsFailure) return Result.Failure<RequirementSnapshot>(found.Error);
+            if (found.Value.HasNoValue) return Result.Failure<RequirementSnapshot>("Requirement not found.");
+            var expected = found.Value.Value;
+            if (expected.Revision != expectedRevision)
+                return Result.Failure<RequirementSnapshot>("The Requirement changed. Retrieve it again before editing.");
+            var requirement = expected.Requirement.Edit(id, title, statement, type, rationale);
+            return requirement.IsSuccess ? await changes.Update(expected, requirement.Value, actor, now, cancellationToken: token)
+                : Result.Failure<RequirementSnapshot>(requirement.Error);
+        }, token);
+
+    public Task<Result<RequirementSnapshot>> Review(ClaimsPrincipal principal, RequirementSnapshot expected, string decision,
+        string? comment, CancellationToken token = default) => Change(principal, decision switch
+        {
+            "InReview" => "requirement.review.InReview", "Approved" => "requirement.review.Approved",
+            "Draft" => "requirement.review.Draft", _ => "requirement.review"
+        }, (actor, now) =>
+        {
+            var requirement = decision switch
+            {
+                "InReview" => expected.Requirement.SubmitForReview(),
+                "Approved" => expected.Requirement.Approve(),
+                "Draft" => expected.Requirement.ReturnToDraft(),
+                _ => Result.Failure<RequirementState>("Invalid review decision.")
+            };
+            return requirement.IsSuccess ? changes.Update(expected, requirement.Value, actor, now, decision, comment, token)
+                : Task.FromResult(Result.Failure<RequirementSnapshot>(requirement.Error));
+        }, token);
+
+    public async Task<Result<IReadOnlyList<RequirementSnapshot>>> List(ClaimsPrincipal principal, Guid product, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.List(product, token) : Result.Failure<IReadOnlyList<RequirementSnapshot>>("Access denied.");
+    public async Task<Result<Maybe<RequirementSnapshot>>> Find(ClaimsPrincipal principal, Guid id, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.Find(id, token) : Result.Failure<Maybe<RequirementSnapshot>>("Access denied.");
+    public async Task<Result<IReadOnlyList<RequirementReview>>> History(ClaimsPrincipal principal, Guid id, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.History(id, token) : Result.Failure<IReadOnlyList<RequirementReview>>("Access denied.");
+}

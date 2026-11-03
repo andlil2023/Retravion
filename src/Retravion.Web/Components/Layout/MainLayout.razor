@@ -107,7 +107,9 @@
     private bool IsProduct => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("products", StringComparison.OrdinalIgnoreCase)
         || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("products/", StringComparison.OrdinalIgnoreCase)
         || Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("user-needs", StringComparison.OrdinalIgnoreCase)
-        || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("user-needs/", StringComparison.OrdinalIgnoreCase);
+        || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("user-needs/", StringComparison.OrdinalIgnoreCase)
+        || Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("requirements", StringComparison.OrdinalIgnoreCase)
+        || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("requirements/", StringComparison.OrdinalIgnoreCase);
     private bool _navigationOpen;
     private bool _darkMode;
 
