@@ -10,6 +10,7 @@ public sealed record AuditInformation
     public AuditActionOutcome Outcome { get; }
     public ProductAuditDetails? ProductChange { get; }
     public UserNeedAuditDetails? UserNeedChange { get; }
+    public RequirementAuditDetails? RequirementChange { get; }
     public AiWorkflowAuditDetails? AiWorkflowChange { get; }
 
     public AuditInformation(
@@ -20,6 +21,7 @@ public sealed record AuditInformation
         AuditActionOutcome outcome,
         ProductAuditDetails? productChange = null,
         UserNeedAuditDetails? userNeedChange = null,
+        RequirementAuditDetails? requirementChange = null,
         AiWorkflowAuditDetails? aiWorkflowChange = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
@@ -37,6 +39,7 @@ public sealed record AuditInformation
         Outcome = outcome;
         ProductChange = productChange;
         UserNeedChange = userNeedChange;
+        RequirementChange = requirementChange;
         AiWorkflowChange = aiWorkflowChange;
     }
 }

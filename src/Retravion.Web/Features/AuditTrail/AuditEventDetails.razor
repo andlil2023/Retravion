@@ -9,7 +9,7 @@
             <dt>Actor</dt><dd>@(Event.Actor is AuditActor.Identified actor ? $"Identified: {actor.Identifier}" : "Unknown")</dd>
             <dt>Time (UTC)</dt><dd><time datetime="@Event.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)">@Event.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)</time></dd>
             <dt>Action</dt><dd>@Event.Action</dd>
-            <dt>Target</dt><dd>@(Event.ProductChange is { } product ? $"Identified: {product.After.Id}" : Event.UserNeedChange is { } need ? $"Identified: {need.After.Id}" : Event.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</dd>
+            <dt>Target</dt><dd>@(Event.ProductChange is { } product ? $"Identified: {product.After.Id}" : Event.UserNeedChange is { } need ? $"Identified: {need.After.Id}" : Event.RequirementChange is { } requirement ? $"Identified: {requirement.After.Id}" : Event.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</dd>
             <dt>Outcome</dt><dd>@Event.Outcome</dd>
         </dl>
         @if (Event.ProductChange is { } change)
@@ -68,6 +68,29 @@
                 <dl><dt>Old value</dt><dd>@settings.Before</dd><dt>New value</dt><dd>@settings.After</dd></dl>
             </section>
         }
+        else if (Event.RequirementChange is { } requirementChange)
+        {
+            <h3>@(requirementChange.Before is null ? "Initial Requirement values" : "Changed Requirement fields")</h3>
+            @foreach (var field in RequirementFields(requirementChange))
+            {
+                <section class="field-change" aria-label="@field.Name">
+                    <h4>@field.Name</h4>
+                    <dl>
+                        @if (requirementChange.Before is not null)
+                        { <dt>Old value</dt><dd class="recorded-value">@(field.Old is null ? "(not provided)" : field.Old == "" ? "(empty)" : field.Old)</dd> }
+                        <dt>@(requirementChange.Before is null ? "Initial value" : "New value")</dt><dd class="recorded-value">@(field.New is null ? "(not provided)" : field.New == "" ? "(empty)" : field.New)</dd>
+                    </dl>
+                </section>
+            }
+            @if (requirementChange.Decision is not null)
+            {
+                <h3>Review decision</h3>
+                <dl><dt>Decision</dt><dd class="recorded-value">@requirementChange.Decision</dd>
+                    <dt>Comment</dt><dd class="recorded-value">@(requirementChange.Comment is null ? "(not provided)" : requirementChange.Comment == "" ? "(empty)" : requirementChange.Comment)</dd></dl>
+            }
+            @if (!RequirementFields(requirementChange).Any() && requirementChange.Decision is null)
+            { <p>No recorded field changes.</p> }
+        }
         else
         {
             <p>No recorded field changes.</p>
@@ -90,6 +113,22 @@
             ("Status", before?.Status, after.Status)
         ];
         // Product internal IDs are retained in the audit payload but are not displayed to users (REQ-PRODUCT-001).
+        return fields.Where(field => before is null || field.Old != field.New);
+    }
+
+    private static IEnumerable<(string Name, string? Old, string? New)> RequirementFields(RequirementAuditDetails change)
+    {
+        var before = change.Before;
+        var after = change.After;
+        (string Name, string? Old, string? New)[] fields =
+        [
+            ("Requirement ID", before?.Id, after.Id),
+            ("Title", before?.Title, after.Title),
+            ("Statement", before?.Statement, after.Statement),
+            ("Type", before?.Type, after.Type),
+            ("Rationale", before?.Rationale, after.Rationale),
+            ("Status", before?.Status, after.Status)
+        ];
         return fields.Where(field => before is null || field.Old != field.New);
     }
 

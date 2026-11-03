@@ -2,7 +2,7 @@
 
 Requires the %CLIENT% terminal with native Streamable HTTP MCP and Agent Skills support.
 No terminal client, installer, OAuth service or companion bridge is included. Use the terminal vendor's installation instructions.
-The integration supports the six tools shipped with Retravion's AI Workflow page: read-only Products and User Need reads/Draft writes. It does not enable future entities.
+This skill guides six tools: read-only Products and User Need reads/Draft writes. The server may also expose Requirement tools; Requirement workflows are not included in this skill version. The skill does not enable additional entities.
 
 ## Install into your project directory
 

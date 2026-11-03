@@ -10,6 +10,9 @@ using Microsoft.Extensions.Logging;
 using Retravion.Application.AiWorkflow;
 using Retravion.Application.AuditTrail;
 using Retravion.Application.UserNeed;
+using Retravion.Application.Requirement;
+using Retravion.Domain.Requirement;
+using Retravion.Web.Features.Requirement;
 using Retravion.Web.Features.Mcp;
 using Retravion.Web.Features.UserNeed;
 using Xunit;
@@ -84,7 +87,7 @@ public sealed partial class AccountManagementTests
         using var scope = host.Factory.Services.CreateScope();
         Assert.True((await scope.ServiceProvider.GetRequiredService<UserNeedOperations>().EditDraft(principal, Guid.NewGuid(), 1, "ID", "secret", "secret")).IsFailure);
         await host.Authenticate();
-        Assert.Equal(6, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(10, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
         settings.Unavailable = true;
         using (var unavailable = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, unavailable.StatusCode);
         using (var unavailableIssue = await host.Issue()) Assert.Equal(HttpStatusCode.Forbidden, unavailableIssue.StatusCode);
@@ -205,7 +208,57 @@ public sealed partial class AccountManagementTests
         await host.Authenticate();
         using (var denied = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         await host.Authenticate();
-        Assert.Equal(6, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(10, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task GlobalSettingsGateAlsoProtectsMergedRequirementToolsAndTheirWriteBoundary()
+    {
+        var settings = new InMemoryAiWorkflowSettingsStore(true);
+        var store = new RequirementStoreDouble();
+        var audit = new RequirementAuditRecorder();
+        var logger = new RequirementAuditLogger();
+        await using var host = new McpTestHost(services =>
+        {
+            services.AddSingleton<IAiWorkflowSettingsStore>(settings);
+            services.AddSingleton<IRequirementStore>(store);
+            services.AddSingleton<IRequirementChangeTransaction>(store);
+            services.AddSingleton<IAuditSubmission>(audit);
+            services.AddSingleton<ILogger<RequirementOperations>>(logger);
+        });
+        await host.Login(); await host.Replace(); await host.Authenticate();
+        var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(host.Mcp.DefaultRequestHeaders.Authorization!.Parameter);
+        using (var disabled = await ConfigureAi(host, settings, false)) Assert.Equal(HttpStatusCode.Redirect, disabled.StatusCode);
+        foreach (var tool in new[] { "create_draft_requirement", "edit_draft_requirement" })
+        {
+            using var denied = await host.Send("tools/call", new { name = tool, arguments = new { title = "secret", rationale = "secret" } });
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        }
+        using var scope = host.Factory.Services.CreateScope();
+        var operations = scope.ServiceProvider.GetRequiredService<RequirementOperations>();
+        Assert.True((await operations.Create(principal, Guid.NewGuid(), "secret", "secret", "secret", RequirementType.Software, "secret")).IsFailure);
+        Assert.True((await operations.EditDraft(principal, Guid.NewGuid(), 1, "secret", "secret", "secret", RequirementType.Software, "secret")).IsFailure);
+        using (var enabled = await ConfigureAi(host, settings, true)) Assert.Equal(HttpStatusCode.Redirect, enabled.StatusCode);
+        Assert.True((await operations.EditDraft(principal, Guid.NewGuid(), 1, "secret", "secret", "secret", RequirementType.Software, "secret")).IsFailure);
+        using (var denied = await host.Send("tools/call", new { name = "create_draft_requirement", arguments = new { title = "secret" } }))
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        Assert.Equal(6, audit.Events.Count);
+        Assert.All(audit.Events, e =>
+        {
+            Assert.Equal(new AuditActor.Identified("admin"), e.Actor);
+            Assert.Equal(AuditActionOutcome.Failure, e.Outcome);
+            Assert.IsType<AuditTarget.Unknown>(e.Target);
+            Assert.Null(e.RequirementChange); Assert.Null(e.AiWorkflowChange);
+            Assert.Contains(e.Action, new[] { "requirement.create", "requirement.edit" });
+        });
+        foreach (var throwing in new[] { false, true })
+        {
+            audit.Fail = true; audit.Throw = throwing;
+            Assert.True((await operations.Create(principal, Guid.NewGuid(), "secret", "secret", "secret", RequirementType.Software, "secret")).IsFailure);
+        }
+        Assert.Equal(0, store.Calls);
+        Assert.Equal(2, logger.Messages.Count);
+        Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Requirement change audit submission failed.", message));
     }
 
     private sealed class SettingsReadHook(IAiWorkflowSettingsStore store) : IAiWorkflowSettingsStore
