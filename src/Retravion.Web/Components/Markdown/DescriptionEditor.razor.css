@@ -64,7 +64,14 @@
 .description-layout.stacked .description-splitter { display: none; }
 .description-layout.stacked { grid-template-columns: minmax(0, 1fr); }
 .description-source, .description-preview { min-width: 0; padding: 1.25rem 1.5rem; }
-.description-preview { overflow-wrap: anywhere; overflow: auto; }
+/* Live diagram loading must not resize the editor or toggle the page scrollbar. */
+.description-preview {
+    block-size: 26rem;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+    overflow: auto;
+    scrollbar-gutter: stable;
+}
 .description-source label, .description-preview h3 {
     display: block;
     margin: 0 0 1rem;

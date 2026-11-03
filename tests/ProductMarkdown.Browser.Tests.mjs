@@ -15,17 +15,32 @@ const executable = process.env.RETRAVION_TEST_BROWSER || [
 ].find(existsSync);
 assert.ok(executable, 'Set RETRAVION_TEST_BROWSER to an installed Chromium executable.');
 const files = new Map();
-for (const path of ['js/productMarkdown.js', 'js/mermaidFrame.js', 'lib/mermaid/mermaid.min.js'])
+for (const path of ['js/productMarkdown.js', 'js/mermaidFrame.js', 'js/markdownFullscreen.js', 'lib/mermaid/mermaid.min.js'])
     files.set('/' + path, await readFile(new URL('../src/Retravion.Web/wwwroot/' + path, import.meta.url)));
+const editorCss = (await readFile(new URL('../src/Retravion.Web/Components/Markdown/DescriptionEditor.razor.css', import.meta.url), 'utf8')).replaceAll('::deep', '');
 const requests = [];
 const server = createServer((request, response) => {
     requests.push(request.url);
     response.setHeader('Content-Type', request.url.endsWith('.js') ? 'text/javascript' : 'text/html');
     if (files.has(request.url)) return response.end(files.get(request.url));
     if (request.url !== '/') { response.statusCode = 404; return response.end(); }
-    response.end(`<!doctype html><html><head><meta charset="utf-8"></head><body>
-        <main id="preview"></main><script type="module">
+    response.end(`<!doctype html><html><head><meta charset="utf-8"><style>
+        :root { --mud-palette-background: white; --mud-palette-text-primary: black; --mud-palette-divider: gray; }
+        body { margin:0; } ${editorCss}
+        </style></head><body>
+        <dialog open class="description-editor-shell"><form>
+            <div class="description-toolbar"><h2>Description</h2><button type="button" data-markdown-fullscreen-toggle>Fullscreen</button></div>
+            <div class="description-layout side-by-side">
+                <div class="description-source"><label for="source">Description (Markdown)</label><textarea id="source" rows="12"></textarea></div>
+                <div class="description-splitter" role="separator" tabindex="0" aria-valuenow="50"></div>
+                <section class="description-preview"><h3>Preview</h3><main id="preview"></main></section>
+            </div>
+        </form><div class="product-actions"><button id="save">Save</button></div></dialog>
+        <script type="module">
         import { render } from '/js/productMarkdown.js';
+        import { initializeSplitter, setFullscreen } from '/js/markdownFullscreen.js';
+        initializeSplitter(document.querySelector('dialog'));
+        window.setEditorFullscreen = enabled => setFullscreen(document.querySelector('dialog'), enabled);
         window.renderMarkdown = render;
         window.makePreview = source => {
             const root = document.createElement('div');
@@ -35,6 +50,10 @@ const server = createServer((request, response) => {
             pre.append(code); root.append(pre); document.querySelector('main').replaceChildren(root);
             return root;
         };
+        document.querySelector('textarea').addEventListener('input', event => {
+            window.currentRoot = makePreview(event.target.value);
+            window.pendingRender = render(currentRoot);
+        });
         window.ready = true;
         </script></body></html>`);
 });
@@ -47,7 +66,13 @@ let browser, socket, nextId = 0;
 const pending = new Map(), contexts = new Map();
 async function command(method, params = {}, sessionId) {
     const id = ++nextId;
-    const result = new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+    const result = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => { pending.delete(id); reject(new Error(`Browser command timed out: ${method}`)); }, 30000);
+        pending.set(id, {
+            resolve: value => { clearTimeout(timeout); resolve(value); },
+            reject: error => { clearTimeout(timeout); reject(error); }
+        });
+    });
     socket.send(JSON.stringify({ id, method, params, sessionId }));
     return result;
 }
@@ -75,8 +100,45 @@ async function frameEvaluate(expression) {
 async function preview(source) {
     await evaluate(`window.currentRoot = makePreview(${JSON.stringify(source)}); await renderMarkdown(currentRoot);`);
 }
+async function assertStableTyping(source, scenario) {
+    await command('Page.bringToFront');
+    await evaluate(`window.editor = document.querySelector('textarea'); editor.focus();
+        editor.setSelectionRange(editor.value.indexOf('Draft') + 5, editor.value.indexOf('Draft') + 5);`);
+    // Let focus/validation and fullscreen transitions settle before measuring typing.
+    await delay(300);
+    await evaluate(`window.geometry = () => {
+            const rect = editor.getBoundingClientRect();
+            return [rect.x, rect.y, rect.width, rect.height,
+                document.querySelector('.description-source').getBoundingClientRect().height,
+                document.querySelector('.description-preview').getBoundingClientRect().height,
+                document.querySelector('.product-actions').getBoundingClientRect().top];
+        };
+        window.samples = [geometry()]; window.sampling = true;
+        requestAnimationFrame(function sample() { samples.push(geometry()); if (sampling) requestAnimationFrame(sample); });`);
+    for (const character of ' updated') {
+        await command('Input.insertText', { text: character });
+        await delay(40);
+    }
+    await evaluate('if (window.pendingRender) await pendingRender;');
+    await waitFor('document.querySelector(".description-preview iframe")?.style.visibility === "visible"');
+    await delay(50);
+    await evaluate('sampling = false; samples.push(geometry());');
+    const samples = await evaluate('samples');
+    assert.ok(samples.length > 2, 'Geometry was sampled during typing, not only before/after.');
+    for (const sample of samples)
+        for (let index = 0; index < sample.length; index++)
+            assert.ok(Math.abs(sample[index] - samples[0][index]) < 1,
+                `Stable editor geometry ${scenario}: ${JSON.stringify(samples[0])} -> ${JSON.stringify(sample)}`);
+    assert.equal(await evaluate('document.activeElement === editor'), true);
+    assert.equal(await evaluate('editor === document.querySelector("textarea")'), true);
+    assert.equal(await evaluate('editor.value'), source.replace('Draft', 'Draft updated'));
+    assert.equal(await evaluate('editor.selectionStart'), source.indexOf('Draft') + 'Draft updated'.length);
+    assert.equal(await frameEvaluate('document.body.textContent.includes("Draft updated")'), true, 'Latest diagram still renders.');
+    assert.equal(await evaluate('document.querySelector(".description-preview").scrollHeight > document.querySelector(".description-preview").clientHeight'), true, 'Tall diagrams remain reachable by scrolling.');
+    console.log(`PASS: stable geometry during real typing, draft/caret/focus and tall-diagram preview ${scenario}`);
+}
 async function waitFor(expression) {
-    for (let attempt = 0; attempt < 200; attempt++) {
+    for (let attempt = 0; attempt < 400; attempt++) {
         if (await evaluate(expression)) return;
         await delay(50);
     }
@@ -171,6 +233,21 @@ try {
     assert.equal(await frameEvaluate('Boolean(document.querySelector("svg"))'), true, 'Valid input recovers after syntax error.');
     assert.equal(await evaluate('Boolean(window.__retravionXssProbe)'), false);
     console.log('PASS: syntax errors retain escaped source/generic feedback, next valid draft recovers');
+    // Sample every animation frame, including pending iframe layout, not just final geometry.
+    for (const [width, arrangement, fullscreen] of [
+        [1280, 'side-by-side', false], [1280, 'stacked', false],
+        [1280, 'side-by-side', true], [1280, 'stacked', true],
+        [390, 'side-by-side', false], [390, 'side-by-side', true]
+    ]) {
+        await command('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+        await evaluate(`setEditorFullscreen(${fullscreen});
+            document.querySelector('.description-layout').className = ${JSON.stringify('description-layout ' + arrangement)};`);
+        const source = 'flowchart TD\nA[Draft] --> B --> C --> D --> E --> F --> G --> H --> I --> J';
+        await preview(source);
+        await evaluate(`document.querySelector('textarea').value = ${JSON.stringify(source)};`);
+        await assertStableTyping(source, `at ${width}px ${arrangement}, fullscreen=${fullscreen}`);
+    }
+    await evaluate('setEditorFullscreen(false)');
     // Optional end-to-end check against a separately started disposable app/database.
     if (process.env.RETRAVION_MARKDOWN_APP_URL) {
         const app = new URL(process.env.RETRAVION_MARKDOWN_APP_URL);
@@ -193,6 +270,29 @@ try {
         })()`);
         await command('Page.navigate', { url: new URL('/products/create', app).href });
         await waitFor('Boolean(document.querySelector("[role=separator][aria-valuetext]"))');
+        const tallSource = '```mermaid\nflowchart TD\nA[Draft] --> B --> C --> D --> E --> F --> G --> H --> I --> J\n```';
+        for (const [width, arrangement, fullscreen] of [
+            [1280, 'Side by side', false], [1280, 'Stacked', false],
+            [1280, 'Side by side', true], [1280, 'Stacked', true],
+            [390, 'Side by side', false], [390, 'Side by side', true]
+        ]) {
+            await command('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+            await evaluate(`if (document.querySelector('dialog').matches(':modal')) document.querySelector('[data-markdown-fullscreen-toggle]').click();`);
+            await waitFor('!document.querySelector("dialog").matches(":modal")');
+            await evaluate(`document.querySelector('[aria-label="${arrangement}"]').click();`);
+            await waitFor(`Boolean(document.querySelector('.description-layout.${arrangement === 'Stacked' ? 'stacked' : 'side-by-side'}'))`);
+            if (fullscreen) {
+                await evaluate('document.querySelector("[data-markdown-fullscreen-toggle]").click()');
+                await waitFor('document.querySelector("dialog").matches(":modal")');
+            }
+            await evaluate(`const input = document.querySelector('textarea'); input.value = ${JSON.stringify(tallSource)};
+                input.dispatchEvent(new Event('input', { bubbles: true }));`);
+            await waitFor('document.querySelector(".description-preview iframe")?.style.visibility === "visible"');
+            await assertStableTyping(tallSource, `in actual Blazor at ${width}px ${arrangement}, fullscreen=${fullscreen}`);
+        }
+        await evaluate('document.querySelector("[data-markdown-fullscreen-toggle]").click()');
+        await waitFor('!document.querySelector("dialog").matches(":modal")');
+        await command('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
         const markdown = 'Before paragraph.\n\n| Name | Status |\n| --- | --- |\n| Product | Active |\n\n```mermaid\nflowchart LR\nA[Draft] --> B[Reviewed]\n```\n\nAfter paragraph.';
         await evaluate(`const textarea = document.querySelector('textarea'); textarea.value = ${JSON.stringify(markdown)};
             textarea.dispatchEvent(new Event('input', { bubbles: true }));`);
