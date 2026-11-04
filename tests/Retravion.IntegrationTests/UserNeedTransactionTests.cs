@@ -29,7 +29,7 @@ public sealed partial class PostgresProductTests
         Assert.True((await store.Update(edited, edited.Need, actor, time)).IsSuccess);
         var reviewed = (await store.Update(edited, edited.Need.SubmitForReview().Value, actor, time, "InReview", "Ready")).Value;
         var approved = (await store.Update(reviewed, reviewed.Need.Approve().Value, actor, time, "Approved")).Value;
-        var returned = (await store.Update(approved, approved.Need.ReturnToDraft().Value, actor, time, "Draft")).Value;
+        var returned = (await store.Update(approved, approved.Need.Reopen("Correction").Value, actor, time, "Reopened", "Correction")).Value;
         var history = (await store.History(need.InternalId)).Value;
         Assert.Equal(3, history.Count);
         Assert.All(history, row => { Assert.Equal("After", row.Title); Assert.Equal("Updated", row.Statement); });
@@ -38,21 +38,21 @@ public sealed partial class PostgresProductTests
         Assert.Equal(5, events.Length);
         Assert.All(events, e => { Assert.Equal(actor, e.Actor); Assert.Equal(new AuditTarget.Identified(need.InternalId.ToString()), e.Target); });
         static UserNeedAuditValues Values(Need value) => new(value.ProductInternalId, value.Id, value.Title, value.Statement, value.Status.ToString());
-        Assert.Equal(new UserNeedAuditDetails(need.InternalId, null, Values(need), null, null),
+        Assert.Equal(new UserNeedAuditDetails(need.InternalId, null, Values(need), null, null, need.VersionId, 1),
             events.Single(e => e.Action == "need.create").UserNeedChange);
-        Assert.Equal(new UserNeedAuditDetails(need.InternalId, Values(need), Values(edited.Need), null, null),
+        Assert.Equal(new UserNeedAuditDetails(need.InternalId, Values(need), Values(edited.Need), null, null, need.VersionId, 1),
             events.Single(e => e.Action == "need.edit").UserNeedChange);
-        Assert.Equal(new UserNeedAuditDetails(need.InternalId, Values(edited.Need), Values(reviewed.Need), "InReview", "Ready"),
+        Assert.Equal(new UserNeedAuditDetails(need.InternalId, Values(edited.Need), Values(reviewed.Need), "InReview", "Ready", need.VersionId, 1),
             events.Single(e => e.Action == "need.review.InReview").UserNeedChange);
-        Assert.Equal(new UserNeedAuditDetails(need.InternalId, Values(reviewed.Need), Values(approved.Need), "Approved", null),
+        Assert.Equal(new UserNeedAuditDetails(need.InternalId, Values(reviewed.Need), Values(approved.Need), "Approved", null, need.VersionId, 1),
             events.Single(e => e.Action == "need.review.Approved").UserNeedChange);
-        Assert.Equal(new UserNeedAuditDetails(need.InternalId, Values(approved.Need), Values(returned.Need), "Draft", null),
-            events.Single(e => e.Action == "need.review.Draft").UserNeedChange);
+        Assert.Equal(new UserNeedAuditDetails(need.InternalId, Values(approved.Need), Values(returned.Need), "Reopened", "Correction", need.VersionId, 1, null, "Correction"),
+            events.Single(e => e.Action == "need.reopen").UserNeedChange);
         Assert.All(events, e => { Assert.Equal(time.UtcTicks, e.OccurredAt.UtcTicks); Assert.Equal(AuditActionOutcome.Success, e.Outcome); });
-        var later = (await store.Update(returned, returned.Need.Edit("Later", "Later title", "Later statement").Value, actor, time)).Value;
+        var later = (await store.Update(returned, returned.Need.Edit("Renamed", "Later title", "Later statement").Value, actor, time)).Value;
         Assert.Equal(history, (await store.History(need.InternalId)).Value);
         Assert.True((await products.Update(product, product.Retire().Value)).IsSuccess);
-        Assert.True((await store.Update(later, later.Need.Edit("x", "x", "x").Value, actor, time)).IsFailure);
+        Assert.True((await store.Update(later, later.Need.Edit("Renamed", "x", "x").Value, actor, time)).IsFailure);
         Assert.True((await store.Create(Need.Create(product.InternalId, "new", "Title", "Statement").Value, actor, time)).IsFailure);
         Assert.True((await store.Find(need.InternalId)).Value.HasValue);
     }

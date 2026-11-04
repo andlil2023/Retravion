@@ -16,7 +16,7 @@ internal static class McpEndpoints
         ["list_products"] = [],
         ["read_product"] = ["productId"],
         ["list_user_needs"] = ["productId"],
-        ["read_user_need"] = ["internalId"],
+        ["read_user_need"] = ["internalId", "versionId"],
         ["create_draft_user_need"] = ["productId", "id", "title", "statement"],
         ["edit_draft_user_need"] = ["internalId", "expectedRevision", "id", "title", "statement"],
         ["list_requirements"] = ["productId"],

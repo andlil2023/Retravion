@@ -19,7 +19,10 @@ else
         <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Status</MudTh></HeaderContent>
         <RowTemplate>
             <MudTd DataLabel="ID"><MudLink Href="@($"/user-needs/details?id={context.Need.InternalId}")">@context.Need.Id</MudLink></MudTd>
-            <MudTd DataLabel="Title">@context.Need.Title</MudTd><MudTd DataLabel="Status">@context.Need.Status</MudTd>
+            <MudTd DataLabel="Title">@context.Need.Title</MudTd><MudTd DataLabel="Status">@($"v{context.Need.VersionNumber}") · @context.Need.Status
+                @if (context.LatestApprovedVersionNumber is { } approved && context.Need.Status != UserNeedStatus.Approved)
+                { <span> · @($"v{approved}") Approved</span> }
+            </MudTd>
         </RowTemplate>
         <NoRecordsContent><p>No User Needs yet.</p></NoRecordsContent>
     </MudTable>
