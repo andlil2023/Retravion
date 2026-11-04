@@ -12,7 +12,7 @@ namespace Retravion.Web.Features.Requirement;
 
 internal sealed class RequirementOperations(IAuthorizationService authorization, SessionTicketStore sessions,
     IRequirementStore store, IRequirementChangeTransaction changes, IAuditSubmission audit, TimeProvider time,
-    ILogger<RequirementOperations> logger, McpCredentials mcpCredentials)
+    ILogger<RequirementOperations> logger, McpCredentials mcpCredentials, IRequirementLinkStore links)
 {
     private async Task<bool> Allowed(ClaimsPrincipal principal) =>
         sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
@@ -80,6 +80,18 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
             return requirement.IsSuccess ? await changes.Update(expected, requirement.Value, actor, now, cancellationToken: token)
                 : Result.Failure<RequirementSnapshot>(requirement.Error);
         }, token);
+
+    internal Task<Result<RequirementSnapshot>> AddLink(ClaimsPrincipal principal, RequirementSnapshot expected,
+        RequirementUserNeedLink target, CancellationToken token = default) =>
+        Change(principal, "requirement.link.add", (actor, now) => links.ChangeLink(expected, target, true, actor, now, token), token);
+
+    internal Task<Result<RequirementSnapshot>> RemoveLink(ClaimsPrincipal principal, RequirementSnapshot expected,
+        RequirementUserNeedLink target, CancellationToken token = default) =>
+        Change(principal, "requirement.link.remove", (actor, now) => links.ChangeLink(expected, target, false, actor, now, token), token);
+
+    internal async Task<Result<IReadOnlyList<RequirementUserNeedLink>>> Links(ClaimsPrincipal principal, Guid id,
+        Guid versionId, CancellationToken token = default) => await Allowed(principal)
+        ? await links.Links(id, versionId, token) : Result.Failure<IReadOnlyList<RequirementUserNeedLink>>("Access denied.");
 
     public Task<Result<RequirementSnapshot>> CreateSuccessor(ClaimsPrincipal principal, RequirementSnapshot expected, string? reason,
         CancellationToken token = default) => Change(principal, "requirement.version.create", (actor, now) =>

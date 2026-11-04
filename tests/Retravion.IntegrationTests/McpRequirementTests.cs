@@ -141,7 +141,8 @@ public sealed partial class PostgresProductTests
     }
 
     private static McpTestHost RequirementMcpHost(Retravion.Application.Product.IProductStore products, IRequirementStore reads, IRequirementChangeTransaction writes) => new(services =>
-    { services.AddSingleton(products); services.AddSingleton(reads); services.AddSingleton(writes); });
+    { services.AddSingleton(products); services.AddSingleton(reads); services.AddSingleton(writes);
+        services.AddSingleton((IRequirementLinkStore)reads); });
 
     private sealed class RequirementWriteHook(PostgresRequirementStore store) : IRequirementChangeTransaction
     {
@@ -165,6 +166,7 @@ public sealed partial class AccountManagementTests
             services.AddSingleton<IAuditSubmission>(audit);
             services.AddSingleton<IRequirementStore>(store);
             services.AddSingleton<IRequirementChangeTransaction>(store);
+            services.AddSingleton<IRequirementLinkStore>(store);
             services.AddSingleton<Microsoft.Extensions.Logging.ILogger<Retravion.Web.Features.Requirement.RequirementOperations>>(logger);
         });
         foreach (var state in new[] { "anonymous", "restricted", "revoked" })

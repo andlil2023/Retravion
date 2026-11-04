@@ -223,6 +223,7 @@ public sealed partial class AccountManagementTests
             services.AddSingleton<IAiWorkflowSettingsStore>(settings);
             services.AddSingleton<IRequirementStore>(store);
             services.AddSingleton<IRequirementChangeTransaction>(store);
+            services.AddSingleton<IRequirementLinkStore>(store);
             services.AddSingleton<IAuditSubmission>(audit);
             services.AddSingleton<ILogger<RequirementOperations>>(logger);
         });

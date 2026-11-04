@@ -1,3 +1,5 @@
+using Retravion.Domain.Requirement;
+
 namespace Retravion.Application.AuditTrail;
 
 public sealed record RequirementAuditValues(Guid ProductInternalId, string Id, string Title, string Statement,
@@ -5,4 +7,6 @@ public sealed record RequirementAuditValues(Guid ProductInternalId, string Id, s
 
 public sealed record RequirementAuditDetails(Guid InternalId, RequirementAuditValues? Before, RequirementAuditValues After,
     string? Decision, string? Comment, Guid? VersionId = null, int? VersionNumber = null,
-    Guid? SourceVersionId = null, string? Reason = null);
+    Guid? SourceVersionId = null, string? Reason = null,
+    string? RelationshipType = null, IReadOnlyList<RequirementUserNeedLink>? BeforeLinks = null,
+    IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null);
