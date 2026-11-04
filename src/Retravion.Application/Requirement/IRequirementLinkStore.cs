@@ -9,6 +9,14 @@ public interface IRequirementLinkStore
 {
     Task<Result<IReadOnlyList<RequirementUserNeedLink>>> Links(Guid requirementInternalId, Guid versionId,
         CancellationToken cancellationToken = default);
+    Task<Result<Maybe<RequirementParentLink>>> Parent(Guid requirementInternalId, Guid versionId,
+        CancellationToken cancellationToken = default);
+    Task<Result<RequirementSnapshot>> AddParent(RequirementSnapshot expected, RequirementParentLink target,
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+    Task<Result<RequirementSnapshot>> RemoveParent(RequirementSnapshot expected, AuditActor actor,
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+    Task<Result<RequirementSnapshot>> ReplaceParent(RequirementSnapshot expected, RequirementParentLink target,
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
     Task<Result<RequirementSnapshot>> ChangeLink(RequirementSnapshot expected, RequirementUserNeedLink target, bool add,
         AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
 }

@@ -55,7 +55,12 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.AddLink(principal, expected, target)).IsFailure);
             Assert.True((await operations.RemoveLink(principal, expected, target)).IsFailure);
             Assert.True((await operations.Links(principal, r.InternalId, r.VersionId)).IsFailure);
-            Assert.Equal(failureMode == "throw" ? 0 : 10, audit.Events.Count);
+            var parent = new RequirementParentLink(Guid.NewGuid(), Guid.NewGuid());
+            Assert.True((await operations.AddParent(principal, expected, parent)).IsFailure);
+            Assert.True((await operations.RemoveParent(principal, expected)).IsFailure);
+            Assert.True((await operations.ReplaceParent(principal, expected, parent)).IsFailure);
+            Assert.True((await operations.Parent(principal, r.InternalId, r.VersionId)).IsFailure);
+            Assert.Equal(failureMode == "throw" ? 0 : 13, audit.Events.Count);
             Assert.All(audit.Events, e =>
             {
                 Assert.Equal(AuditActionOutcome.Failure, e.Outcome); Assert.IsType<AuditTarget.Unknown>(e.Target);
@@ -65,7 +70,7 @@ public sealed partial class AccountManagementTests
                 if (principal.Identity?.IsAuthenticated == true) Assert.Equal(new AuditActor.Identified("admin"), e.Actor);
                 else Assert.IsType<AuditActor.Unknown>(e.Actor);
             });
-            Assert.Equal(logsBefore + (failureMode == "success" ? 0 : 10), logger.Messages.Count);
+            Assert.Equal(logsBefore + (failureMode == "success" ? 0 : 13), logger.Messages.Count);
         }
         Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Requirement change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
@@ -164,6 +169,10 @@ public sealed partial class AccountManagementTests
     private sealed class RequirementStoreDouble : IRequirementStore, IRequirementChangeTransaction, IRequirementLinkStore
     {
         public int Calls;
+        public Task<Result<Maybe<RequirementParentLink>>> Parent(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<RequirementSnapshot>> AddParent(RequirementSnapshot expected, RequirementParentLink target, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<RequirementSnapshot>> RemoveParent(RequirementSnapshot expected, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<RequirementSnapshot>> ReplaceParent(RequirementSnapshot expected, RequirementParentLink target, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementUserNeedLink>>> Links(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> ChangeLink(RequirementSnapshot expected, RequirementUserNeedLink target, bool add, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid product, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }

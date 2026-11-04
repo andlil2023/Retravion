@@ -12,7 +12,8 @@ public sealed record RequirementReview(Guid RequirementInternalId, AuditActor Ac
     string Decision, string? Comment, string Id, string Title, string Statement, RequirementType Type, string? Rationale,
     Guid? VersionId = null, int? VersionNumber = null, Guid? SourceVersionId = null,
     string? RelationshipType = null, IReadOnlyList<RequirementUserNeedLink>? BeforeLinks = null,
-    IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null);
+    IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null,
+    string? ParentRelationshipType = null, RequirementParentLink? BeforeParent = null, RequirementParentLink? AfterParent = null);
 
 public interface IRequirementStore
 {
