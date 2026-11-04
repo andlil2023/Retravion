@@ -13,7 +13,7 @@ Approved future behavior from the interview for [PBI #128](https://github.com/an
 
 The initial scope covers User Needs, Requirements, Requirement–User Need links, and parent–child Requirement links. Implementation is split across [#135](https://github.com/andlil2023/Retravion/issues/135), [#136](https://github.com/andlil2023/Retravion/issues/136), [#137](https://github.com/andlil2023/Retravion/issues/137), [#138](https://github.com/andlil2023/Retravion/issues/138), [#139](https://github.com/andlil2023/Retravion/issues/139), and [#140](https://github.com/andlil2023/Retravion/issues/140). Issue creation is not authorization to begin implementation.
 
-Exact-version links require separately addressable versions. [#132](https://github.com/andlil2023/Retravion/issues/132) specifies their identity/lifecycle in REQ-REQ-006 and REQ-NEED-006 in [Requirement Management](Requirements.md) and [User Need Management](User%20Needs.md): each entity has a stable GUID, each version has a distinct immutable GUID and sequential number, and only one Draft or In Review working version may exist. Changing the latest Approved version creates a successor Draft with a required immutable change reason; it does not reopen or alter that Approved version. Earlier versions retain their Approved status and owned links. Implementing this behavior in [#133](https://github.com/andlil2023/Retravion/issues/133) and [#134](https://github.com/andlil2023/Retravion/issues/134) remains a prerequisite for exact-version relationships.
+Exact-version links require separately addressable versions. [#132](https://github.com/andlil2023/Retravion/issues/132) specifies their identity/lifecycle in REQ-REQ-006 and REQ-NEED-006 in [Requirement Management](Requirements.md) and [User Need Management](User%20Needs.md): each entity has a stable GUID, each version has a distinct immutable GUID and sequential number, and only one Draft or In Review working version may exist. The approved scope extension in [#144](https://github.com/andlil2023/Retravion/issues/144) revises #132: the latest Approved version may explicitly reopen with approval permission and a mandatory reason only if no newer version exists and no Released revision references it directly or indirectly. A successor Draft with a required immutable change reason remains available and is mandatory for changes to released versions. Earlier versions retain their Approved status and owned links. REQ-LINK-009 defines the common future release-protection rule. Implementing this behavior in [#133](https://github.com/andlil2023/Retravion/issues/133) and [#134](https://github.com/andlil2023/Retravion/issues/134) remains a prerequisite for exact-version relationships.
 
 ## Requirements
 
@@ -43,7 +43,8 @@ Exact-version links require separately addressable versions. [#132](https://gith
 - These rules apply to central and expanded entities alike, including incoming links owned by connected Draft entities.
 - Existing Product-retirement and stale-write protections apply to relationship mutations. Retired-Product records remain readable, but their links cannot be changed.
 - Replacing a parent is atomic: either the new parent replaces the old one, or the old link remains intact. Removing a parent is allowed and preserves the child's own children and other links.
-- Approval of an owner requires every ordinary target version to be Approved. Draft and In Review targets block approval; absence of optional links does not.
+- Approval of an owner requires every ordinary target version to be Approved. Draft and In Review targets block approval; absence of optional links does not. A target's later eligible reopening does not revoke an already Approved owner's approval, but release is blocked until the whole outgoing reference closure is Approved (REQ-LINK-009).
+- Approved owners must explicitly reopen under their lifecycle rules before editing owned links. Any owner version protected by a Released revision remains immutable; editable Draft incoming references to it are not frozen merely because their target is protected.
 
 ### REQ-LINK-003 — Preserve Exact-Version Traceability
 
@@ -140,9 +141,25 @@ This direction is deferred to [#141](https://github.com/andlil2023/Retravion/iss
 
 Deferred to [#143](https://github.com/andlil2023/Retravion/issues/143). Provenance viewing performs no business-record writes and requires no change event.
 
+## Approved Future Release Protection — PBI #144
+
+### REQ-LINK-009 — Preserve the Released Revision Reference Closure
+
+**Requirement:** A revision shall enter Released state only when every directly or indirectly referenced entity version is Approved, and those exact versions shall thereafter remain immutable.
+
+**Acceptance criteria:**
+- Apply this common rule to User Needs, Requirements, and Test Cases. Resolve direct revision references to exact version identities and recursively follow outgoing references, including owned Requirement–User Need, child–parent Requirement, and Test Case–Requirement links. Check the entire closure, not just the directly listed versions or currently visible graph. Repeated references must terminate traversal without omitting reachable versions.
+- A Draft or In Review anywhere in that closure blocks release, even if all directly listed versions are Approved. Reopening a target does not automatically revoke referencing owners' approvals; reapproval of the target restores release eligibility only when the entire closure is again Approved.
+- Once any Released revision directly or indirectly references a version, preserve its Approved status, content, and owned links permanently. It cannot reopen or edit in place; changes require a successor with its own version identity. Creating or approving successors never changes the released closure or silently retargets its references.
+- Only the latest Approved version with no newer version and no Released-revision reference may reopen to Draft, requiring approval permission and a nonblank reason. Preserve decision evidence, invalidate its current approval, and repeat submission/review. Product retirement, authorization, stale-write, history, and feature-specific audit rules apply. No direct Approved → In Review transition is provided.
+- Protection follows outgoing references only. Releasing a Test Case can protect its Requirements and their User Needs/parents; releasing a Requirement does not by itself protect every Test Case or child that references it. Eligible Draft owners can change incoming references to protected versions without modifying those protected versions.
+- Release validation/protection and concurrent mutations, reopening, or successor creation must be coordinated so no released closure can contain unapproved or subsequently changed versions. Checks must not use stale state or a partial UI graph as evidence of eligibility.
+
+This is approved future behavior, not implemented revision machinery or a complete revision specification. Revision selection, release permissions/transitions, persistence, release-specific audit events/failure handling, and integration with future provenance references require separately approved planning before implementation. Future reference types must honor the release evidence rule; this does not silently exempt indirectly referenced entities. Reopening audit is specified by REQ-REQ-005, REQ-NEED-005, and REQ-TC-006; #144 changes no runtime write paths.
+
 ## Boundaries and Follow-up
 
-- Test Cases do not exist in this increment. The agreed future direction is Test Case-owned links to exact Requirement versions, making User Need → Requirement → Test Case chains explorable. Detailed Test Case fields, cardinality, lifecycle, and integration require [#144](https://github.com/andlil2023/Retravion/issues/144) and separately approved implementation work.
+- Test Cases remain unimplemented. [Test Case Management](Test%20Cases.md) now specifies their fields, cardinality, lifecycle, owned exact Requirement links, and shared-page integration under [#144](https://github.com/andlil2023/Retravion/issues/144). These are separately approved future implementation work, not additions to #128's initial implementation scope.
 - No entity-creation dialogs, Test Case implementation, execution/results, Product hierarchy, shared applicability records, automatic synchronization, or release-baseline behavior is introduced here.
 - No new MCP relationship operation is specified by this document. New public APIs require separate approval.
 - Exact layout, rendering bounds and overflow behavior, target-picker search/pagination, and detailed persistence/provenance representation require implementation planning or the named prerequisite specifications. Version identity and lifecycle are defined by REQ-REQ-006 and REQ-NEED-006. Implementation choices must not silently truncate a view in a way that implies hidden relationships are absent or change these approved behaviors.

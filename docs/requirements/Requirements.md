@@ -8,7 +8,7 @@
 
 ## Implementation Status
 
-These requirements describe approved future behavior, not implemented or verified functionality. [PBI #124](https://github.com/andlil2023/Retravion/issues/124) and the versioning specification in [PBI #132](https://github.com/andlil2023/Retravion/issues/132) are documentation only. Requirement versioning implementation belongs to [#133](https://github.com/andlil2023/Retravion/issues/133) and requires separately approved work. Planned verification is specified in [Requirement Management — Test Specifications](../test-cases/Requirements.md).
+These requirements describe approved future behavior, not implemented or verified functionality. [PBI #124](https://github.com/andlil2023/Retravion/issues/124) and the versioning specification in [PBI #132](https://github.com/andlil2023/Retravion/issues/132) are documentation only. Requirement versioning implementation belongs to [#133](https://github.com/andlil2023/Retravion/issues/133) and requires separately approved work. Planned verification is specified in [Requirement Management — Test Specifications](../test-cases/Requirements.md). The explicitly approved scope extension in [#144](https://github.com/andlil2023/Retravion/issues/144) replaces #132's unconditional Approved-version immutability with eligible reopening and the shared future release-protection rule REQ-LINK-009 in [Relationship Management](Relationships.md); it does not implement revision functionality.
 
 ## Requirements
 
@@ -52,13 +52,14 @@ These requirements describe approved future behavior, not implemented or verifie
 
 **Acceptance criteria:**
 - A working version permits Draft → In Review, In Review → Approved, and In Review → Draft. Submission freezes editing; rejection returns the same version to Draft without changing its version number or losing review history.
-- An Approved version never transitions back to Draft. A separate web operation creates a successor Draft under REQ-REQ-006, leaving the Approved version unchanged.
+- An Approved version may explicitly reopen to Draft only if it is the latest version, no newer version exists, and no Released revision references it directly or indirectly under REQ-LINK-009. Reopening is web-only, requires approval permission and a nonblank reason, retains version GUID/number and earlier history, and invalidates its current approval. No direct Approved → In Review transition is allowed; submission and approval must be repeated.
+- A successor Draft under REQ-REQ-006 remains available instead of reopening and is mandatory for changes to released versions. Any newer version blocks reopening earlier ones.
 - The same user may submit and approve.
 - Review comments are optional plain text.
-- Each transition retains actor, time, decision, optional comment, immutable entity/version identities, version number, and the exact ID, title, statement, type, and rationale at that decision.
+- Each transition retains actor, time, decision, optional comment (mandatory reason for reopening), immutable entity/version identities, version number, and the exact ID, title, statement, type, rationale, and owned links where applicable at that decision.
 - Later edits and transitions do not alter earlier history.
 - Draft edits do not erase history or create new versions.
-- Approval is distinct from release. Approved-version preservation applies independently of future Product revision integration; revision/baseline selection remains outside this increment.
+- Approval is distinct from release. Reopening a linked target does not revoke this Requirement's approval, but release requires every directly or indirectly outgoing referenced version to be Approved (REQ-LINK-009). Product-retirement and stale-write protections apply to reopening; concurrent release or successor creation must not permit an ineligible reopen. Revision/baseline selection remains outside this increment.
 
 ### REQ-REQ-004 — Access Requirements through MCP
 
@@ -83,22 +84,22 @@ These requirements describe approved future behavior, not implemented or verifie
 
 **Acceptance criteria:**
 - Successful entity creation, actual Draft edits, review transitions, and successor Draft creation record actor, time, distinct action, immutable Requirement entity/version identities, version number, success outcome, and initial or old/new values.
-- Values cover responsible Product identity, manual ID, title, statement, type, rationale, and status. Review events also retain the decision and optional comment. Successor creation is a distinct operation: history and audit retain the source and new version identities, required immutable change reason, and initial copied content and owned links. Inherited links are initial creation values, not duplicate per-link success events (REQ-LINK-006).
+- Values cover responsible Product identity, manual ID, title, statement, type, rationale, and status. Review events also retain the decision and optional comment; reopening is a distinct action retaining its mandatory reason, old/new status, exact content/owned links, and invalidated approval without deleting earlier history. Successor creation is a distinct operation: history and audit retain the source and new version identities, required immutable change reason, and initial copied content and owned links. Inherited links are initial creation values, not duplicate per-link success events (REQ-LINK-006).
 - The business change, any review-history entry, and required audit event commit together.
 - Audit-write failure prevents a successful change; success is reported only after confirmed commit.
 - An uncertain commit outcome is reported as uncertain, with advice to retrieve before retrying; no automatic retry occurs.
 - Unauthorized mutation attempts remain denied and submit failure events with actor if known, time, action, and unknown target, without submitted identifiers, values, or comments.
 - Audit-submission failures for denied attempts are safely logged without submitted values, credentials, or provider exception details. Logging does not replace an audit event.
-- Reads, no-op saves, ordinary validation failures, duplicate-ID conflicts, attempts to create a second working version, and stale-write rejections produce no change events. Unauthorized-attempt auditing still applies, including denied successor creation. The same safe logging, transaction atomicity, and uncertain-outcome protections cover the new operation.
+- Reads, no-op saves, ordinary validation failures, duplicate-ID conflicts, attempts to create a second working version, and stale-write rejections produce no change events. Authorized released-version/older-version reopening rejections and missing-reason validation produce no change event or successful history. Unauthorized-attempt auditing still applies, including denied successor creation and reopening. The same safe logging, transaction atomicity, and uncertain-outcome protections cover the new operation.
 
 ### REQ-REQ-006 — Maintain Stable Requirement Versions
 
 **Parent need:** UN-REQ-001
 
-**Requirement:** The system shall maintain a linear sequence of separately addressable Requirement versions while preserving Approved versions.
+**Requirement:** The system shall maintain a linear sequence of separately addressable Requirement versions, allowing eligible latest-version reopening while preserving earlier and released versions.
 
 **Acceptance criteria:**
-- A new Requirement starts as Draft v1. Version numbers increase sequentially to v2, v3, and so on only when creating a successor from the latest Approved version. Draft edits, submission, and rejection retain the same version GUID and number.
+- A new Requirement starts as Draft v1. Version numbers increase sequentially to v2, v3, and so on only when creating a successor from the latest Approved version. Draft edits, submission, rejection, and eligible reopening retain the same version GUID and number.
 - At most one working version, either Draft or In Review, exists per entity. If one exists, users open it rather than create another. Concurrent creation requests must not produce multiple working versions.
 - Only the latest Approved version can be the source of a successor; older versions remain readable but cannot be used to branch the version sequence.
 - Successor creation is web-only and requires the same permission as content editing. Existing Product-retirement, access, and stale-write protections apply.
@@ -113,4 +114,4 @@ The first increment excludes relationships, automatic ID suggestions, Test Cases
 
 The approved [Relationship Management](Relationships.md) specification defines a separate follow-up for the shared graphical relationship page, Requirement–User Need links, and parent–child Requirement links. This versioning specification does not implement relationship storage or interfaces.
 
-Release-baseline selection and baseline-specific protections remain future revision work; stable Approved-version preservation is specified here. Review history remains distinct from the audit trail and release evidence. This specification does not decide field length limits, exact Unicode comparison semantics, text-search matching beyond case-insensitivity, MCP transport or authentication mechanism, or additional roles. Implementation planning must resolve relevant details without weakening the approved behavior.
+Release-baseline selection and implementation remain future revision work; the approved all-Approved outgoing closure and permanent exact-version protection are specified by REQ-LINK-009. Reopening must not bypass that rule when revision integration exists. Manual ID remains fixed after first approval, including after reopening. Review history remains distinct from the audit trail and release evidence. This specification does not decide field length limits, exact Unicode comparison semantics, text-search matching beyond case-insensitivity, MCP transport or authentication mechanism, or additional roles. Implementation planning must resolve relevant details without weakening the approved behavior.
