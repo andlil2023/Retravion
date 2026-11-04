@@ -46,7 +46,18 @@ public sealed class RequirementTests
         Assert.True(approved.SubmitForReview().IsFailure);
         Assert.True(approved.Approve().IsFailure);
         Assert.Equal(original, review.ReturnToDraft().Value);
-        Assert.Equal(original, approved.ReturnToDraft().Value);
+        Assert.True(approved.ReturnToDraft().IsFailure);
+        Assert.True(approved.Reopen(" ").IsFailure);
+        var reopened = approved.Reopen("Correct wording").Value;
+        Assert.Equal(original.VersionId, reopened.VersionId);
+        Assert.Equal(original.VersionNumber, reopened.VersionNumber);
+        Assert.True(reopened.HasBeenApproved);
+        Assert.True(reopened.Edit("Renamed", "Title", "Statement", original.Type, original.Rationale).IsFailure);
+        Assert.Equal(original.Id, reopened.Id);
+        Assert.Equal(original.Title, reopened.Title);
+        Assert.Equal(original.Statement, reopened.Statement);
+        Assert.Equal(original.Type, reopened.Type);
+        Assert.Equal(original.Rationale, reopened.Rationale);
         foreach (var value in new[] { original, review, approved })
         {
             Assert.Equal(original.InternalId, value.InternalId);
@@ -69,6 +80,48 @@ public sealed class RequirementTests
         Assert.True(RequirementState.Restore(Guid.Empty, original.ProductInternalId, "ID", "Title", "Statement", RequirementType.System, null, RequirementStatus.Draft).IsFailure);
         Assert.True(RequirementState.Restore(original.InternalId, original.ProductInternalId, "ID", "Title", "Statement", RequirementType.System, null, (RequirementStatus)99).IsFailure);
         Assert.True(RequirementState.Restore(original.InternalId, original.ProductInternalId, "ID", "Title", "Statement", (RequirementType)99, null, RequirementStatus.Draft).IsFailure);
+    }
+
+    [Fact]
+    public void SuccessorsCopyAllFieldsKeepIdFixedAndOnlyDeliberateCreationIncrementsVersion()
+    {
+        var draft = RequirementState.Create(Guid.NewGuid(), "ID", "Title", "Statement", RequirementType.Safety, "Rationale").Value;
+        Assert.True(draft.CreateSuccessor("Next").IsFailure);
+        var approved = draft.SubmitForReview().Value.Approve().Value;
+        Assert.True(approved.CreateSuccessor(null).IsFailure);
+        Assert.True(approved.CreateSuccessor(" ").IsFailure);
+        var second = approved.CreateSuccessor("Changed behavior").Value;
+        Assert.Equal(approved.InternalId, second.InternalId); Assert.Equal(approved.ProductInternalId, second.ProductInternalId);
+        Assert.Equal(approved.Id, second.Id); Assert.Equal(approved.Title, second.Title); Assert.Equal(approved.Statement, second.Statement);
+        Assert.Equal(approved.Type, second.Type); Assert.Equal(approved.Rationale, second.Rationale);
+        Assert.NotEqual(approved.VersionId, second.VersionId); Assert.Equal(2, second.VersionNumber);
+        Assert.Equal(approved.VersionId, second.SourceVersionId); Assert.Equal("Changed behavior", second.CreationReason);
+        Assert.True(second.Edit("Renamed", "Title", "Statement", second.Type, null).IsFailure);
+        var edited = second.Edit("ID", "Changed", "Changed", RequirementType.Software, null).Value;
+        Assert.Equal(second.VersionId, edited.VersionId); Assert.Equal(second.CreationReason, edited.CreationReason);
+        Assert.Null(edited.Rationale); Assert.Equal(RequirementType.Software, edited.Type);
+        var rejected = edited.SubmitForReview().Value.ReturnToDraft().Value;
+        Assert.Equal(edited, rejected);
+        Assert.Equal(3, rejected.SubmitForReview().Value.Approve().Value.CreateSuccessor("Next").Value.VersionNumber);
+        Assert.All(typeof(RequirementState).GetProperties(), p => Assert.Null(p.SetMethod));
+    }
+
+    [Theory]
+    [InlineData(RequirementStatus.Draft)]
+    [InlineData(RequirementStatus.InReview)]
+    public void RestoringSuccessorsRequiresPriorApprovalReasonAndSource(RequirementStatus status)
+    {
+        var entity = Guid.NewGuid(); var product = Guid.NewGuid(); var version = Guid.NewGuid(); var source = Guid.NewGuid();
+        Assert.True(RequirementState.Restore(entity, product, "ID", "Title", "Statement", RequirementType.System, null,
+            status, version, 2, false, "Next", source).IsFailure);
+        Assert.True(RequirementState.Restore(entity, product, "ID", "Title", "Statement", RequirementType.System, null,
+            status, version, 2, true, " ", source).IsFailure);
+        Assert.True(RequirementState.Restore(entity, product, "ID", "Title", "Statement", RequirementType.System, null,
+            status, version, 2, true, "Next", version).IsFailure);
+        var restored = RequirementState.Restore(entity, product, "ID", "Title", "Statement", RequirementType.System, null,
+            status, version, 2, true, "Next", source).Value;
+        Assert.True(restored.HasBeenApproved);
+        Assert.True(restored.Edit("Changed ID", "Title", "Statement", restored.Type, null).IsFailure);
     }
 
     [Fact]

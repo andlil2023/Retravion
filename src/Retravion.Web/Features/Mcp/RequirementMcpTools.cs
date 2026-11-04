@@ -16,7 +16,7 @@ internal sealed class RequirementMcpTools(RequirementOperations operations, IPro
     private System.Security.Claims.ClaimsPrincipal Principal => http.HttpContext!.User;
 
     [McpServerTool(Name = "list_requirements", ReadOnly = true, OpenWorld = false)]
-    [Description("List Requirements in all statuses for a Product manual ID, including retired Products. Returns immutable identities and concurrency revision tokens, not released versions.")]
+    [Description("List Requirements in all statuses for a Product manual ID, including retired Products. Returns immutable entity/version identities, working/latest-Approved designations and concurrency revision tokens.")]
     public async Task<CallToolResult> List(string productId, CancellationToken cancellationToken)
     {
         var product = await products.Find(productId, cancellationToken);
@@ -27,19 +27,23 @@ internal sealed class RequirementMcpTools(RequirementOperations operations, IPro
     }
 
     [McpServerTool(Name = "read_requirement", ReadOnly = true, OpenWorld = false)]
-    [Description("Read Requirement content, status, revision and exact retained review history using immutable internalId. Retrieve before retrying an uncertain write.")]
-    public async Task<CallToolResult> Read(Guid internalId, CancellationToken cancellationToken)
+    [Description("Read Requirement content, versions and retained decision history by immutable internalId. Optional versionId selects exactly that version, never latest substitution. Otherwise returns working version or latest Approved. Retrieve before retrying uncertain writes.")]
+    public async Task<CallToolResult> Read(Guid internalId, CancellationToken cancellationToken, Guid? versionId = null)
     {
-        var result = await operations.Find(Principal, internalId, cancellationToken);
+        var result = await operations.Find(Principal, internalId, cancellationToken, versionId);
         if (result.IsFailure) return Error(result.Error);
         if (result.Value.HasNoValue) return Error("Requirement not found.");
         var history = await operations.History(Principal, internalId, cancellationToken);
-        return history.IsFailure ? Error(history.Error) : Success(new
+        if (history.IsFailure) return Error(history.Error);
+        var versions = await operations.Versions(Principal, internalId, cancellationToken);
+        return versions.IsFailure ? Error(versions.Error) : Success(new
         {
             requirement = Values(result.Value.Value),
+            versions = versions.Value.Select(Values),
             history = history.Value.Select(h => new { h.Decision, h.OccurredAt,
                 actor = h.Actor is AuditActor.Identified actor ? actor.Identifier : null,
-                h.Comment, h.Id, h.Title, h.Statement, type = h.Type.ToString(), h.Rationale })
+                h.Comment, h.Id, h.Title, h.Statement, type = h.Type.ToString(), h.Rationale,
+                h.VersionId, h.VersionNumber, h.SourceVersionId })
         });
     }
 
@@ -71,7 +75,9 @@ internal sealed class RequirementMcpTools(RequirementOperations operations, IPro
     {
         snapshot.Requirement.InternalId, snapshot.Requirement.ProductInternalId, snapshot.Requirement.Id, snapshot.Requirement.Title,
         snapshot.Requirement.Statement, type = snapshot.Requirement.Type.ToString(), snapshot.Requirement.Rationale,
-        status = snapshot.Requirement.Status.ToString(), snapshot.Revision
+        status = snapshot.Requirement.Status.ToString(), snapshot.Revision,
+        snapshot.Requirement.VersionId, snapshot.Requirement.VersionNumber, snapshot.Requirement.CreationReason,
+        snapshot.Requirement.SourceVersionId, snapshot.LatestApprovedVersionNumber
     };
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static CallToolResult Success(object value) => new() { Content = [new TextContentBlock { Text = JsonSerializer.Serialize(value, Json) }] };

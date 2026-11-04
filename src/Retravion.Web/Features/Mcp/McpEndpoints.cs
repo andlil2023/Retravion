@@ -20,7 +20,7 @@ internal static class McpEndpoints
         ["create_draft_user_need"] = ["productId", "id", "title", "statement"],
         ["edit_draft_user_need"] = ["internalId", "expectedRevision", "id", "title", "statement"],
         ["list_requirements"] = ["productId"],
-        ["read_requirement"] = ["internalId"],
+        ["read_requirement"] = ["internalId", "versionId"],
         ["create_draft_requirement"] = ["productId", "id", "title", "statement", "type", "rationale"],
         ["edit_draft_requirement"] = ["internalId", "expectedRevision", "id", "title", "statement", "type", "rationale"]
     };

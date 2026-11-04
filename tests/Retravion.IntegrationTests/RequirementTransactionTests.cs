@@ -31,6 +31,8 @@ public sealed partial class PostgresProductTests
         Assert.True(listed.IsSuccess); Assert.Empty(listed.Value);
         var history = await store.History(identity);
         Assert.True(history.IsSuccess); Assert.Empty(history.Value);
+        Assert.True((await store.Find(identity, versionId: Guid.NewGuid())).Value.HasNoValue);
+        Assert.Empty((await store.Versions(identity)).Value);
         var r = RequirementState.Create(Guid.NewGuid(), "ID", "Title", "Statement", RequirementType.System).Value;
         var created = await store.Create(r, RequirementActor, RequirementTime);
         Assert.True(created.IsFailure); Assert.Contains("Product", created.Error);
@@ -58,10 +60,10 @@ public sealed partial class PostgresProductTests
         Assert.True((await store.Update(first, original, RequirementActor, RequirementTime)).IsFailure);
         Assert.True((await store.Update(first, original.SubmitForReview().Value, RequirementActor, RequirementTime, "InReview")).IsFailure);
         var states = new List<RequirementSnapshot> { edited };
-        foreach (var decision in new[] { "InReview", "Draft", "InReview", "Approved", "Draft" })
+        foreach (var decision in new[] { "InReview", "Draft", "InReview", "Approved", "Reopened" })
         {
             var current = states[^1];
-            var next = decision switch { "InReview" => current.Requirement.SubmitForReview().Value, "Approved" => current.Requirement.Approve().Value, _ => current.Requirement.ReturnToDraft().Value };
+            var next = decision switch { "InReview" => current.Requirement.SubmitForReview().Value, "Approved" => current.Requirement.Approve().Value, "Reopened" => current.Requirement.Reopen("comment").Value, _ => current.Requirement.ReturnToDraft().Value };
             states.Add((await store.Update(current, next, RequirementActor, RequirementTime, decision, decision == "Approved" ? null : "comment")).Value);
         }
         var history = (await store.History(original.InternalId)).Value;
@@ -76,14 +78,16 @@ public sealed partial class PostgresProductTests
         var events = (await new PostgresAuditQuery(database.ConnectionString).FindAsync(new())).Where(e => e.RequirementChange?.InternalId == original.InternalId).ToArray();
         Assert.Equal(7, events.Length);
         Assert.All(events, e => { Assert.Equal(RequirementActor, e.Actor); Assert.Equal(RequirementTime, e.OccurredAt); Assert.Equal(AuditActionOutcome.Success, e.Outcome); Assert.Equal(new AuditTarget.Identified(original.InternalId.ToString()), e.Target); });
-        Assert.Equal(new RequirementAuditDetails(original.InternalId, null, RequirementValues(original), null, null), events.Single(e => e.Action == "requirement.create").RequirementChange);
-        Assert.Equal(new RequirementAuditDetails(original.InternalId, RequirementValues(original), RequirementValues(edited.Requirement), null, null), events.Single(e => e.Action == "requirement.edit").RequirementChange);
+        Assert.Equal(new RequirementAuditDetails(original.InternalId, null, RequirementValues(original), null, null, original.VersionId, 1), events.Single(e => e.Action == "requirement.create").RequirementChange);
+        Assert.Equal(new RequirementAuditDetails(original.InternalId, RequirementValues(original), RequirementValues(edited.Requirement), null, null, original.VersionId, 1), events.Single(e => e.Action == "requirement.edit").RequirementChange);
         for (var i = 1; i < states.Count; i++)
         {
             var after = states[i].Requirement;
-            Assert.Contains(events, e => e.RequirementChange == new RequirementAuditDetails(original.InternalId, RequirementValues(states[i - 1].Requirement), RequirementValues(after), after.Status.ToString(), after.Status == RequirementStatus.Approved ? null : "comment"));
+            Assert.Contains(events, e => e.RequirementChange == new RequirementAuditDetails(original.InternalId, RequirementValues(states[i - 1].Requirement), RequirementValues(after), states[i - 1].Requirement.Status == RequirementStatus.Approved ? "Reopened" : after.Status.ToString(),
+                after.Status == RequirementStatus.Approved ? null : "comment", original.VersionId, 1, null,
+                states[i - 1].Requirement.Status == RequirementStatus.Approved ? "comment" : null));
         }
-        var later = (await store.Update(states[^1], states[^1].Requirement.Edit("Later", "Later title", "Later statement", RequirementType.Regulatory, "Later rationale").Value, RequirementActor, RequirementTime)).Value;
+        var later = (await store.Update(states[^1], states[^1].Requirement.Edit("REQ-2", "Later title", "Later statement", RequirementType.Regulatory, "Later rationale").Value, RequirementActor, RequirementTime)).Value;
         Assert.Equal(history, (await store.History(original.InternalId)).Value);
         Assert.Equal(later, (await new PostgresRequirementStore(database.ConnectionString).Find(original.InternalId)).Value.Value);
         Assert.Single((await store.List(product.InternalId)).Value);
@@ -105,11 +109,11 @@ public sealed partial class PostgresProductTests
         {
             var r = snapshot.Requirement;
             if (r.Status == RequirementStatus.Draft) Assert.True((await store.Update(snapshot, r.Edit(r.Id, "Denied", r.Statement, r.Type, r.Rationale).Value, RequirementActor, RequirementTime)).IsFailure);
-            var decisions = r.Status switch { RequirementStatus.Draft => new[] { "InReview" }, RequirementStatus.InReview => new[] { "Approved", "Draft" }, _ => new[] { "Draft" } };
+            var decisions = r.Status switch { RequirementStatus.Draft => new[] { "InReview" }, RequirementStatus.InReview => new[] { "Approved", "Draft" }, _ => new[] { "Reopened" } };
             foreach (var decision in decisions)
             {
-                var next = decision switch { "InReview" => r.SubmitForReview().Value, "Approved" => r.Approve().Value, _ => r.ReturnToDraft().Value };
-                Assert.True((await store.Update(snapshot, next, RequirementActor, RequirementTime, decision)).IsFailure);
+                var next = decision switch { "InReview" => r.SubmitForReview().Value, "Approved" => r.Approve().Value, "Reopened" => r.Reopen("Retired").Value, _ => r.ReturnToDraft().Value };
+                Assert.True((await store.Update(snapshot, next, RequirementActor, RequirementTime, decision, decision == "Reopened" ? "Retired" : null)).IsFailure);
             }
             Assert.True((await store.Find(r.InternalId)).Value.HasValue);
         }
@@ -170,10 +174,10 @@ public sealed partial class PostgresProductTests
             foreach (var s in snapshots)
             {
                 var history = (await store.History(s.Requirement.InternalId)).Value;
-                foreach (var decision in s.Requirement.Status switch { RequirementStatus.Draft => new[] { "InReview" }, RequirementStatus.InReview => new[] { "Approved", "Draft" }, _ => new[] { "Draft" } })
+                foreach (var decision in s.Requirement.Status switch { RequirementStatus.Draft => new[] { "InReview" }, RequirementStatus.InReview => new[] { "Approved", "Draft" }, _ => new[] { "Reopened" } })
                 {
                     var r = s.Requirement;
-                    var next = decision switch { "InReview" => r.SubmitForReview().Value, "Approved" => r.Approve().Value, _ => r.ReturnToDraft().Value };
+                    var next = decision switch { "InReview" => r.SubmitForReview().Value, "Approved" => r.Approve().Value, "Reopened" => r.Reopen("Comment").Value, _ => r.ReturnToDraft().Value };
                     Assert.True((await store.Update(s, next, RequirementActor, RequirementTime, decision, "Comment")).IsFailure);
                     Assert.Equal(s, (await store.Find(r.InternalId)).Value.Value);
                     Assert.Equal(history, (await store.History(r.InternalId)).Value);
@@ -194,15 +198,15 @@ public sealed partial class PostgresProductTests
             var source = path == "Approved" || path == "DraftFromReview" ? snapshots[1] : path == "DraftFromApproved" ? snapshots[2] : snapshots[0];
             source = (await store.Find(source.Requirement.InternalId)).Value.Value;
             // Restore the source state after each committed scenario below.
-            var decision = path switch { "InReview" => "InReview", "Approved" => "Approved", "DraftFromReview" or "DraftFromApproved" => "Draft", _ => null };
+            var decision = path switch { "InReview" => "InReview", "Approved" => "Approved", "DraftFromReview" => "Draft", "DraftFromApproved" => "Reopened", _ => null };
             var r = source.Requirement;
             var next = path switch { "InReview" => r.SubmitForReview().Value, "Approved" => r.Approve().Value,
-                "DraftFromReview" or "DraftFromApproved" => r.ReturnToDraft().Value,
+                "DraftFromReview" => r.ReturnToDraft().Value, "DraftFromApproved" => r.Reopen("Correction").Value,
                 _ => r.Edit(r.Id, "Changed", r.Statement, RequirementType.Hardware, null).Value };
             var historyBefore = (await store.History(r.InternalId)).Value.Count;
             var created = RequirementState.Create(product.InternalId, "uncertain-" + commits, "Title", "Statement", RequirementType.System).Value;
             var result = path == "create" ? await uncertain.Create(created, RequirementActor, RequirementTime)
-                : await uncertain.Update(source, next, RequirementActor, RequirementTime, decision);
+                : await uncertain.Update(source, next, RequirementActor, RequirementTime, decision, decision == "Reopened" ? "Correction" : null);
             Assert.True(result.IsFailure); Assert.Contains("could not be confirmed", result.Error); Assert.Contains("Retrieve", result.Error); Assert.DoesNotContain("private", result.Error); Assert.Equal(1, attempts);
             Assert.Equal(beforeCount + (commits ? 1 : 0), (await new PostgresAuditQuery(database.ConnectionString).FindAsync(new())).Count);
             if (path == "create") Assert.Equal(commits, (await store.Find(created.InternalId)).Value.HasValue);

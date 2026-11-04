@@ -5,22 +5,26 @@ using RequirementState = Retravion.Domain.Requirement.Requirement;
 
 namespace Retravion.Application.Requirement;
 
-/// <summary>A stored snapshot and optimistic concurrency token, not a released content version.</summary>
-public sealed record RequirementSnapshot(RequirementState Requirement, long Revision);
+/// <summary>An exact content version and entity-wide optimistic concurrency token.</summary>
+public sealed record RequirementSnapshot(RequirementState Requirement, long Revision, int? LatestApprovedVersionNumber = null);
 
 public sealed record RequirementReview(Guid RequirementInternalId, AuditActor Actor, DateTimeOffset OccurredAt,
-    string Decision, string? Comment, string Id, string Title, string Statement, RequirementType Type, string? Rationale);
+    string Decision, string? Comment, string Id, string Title, string Statement, RequirementType Type, string? Rationale,
+    Guid? VersionId = null, int? VersionNumber = null, Guid? SourceVersionId = null);
 
 public interface IRequirementStore
 {
     Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid productInternalId, CancellationToken cancellationToken = default);
-    Task<Result<Maybe<RequirementSnapshot>>> Find(Guid internalId, CancellationToken cancellationToken = default);
+    Task<Result<Maybe<RequirementSnapshot>>> Find(Guid internalId, CancellationToken cancellationToken = default, Guid? versionId = null);
+    Task<Result<IReadOnlyList<RequirementSnapshot>>> Versions(Guid internalId, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyList<RequirementReview>>> History(Guid internalId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Owns atomic Product eligibility, concurrency, change, history and audit writes.</summary>
 public interface IRequirementChangeTransaction
 {
+    Task<Result<RequirementSnapshot>> CreateSuccessor(RequirementSnapshot expected, string? reason, AuditActor actor,
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
     Task<Result<RequirementSnapshot>> Create(RequirementState requirement, AuditActor actor, DateTimeOffset occurredAt,
         CancellationToken cancellationToken = default);
     Task<Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor,

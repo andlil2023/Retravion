@@ -12,7 +12,7 @@
 {
     <DescriptionEditor InitialDescription="@_statement" Busy="_busy" OnSave="Save" FormId="requirement-form" SubmitText="Save" CancelHref="@BackPath" Label="Statement">
         <ChildContent>
-            <MudTextField @bind-Value="_id" Label="Requirement ID" HelperText="Product-unique ID, at most 100 Unicode characters. Surrounding whitespace is removed." Required="true" Immediate="true" Disabled="_busy" />
+            <MudTextField @bind-Value="_id" Label="Requirement ID" HelperText="Product-unique ID, at most 100 Unicode characters. Fixed after first approval." Required="true" Immediate="true" Disabled="@(_busy || _existing?.Requirement.HasBeenApproved == true)" />
             <MudTextField @bind-Value="_title" Label="Title" Required="true" Immediate="true" Disabled="_busy" />
             <MudSelect T="RequirementType?" @bind-Value="_type" Label="Type" Required="true" Disabled="_busy">
                 @foreach (var type in Enum.GetValues<RequirementType>()) { <MudSelectItem T="RequirementType?" Value="@((RequirementType?)type)">@type</MudSelectItem> }
