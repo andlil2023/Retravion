@@ -46,7 +46,11 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.List(principal, need.ProductInternalId)).IsFailure);
             Assert.True((await operations.Find(principal, need.InternalId)).IsFailure);
             Assert.True((await operations.History(principal, need.InternalId)).IsFailure);
-            Assert.Equal(6, recorder.Events.Count);
+            Assert.True((await operations.Versions(principal, need.InternalId)).IsFailure);
+            Assert.True((await operations.Find(principal, need.InternalId, versionId: need.VersionId)).IsFailure);
+            Assert.True((await operations.CreateSuccessor(principal, expected, "secret-reason")).IsFailure);
+            Assert.True((await operations.Reopen(principal, expected, "secret-reason")).IsFailure);
+            Assert.Equal(8, recorder.Events.Count);
             Assert.All(recorder.Events, e =>
             {
                 Assert.Equal(AuditActionOutcome.Failure, e.Outcome);
@@ -61,8 +65,10 @@ public sealed partial class AccountManagementTests
         {
             recorder.Fail = true; recorder.Throw = throwing;
             Assert.True((await operations.Create(revoked, need.ProductInternalId, "secret-id", "secret-title", "secret-statement")).IsFailure);
+            Assert.True((await operations.CreateSuccessor(revoked, expected, "secret-reason")).IsFailure);
+            Assert.True((await operations.Reopen(revoked, expected, "secret-reason")).IsFailure);
         }
-        Assert.Equal(2, logger.Messages.Count);
+        Assert.Equal(6, logger.Messages.Count);
         Assert.All(logger.Messages, message => Assert.Equal("Unauthorized User Need change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
     }
@@ -130,8 +136,10 @@ public sealed partial class AccountManagementTests
     {
         public Task<Result<IReadOnlyList<UserNeedSnapshot>>> List(Guid product, CancellationToken token = default) =>
             Task.FromResult(Result.Success<IReadOnlyList<UserNeedSnapshot>>(product == need.Need.ProductInternalId ? [need] : []));
-        public Task<Result<Maybe<UserNeedSnapshot>>> Find(Guid id, CancellationToken token = default) =>
-            Task.FromResult(Result.Success(id == need.Need.InternalId ? Maybe<UserNeedSnapshot>.From(need) : Maybe<UserNeedSnapshot>.None));
+        public Task<Result<Maybe<UserNeedSnapshot>>> Find(Guid id, CancellationToken token = default, Guid? versionId = null) =>
+            Task.FromResult(Result.Success(id == need.Need.InternalId && (versionId is null || versionId == need.Need.VersionId) ? Maybe<UserNeedSnapshot>.From(need) : Maybe<UserNeedSnapshot>.None));
+        public Task<Result<IReadOnlyList<UserNeedSnapshot>>> Versions(Guid id, CancellationToken token = default) =>
+            Task.FromResult(Result.Success<IReadOnlyList<UserNeedSnapshot>>(id == need.Need.InternalId ? [need] : []));
         public Task<Result<IReadOnlyList<UserNeedReview>>> History(Guid id, CancellationToken token = default) =>
             Task.FromResult(Result.Success<IReadOnlyList<UserNeedReview>>([new(id, new AuditActor.Identified("author"), DateTimeOffset.UnixEpoch, "Draft", "comment", "Historical title", "Historical statement")]));
     }
@@ -165,7 +173,9 @@ public sealed partial class AccountManagementTests
     {
         public int Calls;
         public Task<Result<IReadOnlyList<UserNeedSnapshot>>> List(Guid productInternalId, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<Maybe<UserNeedSnapshot>>> Find(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<Maybe<UserNeedSnapshot>>> Find(Guid id, CancellationToken token = default, Guid? versionId = null) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<IReadOnlyList<UserNeedSnapshot>>> Versions(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<UserNeedSnapshot>> CreateSuccessor(UserNeedSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<UserNeedReview>>> History(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<UserNeedSnapshot>> Create(Need need, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<UserNeedSnapshot>> Update(UserNeedSnapshot expected, Need replacement, AuditActor actor, DateTimeOffset time, string? decision = null, string? comment = null, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }

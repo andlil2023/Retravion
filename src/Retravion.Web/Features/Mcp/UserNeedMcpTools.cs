@@ -26,18 +26,21 @@ internal sealed class UserNeedMcpTools(UserNeedOperations operations, IProductSt
     }
 
     [McpServerTool(Name = "read_user_need", ReadOnly = true, OpenWorld = false)]
-    [Description("Read full User Need content, status, revision and retained review history using its immutable internalId. Retrieve before retrying any uncertain write.")]
-    public async Task<CallToolResult> Read(Guid internalId, CancellationToken cancellationToken)
+    [Description("Read User Need content, versions and decision history by immutable internalId. Optional versionId selects exactly that version, never latest substitution. Otherwise returns working version or latest Approved. Retrieve before retrying uncertain writes.")]
+    public async Task<CallToolResult> Read(Guid internalId, CancellationToken cancellationToken, Guid? versionId = null)
     {
-        var result = await operations.Find(Principal, internalId, cancellationToken);
+        var result = await operations.Find(Principal, internalId, cancellationToken, versionId);
         if (result.IsFailure) return Error(result.Error);
         if (result.Value.HasNoValue) return Error("User Need not found.");
         var history = await operations.History(Principal, internalId, cancellationToken);
-        return history.IsFailure ? Error(history.Error) : Success(new
+        if (history.IsFailure) return Error(history.Error);
+        var versions = await operations.Versions(Principal, internalId, cancellationToken);
+        return versions.IsFailure ? Error(versions.Error) : Success(new
         {
             need = Values(result.Value.Value),
+            versions = versions.Value.Select(Values),
             history = history.Value.Select(h => new { h.Decision, h.OccurredAt, actor = h.Actor is AuditActor.Identified actor ? actor.Identifier : null,
-                h.Comment, h.Title, h.Statement })
+                h.Comment, h.Title, h.Statement, h.VersionId, h.VersionNumber, h.ManualId, h.SourceVersionId })
         });
     }
 
@@ -64,7 +67,9 @@ internal sealed class UserNeedMcpTools(UserNeedOperations operations, IProductSt
     private static object Values(UserNeedSnapshot snapshot) => new
     {
         snapshot.Need.InternalId, snapshot.Need.ProductInternalId, snapshot.Need.Id, snapshot.Need.Title,
-        snapshot.Need.Statement, status = snapshot.Need.Status.ToString(), snapshot.Revision
+        snapshot.Need.Statement, status = snapshot.Need.Status.ToString(), snapshot.Revision,
+        snapshot.Need.VersionId, snapshot.Need.VersionNumber, snapshot.Need.CreationReason, snapshot.Need.SourceVersionId,
+        snapshot.LatestApprovedVersionNumber
     };
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static CallToolResult Success(object value) => new() { Content = [new TextContentBlock { Text = JsonSerializer.Serialize(value, Json) }] };

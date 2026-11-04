@@ -12,7 +12,7 @@
 {
     <DescriptionEditor InitialDescription="@_statement" Busy="_busy" OnSave="Save" FormId="user-need-form" SubmitText="Save" CancelHref="@BackPath" Label="Statement">
         <ChildContent>
-            <MudTextField @bind-Value="_id" Label="User Need ID" Required="true" Immediate="true" />
+            <MudTextField @bind-Value="_id" Label="User Need ID" Required="true" Immediate="true" Disabled="@(_existing?.Need.HasBeenApproved == true)" />
             <MudTextField @bind-Value="_title" Label="Title" Required="true" Immediate="true" />
         </ChildContent>
     </DescriptionEditor>

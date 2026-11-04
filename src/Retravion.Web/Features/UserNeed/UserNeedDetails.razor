@@ -12,7 +12,13 @@
     <MudPaper Class="pa-4" Elevation="0">
         <h2>@_need.Need.Id – @_need.Need.Title</h2>
         <p>Product: @_product.Id – @_product.Name</p>
-        <p>Status: @_need.Need.Status @(!_product.IsActive ? "(Product retired)" : "")</p>
+        <p>@($"v{_need.Need.VersionNumber}") · Status: @_need.Need.Status @(!_product.IsActive ? "(Product retired)" : "")</p>
+        @if (_need.Need.CreationReason is { } reason) { <p>Successor creation reason: @reason</p> }
+        <nav aria-label="User Need versions">
+            @foreach (var version in _versions ?? [])
+            { <MudLink Href="@($"/user-needs/details?id={Id}&version={version.Need.VersionId}")">@($"v{version.Need.VersionNumber}") · @version.Need.Status</MudLink><span> </span> }
+        </nav>
+        @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
         <h3>Statement</h3><ProductMarkdownView Markdown="@_need.Need.Statement" />
         <h3>Review history</h3>
         @if (_history is null) { <p role="status">Loading review history…</p> }
@@ -22,13 +28,14 @@
             @foreach (var item in _history)
             {
                 <details><summary>@item.Decision — @item.OccurredAt.ToString("u") — @((item.Actor as Retravion.Application.AuditTrail.AuditActor.Identified)?.Identifier)</summary>
-                    <p>Title: @item.Title</p><p>Comment: @(item.Comment ?? "None")</p>
+                    <p>@(item.VersionNumber is { } number ? $"v{number} · {item.ManualId}" : "Legacy decision — version attribution was not recorded")</p>
+                    <p>Title: @item.Title</p><p>Comment / reason: @(item.Comment ?? "None")</p>
                     <h4>Statement at decision</h4><ProductMarkdownView Markdown="@item.Statement" />
                 </details>
             }
         }
     </MudPaper>
-    @if (_product.IsActive)
+    @if (_product.IsActive && IsLatest)
     {
         <div class="mt-4">
             @if (_need.Need.Status == UserNeedStatus.Draft)
@@ -37,39 +44,70 @@
                 <MudTextField @bind-Value="_comment" Label="Review comment (optional)" />
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("InReview"))'>Submit for review</MudButton>
             }
-            else
+            else if (_need.Need.Status == UserNeedStatus.InReview)
             {
                 <MudTextField @bind-Value="_comment" Label="Review comment (optional)" />
-                @if (_need.Need.Status == UserNeedStatus.InReview)
-                { <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton> }
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton>
                 <MudButton Disabled="_busy" OnClick='@(() => Review("Draft"))'>Return to Draft</MudButton>
+            }
+            else
+            {
+                <MudTextField @bind-Value="_reason" Label="Change or reopening reason" Required="true" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="CreateSuccessor">Create successor Draft</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Reopen">Reopen to Draft</MudButton>
             }
         </div>
     }
 }
 @code {
     [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "version")] public Guid? VersionId { get; set; }
+    private IReadOnlyList<UserNeedSnapshot>? _versions;
+    private bool IsLatest => _versions?.LastOrDefault()?.Need.VersionId == _need?.Need.VersionId;
     private UserNeedSnapshot? _need;
     private Retravion.Domain.Product.Product? _product;
     private IReadOnlyList<UserNeedReview>? _history;
-    private string? _error, _comment;
+    private string? _error, _comment, _reason;
     private bool _busy;
     private string BackPath => _product is null ? "/products" : $"/user-needs?product={Uri.EscapeDataString(_product.Id)}";
     protected override async Task OnParametersSetAsync() => await Load();
     private async Task Load()
     {
-        _need = null; _product = null; _history = null; _error = null;
+        _need = null; _product = null; _history = null; _versions = null; _error = null;
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
-        var result = await Operations.Find(actor, Id);
+        var result = await Operations.Find(actor, Id, versionId: VersionId);
         if (result.IsFailure) { _error = result.Error; return; }
         if (result.Value.HasNoValue) { _error = "User Need not found."; return; }
         _need = result.Value.Value;
+        var versions = await Operations.Versions(actor, Id);
+        if (versions.IsFailure) { _error = versions.Error; return; }
+        _versions = versions.Value;
         var products = await Products.List(actor);
         if (products.IsFailure) { _error = products.Error; return; }
         _product = products.Value.SingleOrDefault(p => p.InternalId == _need.Need.ProductInternalId);
         if (_product is null) { _error = "Product not found."; return; }
         var history = await Operations.History(actor, Id);
         if (history.IsFailure) _error = history.Error; else _history = history.Value;
+    }
+    private Task Reopen() => ChangeVersion(false);
+    private Task CreateSuccessor() => ChangeVersion(true);
+    private async Task ChangeVersion(bool successor)
+    {
+        if (_busy || _need is null) return;
+        _busy = true; _error = null;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var result = successor ? await Operations.CreateSuccessor(actor, _need, _reason) : await Operations.Reopen(actor, _need, _reason);
+            if (result.IsFailure) _error = result.Error;
+            else
+            {
+                _reason = null; VersionId = result.Value.Need.VersionId;
+                Navigation.NavigateTo($"/user-needs/details?id={Id}&version={VersionId}");
+                await Load();
+            }
+        }
+        finally { _busy = false; }
     }
     private async Task Review(string decision)
     {

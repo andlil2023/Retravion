@@ -81,6 +81,18 @@ internal sealed class UserNeedOperations(IAuthorizationService authorization, Se
                 : Result.Failure<UserNeedSnapshot>(need.Error);
         }, cancellationToken);
 
+    public Task<Result<UserNeedSnapshot>> CreateSuccessor(ClaimsPrincipal principal, UserNeedSnapshot expected, string? reason,
+        CancellationToken cancellationToken = default) => Change(principal, "need.version.create", (actor, now) =>
+            changes.CreateSuccessor(expected, reason, actor, now, cancellationToken), cancellationToken);
+
+    public Task<Result<UserNeedSnapshot>> Reopen(ClaimsPrincipal principal, UserNeedSnapshot expected, string? reason,
+        CancellationToken cancellationToken = default) => Change(principal, "need.reopen", (actor, now) =>
+    {
+        var need = expected.Need.Reopen(reason);
+        return need.IsSuccess ? changes.Update(expected, need.Value, actor, now, "Reopened", reason, cancellationToken)
+            : Task.FromResult(Result.Failure<UserNeedSnapshot>(need.Error));
+    }, cancellationToken);
+
     public Task<Result<UserNeedSnapshot>> Review(ClaimsPrincipal principal, UserNeedSnapshot expected, string decision, string? comment,
         CancellationToken cancellationToken = default) => Change(principal, decision switch
         {
@@ -101,8 +113,10 @@ internal sealed class UserNeedOperations(IAuthorizationService authorization, Se
 
     public async Task<Result<IReadOnlyList<UserNeedSnapshot>>> List(ClaimsPrincipal principal, Guid product, CancellationToken token = default) =>
         await Allowed(principal) ? await store.List(product, token) : Result.Failure<IReadOnlyList<UserNeedSnapshot>>("Access denied.");
-    public async Task<Result<Maybe<UserNeedSnapshot>>> Find(ClaimsPrincipal principal, Guid id, CancellationToken token = default) =>
-        await Allowed(principal) ? await store.Find(id, token) : Result.Failure<Maybe<UserNeedSnapshot>>("Access denied.");
+    public async Task<Result<Maybe<UserNeedSnapshot>>> Find(ClaimsPrincipal principal, Guid id, CancellationToken token = default, Guid? versionId = null) =>
+        await Allowed(principal) ? await store.Find(id, token, versionId) : Result.Failure<Maybe<UserNeedSnapshot>>("Access denied.");
+    public async Task<Result<IReadOnlyList<UserNeedSnapshot>>> Versions(ClaimsPrincipal principal, Guid id, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.Versions(id, token) : Result.Failure<IReadOnlyList<UserNeedSnapshot>>("Access denied.");
     public async Task<Result<IReadOnlyList<UserNeedReview>>> History(ClaimsPrincipal principal, Guid id, CancellationToken token = default) =>
         await Allowed(principal) ? await store.History(id, token) : Result.Failure<IReadOnlyList<UserNeedReview>>("Access denied.");
 }
