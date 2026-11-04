@@ -123,6 +123,9 @@ builder.Services.AddSingleton<IRequirementStore>(_ => new PostgresRequirementSto
 builder.Services.AddSingleton<IRequirementChangeTransaction>(_ => new PostgresRequirementStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<IRequirementLinkStore>(_ => new PostgresRequirementStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddScoped<RequirementOperations>();
 builder.Services.AddSingleton<AccountCreation>();
 builder.Services.AddScoped<UserOperations>();

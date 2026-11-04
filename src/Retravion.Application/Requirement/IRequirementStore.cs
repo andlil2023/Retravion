@@ -10,7 +10,9 @@ public sealed record RequirementSnapshot(RequirementState Requirement, long Revi
 
 public sealed record RequirementReview(Guid RequirementInternalId, AuditActor Actor, DateTimeOffset OccurredAt,
     string Decision, string? Comment, string Id, string Title, string Statement, RequirementType Type, string? Rationale,
-    Guid? VersionId = null, int? VersionNumber = null, Guid? SourceVersionId = null);
+    Guid? VersionId = null, int? VersionNumber = null, Guid? SourceVersionId = null,
+    string? RelationshipType = null, IReadOnlyList<RequirementUserNeedLink>? BeforeLinks = null,
+    IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null);
 
 public interface IRequirementStore
 {
