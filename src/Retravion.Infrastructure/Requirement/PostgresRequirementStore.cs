@@ -78,6 +78,14 @@ public sealed partial class PostgresRequirementStore(string connectionString,
         );
         ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS before_links jsonb;
         ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS after_links jsonb;
+        CREATE TABLE IF NOT EXISTS retravion_requirement.parent_link (
+            owner_version_id uuid PRIMARY KEY REFERENCES retravion_requirement.requirement_version(version_id),
+            target_internal_id uuid NOT NULL REFERENCES retravion_requirement.requirement(internal_id),
+            target_version_id uuid NOT NULL REFERENCES retravion_requirement.requirement_version(version_id)
+        );
+        ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS parent_relationship_type text;
+        ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS before_parent jsonb;
+        ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS after_parent jsonb;
         """;
 
     private const string Columns = "r.internal_id,r.product_internal_id,r.id,r.title,r.statement,r.type,r.rationale,r.status,r.revision,r.version_id,r.version_number,r.ever_approved,r.creation_reason,r.source_version_id,(SELECT max(v.version_number) FROM retravion_requirement.requirement_version v WHERE v.internal_id=r.internal_id AND v.status=2)";
@@ -121,7 +129,7 @@ public sealed partial class PostgresRequirementStore(string connectionString,
     public Task<Result<IReadOnlyList<RequirementReview>>> History(Guid internalId, CancellationToken cancellationToken = default) =>
         Execute(async (connection, transaction) =>
         {
-            await using var command = new NpgsqlCommand("SELECT actor_identifier,occurred_at_utc_ticks,decision,comment,manual_id,title,statement,type,rationale,version_id,version_number,source_version_id,before_links,after_links FROM retravion_requirement.review WHERE requirement_internal_id=$1 ORDER BY id", connection, transaction);
+            await using var command = new NpgsqlCommand("SELECT actor_identifier,occurred_at_utc_ticks,decision,comment,manual_id,title,statement,type,rationale,version_id,version_number,source_version_id,before_links,after_links,parent_relationship_type,before_parent,after_parent FROM retravion_requirement.review WHERE requirement_internal_id=$1 ORDER BY id", connection, transaction);
             command.Parameters.AddWithValue(internalId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             var rows = new List<RequirementReview>();
@@ -132,7 +140,8 @@ public sealed partial class PostgresRequirementStore(string connectionString,
                 rows.Add(new(internalId, new AuditActor.Identified(reader.GetString(0)), new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero),
                     reader.GetString(2), Text(reader, 3), reader.GetString(4), reader.GetString(5), reader.GetString(6), type, Text(reader, 8),
                     reader.IsDBNull(9) ? null : reader.GetGuid(9), reader.IsDBNull(10) ? null : reader.GetInt32(10), reader.IsDBNull(11) ? null : reader.GetGuid(11),
-                    reader.IsDBNull(13) ? null : "Requirement–User Need", ReadLinks(reader, 12), ReadLinks(reader, 13)));
+                    reader.IsDBNull(13) ? null : "Requirement–User Need", ReadLinks(reader, 12), ReadLinks(reader, 13),
+                    Text(reader, 14), ReadParent(reader, 15), ReadParent(reader, 16)));
             }
             return Result.Success<IReadOnlyList<RequirementReview>>(rows);
         }, cancellationToken, Result.Success<IReadOnlyList<RequirementReview>>([]));
@@ -193,6 +202,8 @@ public sealed partial class PostgresRequirementStore(string connectionString,
             {
                 var approval = await ValidateTargets(connection, transaction, before.VersionId, token);
                 if (approval.IsFailure) return Result.Failure<RequirementSnapshot>(approval.Error);
+                var parentApproval = await ValidateParent(connection, transaction, before.VersionId, token);
+                if (parentApproval.IsFailure) return Result.Failure<RequirementSnapshot>(parentApproval.Error);
             }
             // The projection is always the newest version. Compare the full snapshot, including no-ops,
             // to block older reopening and races between successor creation, reopening and editing.
@@ -227,6 +238,9 @@ public sealed partial class PostgresRequirementStore(string connectionString,
                 await using var copy = new NpgsqlCommand("INSERT INTO retravion_requirement.user_need_link SELECT $1,target_internal_id,target_version_id FROM retravion_requirement.user_need_link WHERE owner_version_id=$2", connection, transaction);
                 copy.Parameters.AddWithValue(replacement.VersionId); copy.Parameters.AddWithValue(before.VersionId);
                 await copy.ExecuteNonQueryAsync(token);
+                await using var parentCopy = new NpgsqlCommand("INSERT INTO retravion_requirement.parent_link SELECT $1,target_internal_id,target_version_id FROM retravion_requirement.parent_link WHERE owner_version_id=$2", connection, transaction);
+                parentCopy.Parameters.AddWithValue(replacement.VersionId); parentCopy.Parameters.AddWithValue(before.VersionId);
+                await parentCopy.ExecuteNonQueryAsync(token);
             }
             if (decision is not null)
             {
@@ -242,6 +256,10 @@ public sealed partial class PostgresRequirementStore(string connectionString,
                 if (ownedLinks.Count > 0)
                     await SetHistoryLinks(connection, transaction, replacement, decision == "Successor" ? null : ownedLinks,
                         ownedLinks, token);
+                var parent = await LoadParent(connection, transaction, replacement.VersionId, token);
+                if (parent.HasValue)
+                    await SetHistoryParent(connection, transaction, replacement, decision == "Successor" ? Maybe<RequirementParentLink>.None : parent,
+                        parent, token);
             }
             if (changed) await Audit(connection, transaction, actor, occurredAt, decision switch
             {
@@ -295,12 +313,16 @@ public sealed partial class PostgresRequirementStore(string connectionString,
         static RequirementAuditValues Values(RequirementState r) => new(r.ProductInternalId, r.Id, r.Title, r.Statement, r.Type.ToString(), r.Rationale, r.Status.ToString());
         var afterLinks = await LoadLinks(connection, transaction, after.VersionId, token);
         var beforeLinks = before is null || decision == "Successor" ? null : await LoadLinks(connection, transaction, before.VersionId, token);
+        var afterParent = await LoadParent(connection, transaction, after.VersionId, token);
+        var beforeParent = before is null || decision == "Successor" ? Maybe<RequirementParentLink>.None : await LoadParent(connection, transaction, before.VersionId, token);
         await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
             new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(after.InternalId.ToString()), AuditActionOutcome.Success,
                 requirementChange: new RequirementAuditDetails(after.InternalId, before is null ? null : Values(before), Values(after), decision, comment,
                     after.VersionId, after.VersionNumber, after.SourceVersionId, decision is "Successor" or "Reopened" ? comment : null,
                     afterLinks.Count == 0 ? null : "Requirement–User Need", beforeLinks is { Count: > 0 } ? beforeLinks : null,
-                    afterLinks.Count == 0 ? null : afterLinks)), token);
+                    afterLinks.Count == 0 ? null : afterLinks,
+                    afterParent.HasValue ? ParentRelationship : null, beforeParent.HasValue ? beforeParent.Value : null,
+                    afterParent.HasValue ? afterParent.Value : null)), token);
     }
 
     private async Task<Result<T>> Execute<T>(Func<NpgsqlConnection, NpgsqlTransaction, Task<Result<T>>> operation, CancellationToken token,

@@ -81,6 +81,22 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
                 : Result.Failure<RequirementSnapshot>(requirement.Error);
         }, token);
 
+    internal Task<Result<RequirementSnapshot>> AddParent(ClaimsPrincipal principal, RequirementSnapshot expected,
+        RequirementParentLink target, CancellationToken token = default) =>
+        Change(principal, "requirement.parent.add", (actor, now) => links.AddParent(expected, target, actor, now, token), token);
+
+    internal Task<Result<RequirementSnapshot>> RemoveParent(ClaimsPrincipal principal, RequirementSnapshot expected,
+        CancellationToken token = default) =>
+        Change(principal, "requirement.parent.remove", (actor, now) => links.RemoveParent(expected, actor, now, token), token);
+
+    internal Task<Result<RequirementSnapshot>> ReplaceParent(ClaimsPrincipal principal, RequirementSnapshot expected,
+        RequirementParentLink target, CancellationToken token = default) =>
+        Change(principal, "requirement.parent.replace", (actor, now) => links.ReplaceParent(expected, target, actor, now, token), token);
+
+    internal async Task<Result<Maybe<RequirementParentLink>>> Parent(ClaimsPrincipal principal, Guid id,
+        Guid versionId, CancellationToken token = default) => await Allowed(principal)
+        ? await links.Parent(id, versionId, token) : Result.Failure<Maybe<RequirementParentLink>>("Access denied.");
+
     internal Task<Result<RequirementSnapshot>> AddLink(ClaimsPrincipal principal, RequirementSnapshot expected,
         RequirementUserNeedLink target, CancellationToken token = default) =>
         Change(principal, "requirement.link.add", (actor, now) => links.ChangeLink(expected, target, true, actor, now, token), token);

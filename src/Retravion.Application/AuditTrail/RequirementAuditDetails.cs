@@ -9,4 +9,5 @@ public sealed record RequirementAuditDetails(Guid InternalId, RequirementAuditVa
     string? Decision, string? Comment, Guid? VersionId = null, int? VersionNumber = null,
     Guid? SourceVersionId = null, string? Reason = null,
     string? RelationshipType = null, IReadOnlyList<RequirementUserNeedLink>? BeforeLinks = null,
-    IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null);
+    IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null,
+    string? ParentRelationshipType = null, RequirementParentLink? BeforeParent = null, RequirementParentLink? AfterParent = null);
