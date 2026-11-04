@@ -94,6 +94,39 @@ public sealed partial class PostgresProductTests
     }
 
     [PostgresFact]
+    public async Task NeedCreationRejectsVersionIdentityOwnedByAnotherEntityWithoutChangingAnyEvidence()
+    {
+        await using var database = await Database.Create();
+        var products = new PostgresProductStore(database.ConnectionString);
+        var product = (await new CreateProduct(products).Execute("P", "Product", ProductKind.System, "")).Value;
+        var otherProduct = (await new CreateProduct(products).Execute("Other", "Other Product", ProductKind.System, "")).Value;
+        var store = new PostgresUserNeedStore(database.ConnectionString);
+        var original = await ApprovedNeed(store, product.InternalId, "Original");
+        var history = (await store.History(original.Need.InternalId)).Value;
+        var audit = await new PostgresAuditQuery(database.ConnectionString).FindAsync(new());
+        var collisionId = Guid.NewGuid();
+        foreach (var owner in new[] { product.InternalId, otherProduct.InternalId })
+        {
+            var collision = Need.Restore(collisionId, owner, "Collision", "Overwrite", "Overwrite",
+                UserNeedStatus.Draft, original.Need.VersionId).Value;
+            var rejected = await store.Create(collision, VersionActor, VersionTime);
+            Assert.True(rejected.IsFailure);
+            Assert.True((await store.Find(collisionId)).Value.HasNoValue);
+            Assert.Empty((await store.Versions(collisionId)).Value);
+            Assert.Equal(original, (await store.Find(original.Need.InternalId)).Value.Value);
+            Assert.Equal(original, (await store.Find(original.Need.InternalId, versionId: original.Need.VersionId)).Value.Value);
+            Assert.Equal(history, (await store.History(original.Need.InternalId)).Value);
+            Assert.Equal(audit, await new PostgresAuditQuery(database.ConnectionString).FindAsync(new()));
+        }
+        Assert.Single((await store.List(product.InternalId)).Value);
+        Assert.Empty((await store.List(otherProduct.InternalId)).Value);
+        // Rejection rolls back both entity identity and Product-scoped manual-ID reservation.
+        var valid = Need.Restore(collisionId, product.InternalId, "Collision", "Valid", "Valid",
+            UserNeedStatus.Draft, Guid.NewGuid()).Value;
+        Assert.True((await store.Create(valid, VersionActor, VersionTime)).IsSuccess);
+    }
+
+    [PostgresFact]
     public async Task NeedMigrationPreservesLegacyRecordsAndDoesNotInventVersionAttributionForOldDecisions()
     {
         await using var database = await Database.Create();
@@ -149,10 +182,31 @@ public sealed partial class PostgresProductTests
         await using (var function = new NpgsqlCommand("CREATE FUNCTION public.reject_version_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'private' USING ERRCODE='42501'; END $$", connection)) await function.ExecuteNonQueryAsync();
         foreach (var table in new[] { "retravion_need.need", "retravion_need.need_version", "retravion_need.review", "retravion_audit.event" })
         {
-            await using (var trigger = new NpgsqlCommand($"CREATE TRIGGER reject_version_write BEFORE INSERT OR UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION public.reject_version_write()", connection)) await trigger.ExecuteNonQueryAsync();
+            var versionTable = table == "retravion_need.need_version";
+            var triggerSql = versionTable ? """
+                CREATE TRIGGER reject_version_write BEFORE INSERT ON retravion_need.need_version
+                    FOR EACH ROW WHEN (NEW.version_number > 1) EXECUTE FUNCTION public.reject_version_write();
+                CREATE TRIGGER reject_version_update BEFORE UPDATE ON retravion_need.need_version
+                    FOR EACH ROW EXECUTE FUNCTION public.reject_version_write();
+                CREATE SEQUENCE public.projection_attempt;
+                CREATE FUNCTION public.mark_projection_attempt() RETURNS trigger LANGUAGE plpgsql AS $$
+                    BEGIN PERFORM nextval('public.projection_attempt'); RETURN NEW; END $$;
+                CREATE TRIGGER mark_projection_attempt AFTER UPDATE ON retravion_need.need
+                    FOR EACH ROW EXECUTE FUNCTION public.mark_projection_attempt();
+                """ : $"CREATE TRIGGER reject_version_write BEFORE INSERT OR UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION public.reject_version_write()";
+            await using (var trigger = new NpgsqlCommand(triggerSql, connection)) await trigger.ExecuteNonQueryAsync();
             var successor = await store.CreateSuccessor(original, "Next", VersionActor, VersionTime);
             var reopen = await store.Update(original, original.Need.Reopen("Correction").Value, VersionActor, VersionTime, "Reopened", "Correction");
             Assert.True(successor.IsFailure); Assert.True(reopen.IsFailure);
+            if (versionTable)
+            {
+                // Sequence increments survive rollback: both failures must follow the business UPDATE,
+                // rather than setup's INSERT ... ON CONFLICT DO NOTHING backfill.
+                await using var reachedMutation = new NpgsqlCommand("SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM public.projection_attempt", connection);
+                Assert.Equal(2L, await reachedMutation.ExecuteScalarAsync());
+                await using var removeMarkers = new NpgsqlCommand("DROP TRIGGER mark_projection_attempt ON retravion_need.need; DROP TRIGGER reject_version_update ON retravion_need.need_version", connection);
+                await removeMarkers.ExecuteNonQueryAsync();
+            }
             await using (var drop = new NpgsqlCommand($"DROP TRIGGER reject_version_write ON {table}", connection)) await drop.ExecuteNonQueryAsync();
             Assert.Equal(original, (await store.Find(original.Need.InternalId)).Value.Value);
             Assert.Single((await store.Versions(original.Need.InternalId)).Value);

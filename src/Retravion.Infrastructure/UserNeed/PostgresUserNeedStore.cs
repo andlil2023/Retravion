@@ -133,7 +133,8 @@ public sealed class PostgresUserNeedStore(string connectionString,
             command.Parameters.AddWithValue(need.Id); command.Parameters.AddWithValue(need.Title); command.Parameters.AddWithValue(need.Statement);
             command.Parameters.AddWithValue(need.VersionId);
             if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) return Result.Failure<UserNeedSnapshot>("That User Need ID is already in use for this Product.");
-            await SaveVersion(connection, transaction, need.InternalId, cancellationToken);
+            if (!await SaveVersion(connection, transaction, need.InternalId, cancellationToken))
+                return Result.Failure<UserNeedSnapshot>("The User Need version identity is already in use.");
             await Audit(connection, transaction, actor, occurredAt, "need.create", null, need, null, null, cancellationToken);
             return Result.Success(new UserNeedSnapshot(need, 1));
         }, cancellationToken);
@@ -194,7 +195,8 @@ public sealed class PostgresUserNeedStore(string connectionString,
             command.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)before.SourceVersionId ?? DBNull.Value);
             var revision = await command.ExecuteScalarAsync(token);
             if (revision is null) return Result.Failure<UserNeedSnapshot>("The User Need changed or a newer version exists. Retrieve it again.");
-            await SaveVersion(connection, transaction, before.InternalId, token);
+            if (!await SaveVersion(connection, transaction, before.InternalId, token))
+                return Result.Failure<UserNeedSnapshot>("The User Need version identity is already in use.");
             if (decision is not null)
             {
                 await using var history = new NpgsqlCommand("INSERT INTO retravion_need.review (need_internal_id,actor_identifier,occurred_at_utc_ticks,decision,comment,title,statement,version_id,version_number,manual_id,source_version_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", connection, transaction);
@@ -216,16 +218,21 @@ public sealed class PostgresUserNeedStore(string connectionString,
         }, token);
     }
 
-    private static async Task SaveVersion(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid id, CancellationToken token)
+    private static async Task<bool> SaveVersion(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid id, CancellationToken token)
     {
         await using var command = new NpgsqlCommand("""
             INSERT INTO retravion_need.need_version SELECT internal_id,product_internal_id,id,title,statement,status,revision,
                 version_id,version_number,ever_approved,creation_reason,source_version_id FROM retravion_need.need WHERE internal_id=$1
             ON CONFLICT (version_id) DO UPDATE SET id=EXCLUDED.id,title=EXCLUDED.title,statement=EXCLUDED.statement,
                 status=EXCLUDED.status,revision=EXCLUDED.revision,ever_approved=EXCLUDED.ever_approved
+            WHERE need_version.internal_id=EXCLUDED.internal_id
+                AND need_version.product_internal_id=EXCLUDED.product_internal_id
+                AND need_version.version_number=EXCLUDED.version_number
+                AND need_version.creation_reason IS NOT DISTINCT FROM EXCLUDED.creation_reason
+                AND need_version.source_version_id IS NOT DISTINCT FROM EXCLUDED.source_version_id
             """, connection, transaction);
         command.Parameters.AddWithValue(id);
-        await command.ExecuteNonQueryAsync(token);
+        return await command.ExecuteNonQueryAsync(token) == 1;
     }
 
     private static Result<UserNeedSnapshot> Read(NpgsqlDataReader reader)
