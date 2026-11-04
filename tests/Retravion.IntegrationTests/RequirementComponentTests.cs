@@ -65,7 +65,9 @@ public sealed partial class PostgresProductTests
             await renderer.Click("Submit for review");
             Assert.Contains("In Review", renderer.Text()); await renderer.Click("Return to Draft");
             await renderer.Click("Submit for review"); await renderer.Click("Approve");
-            Assert.Contains("Approved", renderer.Text()); await renderer.Click("Return to Draft");
+            Assert.Contains("Approved", renderer.Text());
+            await renderer.Field("Change or reopening reason").ValueChanged.InvokeAsync("Correct wording");
+            await renderer.Click("Reopen to Draft");
             Assert.Equal(5, (await store.History(created.Requirement.InternalId)).Value.Count);
             navigation.Go($"requirements/edit?id={created.Requirement.InternalId}");
             await renderer.Mount(typeof(RequirementEditor), new() { [nameof(RequirementEditor.Id)] = created.Requirement.InternalId });

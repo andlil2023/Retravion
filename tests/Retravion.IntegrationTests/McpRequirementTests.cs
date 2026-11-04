@@ -146,6 +146,7 @@ public sealed partial class PostgresProductTests
     private sealed class RequirementWriteHook(PostgresRequirementStore store) : IRequirementChangeTransaction
     {
         internal PostgresRequirementStore Store = store;
+        public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> CreateSuccessor(RequirementSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default) => Store.CreateSuccessor(expected, reason, actor, time, token);
         public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> Create(RequirementState r, AuditActor actor, DateTimeOffset time, CancellationToken token = default) => Store.Create(r, actor, time, token);
         public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor, DateTimeOffset time, string? decision = null, string? comment = null, CancellationToken token = default) => Store.Update(expected, replacement, actor, time, decision, comment, token);
     }

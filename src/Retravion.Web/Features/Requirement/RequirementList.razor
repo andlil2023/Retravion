@@ -34,7 +34,10 @@ else
             <MudTd DataLabel="ID"><MudLink Href="@($"/requirements/details?id={context.Requirement.InternalId}")">@context.Requirement.Id</MudLink></MudTd>
             <MudTd DataLabel="Title">@context.Requirement.Title</MudTd>
             <MudTd DataLabel="Type">@context.Requirement.Type</MudTd>
-            <MudTd DataLabel="Status">@(context.Requirement.Status == RequirementStatus.InReview ? "In Review" : context.Requirement.Status.ToString())</MudTd>
+            <MudTd DataLabel="Status">@($"v{context.Requirement.VersionNumber}") · @(context.Requirement.Status == RequirementStatus.InReview ? "In Review" : context.Requirement.Status.ToString())
+                @if (context.LatestApprovedVersionNumber is { } approved && context.Requirement.Status != RequirementStatus.Approved)
+                { <span> · @($"v{approved}") Approved</span> }
+            </MudTd>
         </RowTemplate>
         <NoRecordsContent><p>@(_requirements.Count == 0 ? "No Requirements yet." : "No Requirements match the current filters.")</p></NoRecordsContent>
     </MudTable>

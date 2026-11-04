@@ -2,6 +2,7 @@
 @inject RequirementOperations Operations
 @inject ProductOperations Products
 @inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
 
 <PageTitle>Requirement · Retravion</PageTitle>
 <SectionContent SectionName="product-page-header"><PageHeader Title="Requirement" BackHref="@BackPath" BackText="Requirements" /></SectionContent>
@@ -12,7 +13,13 @@
         <h2>@_requirement.Requirement.Id – @_requirement.Requirement.Title</h2>
         <p>Product: @_product.Id – @_product.Name</p>
         <p>Type: @_requirement.Requirement.Type</p>
-        <p>Status: @(_requirement.Requirement.Status == RequirementStatus.InReview ? "In Review" : _requirement.Requirement.Status.ToString()) @(!_product.IsActive ? "(Product retired)" : "")</p>
+        <p>@($"v{_requirement.Requirement.VersionNumber}") · Status: @(_requirement.Requirement.Status == RequirementStatus.InReview ? "In Review" : _requirement.Requirement.Status.ToString()) @(!_product.IsActive ? "(Product retired)" : "")</p>
+        @if (_requirement.Requirement.CreationReason is { } reason) { <p>Successor creation reason: @reason</p> }
+        <nav aria-label="Requirement versions">
+            @foreach (var version in _versions ?? [])
+            { <MudLink Href="@($"/requirements/details?id={Id}&version={version.Requirement.VersionId}")">@($"v{version.Requirement.VersionNumber}") · @(version.Requirement.Status == RequirementStatus.InReview ? "In Review" : version.Requirement.Status.ToString())</MudLink><span> </span> }
+        </nav>
+        @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
         <h3>Statement</h3><ProductMarkdownView Markdown="@_requirement.Requirement.Statement" />
         <h3>Rationale</h3><p style="white-space:pre-wrap">@(_requirement.Requirement.Rationale ?? "Not provided")</p>
         <h3>Review history</h3>
@@ -23,15 +30,16 @@
             @foreach (var item in _history)
             {
                 <details><summary>@(item.Decision == "InReview" ? "In Review" : item.Decision) — @item.OccurredAt.ToString("u") — @((item.Actor as Retravion.Application.AuditTrail.AuditActor.Identified)?.Identifier)</summary>
+                    <p>@(item.VersionNumber is { } number ? $"v{number}" : "Legacy decision — version attribution was not recorded")</p>
                     <p>ID: @item.Id</p><p>Title: @item.Title</p><p>Type: @item.Type</p>
                     <p style="white-space:pre-wrap">Rationale: @(item.Rationale ?? "Not provided")</p>
-                    <p style="white-space:pre-wrap">Comment: @(item.Comment ?? "None")</p>
+                    <p style="white-space:pre-wrap">Comment / reason: @(item.Comment ?? "None")</p>
                     <h4>Statement at decision</h4><ProductMarkdownView Markdown="@item.Statement" />
                 </details>
             }
         }
     </MudPaper>
-    @if (_product.IsActive)
+    @if (_product.IsActive && IsLatest)
     {
         <div class="mt-4">
             @if (_requirement.Requirement.Status == RequirementStatus.Draft)
@@ -40,39 +48,70 @@
                 <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Disabled="_busy" />
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("InReview"))'>Submit for review</MudButton>
             }
-            else
+            else if (_requirement.Requirement.Status == RequirementStatus.InReview)
             {
                 <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Disabled="_busy" />
-                @if (_requirement.Requirement.Status == RequirementStatus.InReview)
-                { <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton> }
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Draft"))'>Return to Draft</MudButton>
+            }
+            else
+            {
+                <MudTextField @bind-Value="_reason" Label="Change or reopening reason" Required="true" Disabled="_busy" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="CreateSuccessor">Create successor Draft</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Reopen">Reopen to Draft</MudButton>
             }
         </div>
     }
 }
 @code {
     [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "version")] public Guid? VersionId { get; set; }
+    private IReadOnlyList<RequirementSnapshot>? _versions;
+    private bool IsLatest => _versions?.LastOrDefault()?.Requirement.VersionId == _requirement?.Requirement.VersionId;
     private RequirementSnapshot? _requirement;
     private Retravion.Domain.Product.Product? _product;
     private IReadOnlyList<RequirementReview>? _history;
-    private string? _error, _comment;
+    private string? _error, _comment, _reason;
     private bool _busy;
     private string BackPath => _product is null ? "/products" : $"/requirements?product={Uri.EscapeDataString(_product.Id)}";
-    protected override async Task OnParametersSetAsync() { _comment = null; await Load(); }
+    protected override async Task OnParametersSetAsync() { _comment = null; _reason = null; await Load(); }
     private async Task Load()
     {
-        _requirement = null; _product = null; _history = null; _error = null;
+        _requirement = null; _product = null; _history = null; _versions = null; _error = null;
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
-        var result = await Operations.Find(actor, Id);
+        var result = await Operations.Find(actor, Id, versionId: VersionId);
         if (result.IsFailure) { _error = result.Error; return; }
         if (result.Value.HasNoValue) { _error = "Requirement not found."; return; }
         _requirement = result.Value.Value;
+        var versions = await Operations.Versions(actor, Id);
+        if (versions.IsFailure) { _error = versions.Error; return; }
+        _versions = versions.Value;
         var products = await Products.List(actor);
         if (products.IsFailure) { _error = products.Error; return; }
         _product = products.Value.SingleOrDefault(p => p.InternalId == _requirement.Requirement.ProductInternalId);
         if (_product is null) { _error = "Product not found."; return; }
         var history = await Operations.History(actor, Id);
         if (history.IsFailure) _error = history.Error; else _history = history.Value;
+    }
+    private Task Reopen() => ChangeVersion(false);
+    private Task CreateSuccessor() => ChangeVersion(true);
+    private async Task ChangeVersion(bool successor)
+    {
+        if (_busy || _requirement is null) return;
+        _busy = true; _error = null;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var result = successor ? await Operations.CreateSuccessor(actor, _requirement, _reason) : await Operations.Reopen(actor, _requirement, _reason);
+            if (result.IsFailure) _error = result.Error;
+            else
+            {
+                _reason = null; VersionId = result.Value.Requirement.VersionId;
+                Navigation.NavigateTo($"/requirements/details?id={Id}&version={VersionId}");
+                await Load();
+            }
+        }
+        finally { _busy = false; }
     }
     private async Task Review(string decision)
     {

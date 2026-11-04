@@ -46,7 +46,11 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.List(principal, r.ProductInternalId)).IsFailure);
             Assert.True((await operations.Find(principal, r.InternalId)).IsFailure);
             Assert.True((await operations.History(principal, r.InternalId)).IsFailure);
-            Assert.Equal(failureMode == "throw" ? 0 : 6, audit.Events.Count);
+            Assert.True((await operations.Versions(principal, r.InternalId)).IsFailure);
+            Assert.True((await operations.Find(principal, r.InternalId, versionId: r.VersionId)).IsFailure);
+            Assert.True((await operations.CreateSuccessor(principal, expected, "secret-reason")).IsFailure);
+            Assert.True((await operations.Reopen(principal, expected, "secret-reason")).IsFailure);
+            Assert.Equal(failureMode == "throw" ? 0 : 8, audit.Events.Count);
             Assert.All(audit.Events, e =>
             {
                 Assert.Equal(AuditActionOutcome.Failure, e.Outcome); Assert.IsType<AuditTarget.Unknown>(e.Target);
@@ -56,7 +60,7 @@ public sealed partial class AccountManagementTests
                 if (principal.Identity?.IsAuthenticated == true) Assert.Equal(new AuditActor.Identified("admin"), e.Actor);
                 else Assert.IsType<AuditActor.Unknown>(e.Actor);
             });
-            Assert.Equal(logsBefore + (failureMode == "success" ? 0 : 6), logger.Messages.Count);
+            Assert.Equal(logsBefore + (failureMode == "success" ? 0 : 8), logger.Messages.Count);
         }
         Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Requirement change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
@@ -106,7 +110,8 @@ public sealed partial class AccountManagementTests
             store.Snapshot = new(RequirementState.Restore(r.InternalId, r.ProductInternalId, r.Id, r.Title, r.Statement, r.Type, r.Rationale, status).Value, 2);
             Assert.Contains("Only Draft Requirements can be edited.", await client.GetStringAsync(paths[3]));
             details = await client.GetStringAsync(paths[1]);
-            Assert.DoesNotContain("/requirements/edit?", details); Assert.Contains("Return to Draft", details);
+            Assert.DoesNotContain("/requirements/edit?", details);
+            Assert.Contains(status == RequirementStatus.InReview ? "Return to Draft" : "Reopen to Draft", details);
             if (status == RequirementStatus.InReview) Assert.Matches("<button[^>]*>.*?<span[^>]*>Approve</span>.*?</button>", details);
         }
         store.Snapshot = new(r, 1);
@@ -124,8 +129,10 @@ public sealed partial class AccountManagementTests
         public RequirementSnapshot Snapshot = snapshot;
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid product, CancellationToken token = default) =>
             Task.FromResult(Result.Success<IReadOnlyList<RequirementSnapshot>>(product == Snapshot.Requirement.ProductInternalId ? [Snapshot] : []));
-        public Task<Result<Maybe<RequirementSnapshot>>> Find(Guid id, CancellationToken token = default) =>
-            Task.FromResult(Result.Success(id == Snapshot.Requirement.InternalId ? Maybe<RequirementSnapshot>.From(Snapshot) : Maybe<RequirementSnapshot>.None));
+        public Task<Result<Maybe<RequirementSnapshot>>> Find(Guid id, CancellationToken token = default, Guid? versionId = null) =>
+            Task.FromResult(Result.Success(id == Snapshot.Requirement.InternalId && (versionId is null || versionId == Snapshot.Requirement.VersionId) ? Maybe<RequirementSnapshot>.From(Snapshot) : Maybe<RequirementSnapshot>.None));
+        public Task<Result<IReadOnlyList<RequirementSnapshot>>> Versions(Guid id, CancellationToken token = default) =>
+            Task.FromResult(Result.Success<IReadOnlyList<RequirementSnapshot>>(id == Snapshot.Requirement.InternalId ? [Snapshot] : []));
         public Task<Result<IReadOnlyList<RequirementReview>>> History(Guid id, CancellationToken token = default) =>
             Task.FromResult(Result.Success<IReadOnlyList<RequirementReview>>([new(id, new AuditActor.Identified("author"), DateTimeOffset.UnixEpoch, "Draft", "<b>comment</b>", "Historical ID", "Historical title", "Historical statement", RequirementType.Safety, "Historical rationale")]));
     }
@@ -152,7 +159,9 @@ public sealed partial class AccountManagementTests
     {
         public int Calls;
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid product, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<Maybe<RequirementSnapshot>>> Find(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<Maybe<RequirementSnapshot>>> Find(Guid id, CancellationToken token = default, Guid? versionId = null) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<IReadOnlyList<RequirementSnapshot>>> Versions(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<RequirementSnapshot>> CreateSuccessor(RequirementSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementReview>>> History(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> Create(RequirementState r, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor, DateTimeOffset time, string? decision = null, string? comment = null, CancellationToken cancellationToken = default) { Calls++; throw new InvalidOperationException(); }
