@@ -1,0 +1,100 @@
+@page "/revisions/create"
+@page "/revisions/edit"
+@inject RevisionOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Prepare Draft revision · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Prepare Draft revision" BackHref="@BackPath" BackText="Revisions" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_message is not null) { <MudAlert Severity="Severity.Info" role="status">@_message</MudAlert> }
+@if (_ready)
+{
+    <MudPaper Class="pa-4" Elevation="0">
+        <form id="revision-form" @onsubmit="Save" @onsubmit:preventDefault aria-label="Save Draft revision">
+            <p>@_product!.Id – @_product.Name · Draft</p>
+            <MudTextField @bind-Value="_identifier" Label="Revision identifier" HelperText="Required; up to 100 Unicode characters. Unique within this Product without regard to case." Immediate="true" Disabled="@(_busy || _uncertain)" />
+            <MudTextField @bind-Value="_description" Label="Description (optional)" Lines="4" Immediate="true" Disabled="@(_busy || _uncertain)" />
+            <p>New revisions start empty. Manage exact-version selections from details.</p>
+        </form>
+    </MudPaper>
+    <div class="mt-4">
+        <MudButton ButtonType="ButtonType.Submit" form="revision-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _uncertain)">Save Draft</MudButton>
+        <MudButton Href="@BackPath" Disabled="_busy">Cancel</MudButton>
+    </div>
+}
+@if (_uncertain)
+{
+    <p>No automatic retry. Retrieve the attempted operation before deciding what to do next.</p>
+    <MudButton OnClick="RetrieveOutcome" Disabled="_busy" Variant="Variant.Filled" Color="Color.Primary">Retrieve outcome</MudButton>
+    <MudLink Href="@($"/revisions/details?product={Uri.EscapeDataString(ProductId ?? "")}&id={_recordId}&operation={_operation}")">Outcome retrieval link</MudLink>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private RevisionSnapshot? _existing;
+    private Guid _recordId, _operation;
+    private string _identifier = "", _description = "";
+    private string? _error, _message;
+    private bool _ready, _busy, _uncertain;
+    private string BackPath => $"/revisions?product={Uri.EscapeDataString(ProductId ?? "")}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _ready = false; _error = _message = null; _existing = null; _uncertain = false;
+        _identifier = _description = "";
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, ProductId);
+        if (product.IsFailure) { _error = product.Error; return; }
+        _product = product.Value;
+        if (!_product.IsActive) { _error = "The responsible Product is retired; revisions are read-only."; return; }
+        var editing = Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.EndsWith("/edit", StringComparison.OrdinalIgnoreCase);
+        _recordId = editing ? Id : Guid.NewGuid();
+        if (editing)
+        {
+            var found = await Operations.Retrieve(actor, _product.InternalId, Id);
+            if (found.IsFailure) { _error = found.Error; return; }
+            if (found.Value.Record is not { Deleted: false } row) { _error = "Draft revision not found."; return; }
+            _existing = row; _identifier = row.Draft.Identifier; _description = row.Draft.Description;
+        }
+        _ready = true;
+    }
+    private async Task Save()
+    {
+        if (_busy || !_ready || _uncertain) return;
+        _busy = true; _error = _message = null; _operation = Guid.NewGuid();
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var result = _existing is null
+                ? await Operations.Create(actor, _operation, _recordId, _product!.InternalId, _identifier, _description)
+                : await Operations.Edit(actor, _operation, _existing, _identifier, _description);
+            if (result.IsFailure)
+            {
+                _error = result.Error;
+                _uncertain = result.Error.Contains("could not be confirmed", StringComparison.Ordinal);
+            }
+            else Navigation.NavigateTo($"/revisions/details?product={Uri.EscapeDataString(ProductId ?? "")}&id={_recordId}");
+        }
+        finally { _busy = false; }
+    }
+    private async Task RetrieveOutcome()
+    {
+        if (_busy || !_uncertain) return;
+        _busy = true;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var found = await Operations.Retrieve(actor, _product!.InternalId, _recordId, _operation);
+            if (found.IsFailure) { _error = found.Error; return; }
+            _uncertain = false; _error = null;
+            _existing = found.Value.Record;
+            _message = found.Value.Operation is null ? "The attempted operation did not commit. Review the current state before a user-directed retry." : "The attempted operation committed. Current state retrieved.";
+            if (_existing?.Deleted == true) _ready = false;
+            if (_existing is not null)
+                Navigation.NavigateTo($"/revisions/details?product={Uri.EscapeDataString(ProductId ?? "")}&id={_recordId}&operation={_operation}");
+        }
+        finally { _busy = false; }
+    }
+}

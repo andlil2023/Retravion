@@ -12,7 +12,31 @@
             <dt>Target</dt><dd>@(Event.ProductChange is { } product ? $"Identified: {product.After.Id}" : Event.UserNeedChange is { } need ? $"Identified: {need.After.Id}" : Event.RequirementChange is { } requirement ? $"Identified: {requirement.After.Id}" : Event.TestCaseChange is { } testCase ? $"Identified: {testCase.After.Id}" : Event.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</dd>
             <dt>Outcome</dt><dd>@Event.Outcome</dd>
         </dl>
-        @if (Event.ProductChange is { } change)
+        @if (Event.RevisionChange is { } revision)
+        {
+            <h3>Revision evidence</h3>
+            <p>Operation: @revision.OperationId · Revision: @revision.InternalId</p>
+            @foreach (var entry in new[] { (Label: "Prior values", Values: revision.Before), (Label: "New values", Values: revision.After) })
+            {
+                <section aria-label="@entry.Label">
+                    <h4>@entry.Label</h4>
+                    @if (entry.Values is { } values)
+                    {
+                        <dl><dt>Identifier</dt><dd>@values.Identifier</dd><dt>Description</dt><dd class="recorded-value">@values.Description</dd><dt>State</dt><dd>@values.State</dd></dl>
+                        <ul>
+                            @foreach (var endpoint in values.Selections)
+                            {
+                                var feature = endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.UserNeed ? "user-needs" : endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.Requirement ? "requirements" : "test-cases";
+                                <li><a href="@($"/{feature}/details?id={endpoint.InternalId}&version={endpoint.VersionId}")">@endpoint.Kind · v@endpoint.VersionNumber · @endpoint.InternalId / @endpoint.VersionId</a></li>
+                            }
+                        </ul>
+                        @if (values.Selections.IsEmpty) { <p>No explicit selections.</p> }
+                    }
+                    else { <p>@(revision.Before is null ? "Not yet created" : "Deleted")</p> }
+                </section>
+            }
+        }
+        else if (Event.ProductChange is { } change)
         {
             <h3>@(change.Before is null ? "Initial Product values" : "Changed Product fields")</h3>
             @foreach (var field in Fields(change))

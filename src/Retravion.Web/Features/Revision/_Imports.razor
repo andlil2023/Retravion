@@ -1,0 +1,10 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Sections
+@using MudBlazor
+@using Retravion.Web.Components
+@using Retravion.Web.Features.Product
+@using Retravion.Application.Revision
+@using Retravion.Domain.Revision
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "CompletedPasswordReplacement")]
