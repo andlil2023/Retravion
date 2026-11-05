@@ -6,7 +6,7 @@ namespace Retravion.UnitTests;
 public sealed class RevisionArchitectureTests
 {
     [Fact]
-    public void RevisionFeatureKeepsLayerBoundariesAndDoesNotExposeReleaseOrCopy()
+    public void RevisionFeatureKeepsLayerBoundariesAndDraftAndReleasedOperationsSeparate()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "Retravion.slnx"))) root = root.Parent;
@@ -19,5 +19,8 @@ public sealed class RevisionArchitectureTests
         }
         Assert.DoesNotContain(typeof(DraftRevision).GetProperties(), p => p.SetMethod?.IsPublic == true);
         Assert.DoesNotContain(typeof(DraftRevision).GetMethods(), m => m.Name is "Release" or "CopyFromReleased" or "Reopen");
+        Assert.True(typeof(Retravion.Domain.Revision.Revision).IsAbstract);
+        Assert.DoesNotContain(typeof(ReleasedRevision).GetMethods(), m => m.Name is "Edit" or "ChangeSelection" or "Reopen");
+        Assert.DoesNotContain(typeof(ReleasedRevision).GetProperties(), p => p.SetMethod?.IsPublic == true);
     }
 }

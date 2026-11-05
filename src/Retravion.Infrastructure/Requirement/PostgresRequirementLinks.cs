@@ -46,6 +46,8 @@ public sealed partial class PostgresRequirementStore
                 if (stored.Value.Revision != expected.Revision || stored.Value.Requirement != r)
                     return Result.Failure<RequirementSnapshot>("The Requirement changed or a newer version exists. Retrieve it again.");
             }
+            if (await Protected(connection, transaction, r.VersionId, cancellationToken))
+                return Result.Failure<RequirementSnapshot>("This exact version and its owned links are permanently protected by a Released revision.");
             var before = await LoadLinks(connection, transaction, r.VersionId, cancellationToken);
             if (add)
             {

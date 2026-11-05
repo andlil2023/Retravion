@@ -86,6 +86,7 @@ public abstract record TestCase
     public virtual Result<TestCase> SubmitForReview() => Result.Failure<TestCase>("Only Draft Test Cases can be submitted for review.");
     public virtual Result<TestCase> Approve(bool allTargetsApproved) => Result.Failure<TestCase>("Only Test Cases in review can be approved.");
     public virtual Result<TestCase> ReturnToDraft() => Result.Failure<TestCase>("Only Test Cases in review can be returned to Draft.");
+    public virtual Result<TestCase> Reopen(string? reason) => Result.Failure<TestCase>("Only Approved Test Cases can reopen.");
     public virtual Result<TestCase> CreateSuccessor(string? reason) => Result.Failure<TestCase>("Only Approved Test Cases can have a successor.");
 
     public bool SameState(TestCase other) => InternalId == other.InternalId && ProductInternalId == other.ProductInternalId &&
@@ -117,6 +118,8 @@ public abstract record TestCase
         public Approved(Guid id, Guid product, Guid version, long number, TestCaseContent content, ImmutableArray<TestCaseRequirementLink> links,
             int versionNumber, string? reason, Guid? source) : base(id, product, version, number, content, links, versionNumber, reason, source) { }
         public override string Status => "Approved";
+        public override Result<TestCase> Reopen(string? reason) => string.IsNullOrWhiteSpace(reason)
+            ? Result.Failure<TestCase>("A reopening reason is required.") : Change("Draft", Content, Links);
         public override Result<TestCase> CreateSuccessor(string? reason) => string.IsNullOrWhiteSpace(reason)
             ? Result.Failure<TestCase>("A change reason is required.") : VersionNumber == int.MaxValue
                 ? Result.Failure<TestCase>("The version number limit has been reached.")

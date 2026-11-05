@@ -58,6 +58,7 @@ public sealed class PostgresUserNeedStore(string connectionString,
             CHECK ((version_number=1 AND creation_reason IS NULL AND source_version_id IS NULL) OR
                 (version_number>1 AND length(btrim(creation_reason))>0 AND source_version_id IS NOT NULL))
         );
+        ALTER TABLE retravion_need.need_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
         CREATE UNIQUE INDEX IF NOT EXISTS need_one_working_version ON retravion_need.need_version(internal_id) WHERE status <> 2;
         INSERT INTO retravion_need.need_version SELECT internal_id,product_internal_id,id,title,statement,status,revision,
             version_id,version_number,ever_approved,creation_reason,source_version_id FROM retravion_need.need
@@ -172,6 +173,13 @@ public sealed class PostgresUserNeedStore(string connectionString,
         return Execute(async (connection, transaction) =>
         {
             if (!await ProductActive(connection, transaction, before.ProductInternalId, token)) return Inactive();
+            if (replacement.VersionId == before.VersionId && replacement != before)
+            {
+                await using var protection = new NpgsqlCommand("SELECT release_protected FROM retravion_need.need_version WHERE internal_id=$1 AND version_id=$2", connection, transaction);
+                protection.Parameters.AddWithValue(before.InternalId); protection.Parameters.AddWithValue(before.VersionId);
+                if (await protection.ExecuteScalarAsync(token) is true)
+                    return Result.Failure<UserNeedSnapshot>("This exact version is permanently protected by a Released revision. Create a successor for changes.");
+            }
             // The projection is always the newest version. This compare also blocks older-version reopening
             // and races between successor creation, reopening and edits. Revisions are entity-wide, never reset.
             await using var command = new NpgsqlCommand("""

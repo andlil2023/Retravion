@@ -14,6 +14,9 @@ public sealed partial class PostgresRevisionStore(string connectionString,
 {
     private const string Setup = """
         SELECT pg_advisory_xact_lock(821749620115);
+        ALTER TABLE IF EXISTS retravion_need.need_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
+        ALTER TABLE IF EXISTS retravion_requirement.requirement_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
+        ALTER TABLE IF EXISTS retravion_test_case.test_case_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
         CREATE SCHEMA IF NOT EXISTS retravion_revision;
         CREATE COLLATION IF NOT EXISTS retravion_revision.identifier_fold (provider=icu, locale='und-u-ks-level2', deterministic=false);
         CREATE TABLE IF NOT EXISTS retravion_revision.revision (
@@ -26,6 +29,15 @@ public sealed partial class PostgresRevisionStore(string connectionString,
             revision bigint NOT NULL CHECK (revision>0),
             deleted boolean NOT NULL DEFAULT false
         );
+        ALTER TABLE retravion_revision.revision DROP CONSTRAINT IF EXISTS revision_state_check;
+        ALTER TABLE retravion_revision.revision ADD COLUMN IF NOT EXISTS release_evidence jsonb;
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='retravion_revision.revision'::regclass AND conname='revision_valid_state') THEN
+                ALTER TABLE retravion_revision.revision ADD CONSTRAINT revision_valid_state CHECK (
+                    (state='Draft' AND release_evidence IS NULL) OR
+                    (state='Released' AND release_evidence IS NOT NULL AND NOT deleted));
+            END IF;
+        END $$;
         CREATE UNIQUE INDEX IF NOT EXISTS revision_identifier_unique ON retravion_revision.revision
             (product_internal_id,identifier COLLATE retravion_revision.identifier_fold) WHERE NOT deleted;
         CREATE TABLE IF NOT EXISTS retravion_revision.history (
@@ -36,7 +48,7 @@ public sealed partial class PostgresRevisionStore(string connectionString,
             action text NOT NULL, change jsonb NOT NULL
         );
         """;
-    private const string Columns = "internal_id,product_internal_id,identifier,description,state,selections,revision,deleted";
+    private const string Columns = "internal_id,product_internal_id,identifier,description,state,selections,revision,deleted,release_evidence";
 
     public Task<Result<IReadOnlyList<RevisionSnapshot>>> List(Guid product, CancellationToken token = default) =>
         Execute<IReadOnlyList<RevisionSnapshot>>(async (c, t) =>
@@ -97,10 +109,19 @@ public sealed partial class PostgresRevisionStore(string connectionString,
 
     private static Result<RevisionSnapshot> Read(NpgsqlDataReader reader)
     {
-        if (reader.GetString(4) != "Draft" || reader.GetInt64(6) <= 0) return Result.Failure<RevisionSnapshot>("Invalid persisted revision state.");
+        var state = reader.GetString(4);
+        if (reader.GetInt64(6) <= 0 || state is not ("Draft" or "Released") ||
+            (state == "Released" && (reader.GetBoolean(7) || reader.IsDBNull(8))) ||
+            (state == "Draft" && !reader.IsDBNull(8)))
+            return Result.Failure<RevisionSnapshot>("Invalid persisted revision state.");
         var selections = JsonSerializer.Deserialize<RevisionSelection[]>(reader.GetString(5));
-        return DraftRevision.Restore(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), selections)
-            .Map(d => new RevisionSnapshot(d, reader.GetInt64(6), reader.GetBoolean(7)));
+        var draft = DraftRevision.Restore(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), selections);
+        if (draft.IsFailure) return Result.Failure<RevisionSnapshot>(draft.Error);
+        if (state == "Draft") return new RevisionSnapshot(draft.Value, reader.GetInt64(6), reader.GetBoolean(7));
+        var evidence = JsonSerializer.Deserialize<RevisionReleaseEvidence>(reader.GetString(8));
+        return evidence is null ? Result.Failure<RevisionSnapshot>("Invalid frozen release evidence.") :
+            ReleasedRevision.Restore(draft.Value, evidence.Actor, evidence.OccurredAt, evidence.Members.IsDefault ? null : evidence.Members)
+                .Map(released => new RevisionSnapshot(released, reader.GetInt64(6)));
     }
 
     public Task<Result<RevisionSnapshot>> Create(Guid operation, DraftRevision draft, AuditActor actor, DateTimeOffset time,
@@ -136,18 +157,18 @@ public sealed partial class PostgresRevisionStore(string connectionString,
         Func<Task<bool>> authorized, string action, Func<DraftRevision, Result<DraftRevision>> transform, bool delete, CancellationToken token) =>
         Write(operation, actor, authorized, async (c, t) =>
         {
-            if (expected?.Draft is null || expected.Deleted || expected.Revision <= 0) return Stale();
-            if (!await ProductActive(c, t, expected.Draft.ProductInternalId, token)) return Inactive();
-            var found = await Find(c, t, expected.Draft.ProductInternalId, expected.Draft.InternalId, token);
+            if (expected?.Value is not DraftRevision draft || expected.Deleted || expected.Revision <= 0) return Stale();
+            if (!await ProductActive(c, t, draft.ProductInternalId, token)) return Inactive();
+            var found = await Find(c, t, draft.ProductInternalId, draft.InternalId, token);
             if (found.IsFailure) return Result.Failure<RevisionSnapshot>(found.Error);
             if (found.Value.HasNoValue || found.Value.Value.Deleted || found.Value.Value.Revision != expected.Revision ||
-                !found.Value.Value.Draft.SameValues(expected.Draft)) return Stale();
-            var next = transform(found.Value.Value.Draft);
+                found.Value.Value.Value is not DraftRevision current || !current.SameValues(draft)) return Stale();
+            var next = transform(current);
             if (next.IsFailure) return Result.Failure<RevisionSnapshot>(next.Error);
-            if (!delete && next.Value.SameValues(expected.Draft)) return found.Value.Value;
+            if (!delete && next.Value.SameValues(draft)) return found.Value.Value;
             foreach (var endpoint in next.Value.Selections)
             {
-                var target = await LoadEndpoint(c, t, expected.Draft.ProductInternalId, endpoint, token);
+                var target = await LoadEndpoint(c, t, draft.ProductInternalId, endpoint, token);
                 if (target.IsFailure) return Result.Failure<RevisionSnapshot>(target.Error);
             }
             await using var update = new NpgsqlCommand("""
@@ -158,7 +179,7 @@ public sealed partial class PostgresRevisionStore(string connectionString,
             update.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(next.Value.Selections));
             update.Parameters.AddWithValue(delete); update.Parameters.AddWithValue(next.Value.InternalId);
             var revision = (long)(await update.ExecuteScalarAsync(token))!;
-            await Evidence(c, t, operation, actor, time, action, expected.Draft, next.Value, delete, token);
+            await Evidence(c, t, operation, actor, time, action, draft, next.Value, delete, token);
             return new RevisionSnapshot(next.Value, revision, delete);
         }, token);
 
@@ -185,9 +206,10 @@ public sealed partial class PostgresRevisionStore(string connectionString,
     }
 
     private static async Task Evidence(NpgsqlConnection c, NpgsqlTransaction t, Guid operation, AuditActor actor, DateTimeOffset time,
-        string action, DraftRevision? before, DraftRevision after, bool delete, CancellationToken token)
+        string action, Retravion.Domain.Revision.Revision? before, Retravion.Domain.Revision.Revision after, bool delete, CancellationToken token)
     {
-        static RevisionAuditValues Values(DraftRevision d) => new(d.Identifier, d.Description, d.State, d.Selections);
+        static RevisionAuditValues Values(Retravion.Domain.Revision.Revision d) => new(d.Identifier, d.Description, d.State, d.Selections,
+            d is ReleasedRevision r ? new(r.ReleasedBy, r.ReleasedAt, r.Members) : null);
         var change = new RevisionAuditDetails(after.ProductInternalId, after.InternalId, operation, before is null ? null : Values(before), delete ? null : Values(after));
         await using var history = new NpgsqlCommand("INSERT INTO retravion_revision.history(internal_id,operation_id,actor_identifier,occurred_at_utc_ticks,action,change) VALUES($1,$2,$3,$4,$5,$6)", c, t);
         history.Parameters.AddWithValue(after.InternalId); history.Parameters.AddWithValue(operation);

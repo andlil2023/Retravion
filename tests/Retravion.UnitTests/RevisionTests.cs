@@ -27,6 +27,31 @@ public sealed class RevisionTests
     }
 
     [Fact]
+    public void ReleasedStateRequiresFrozenRootsClosureAndAttributionAndExposesNoDraftMutations()
+    {
+        var root = new RevisionSelection(RevisionEntityKind.TestCase, Guid.NewGuid(), Guid.NewGuid(), 1);
+        var indirect = new RevisionSelection(RevisionEntityKind.Requirement, Guid.NewGuid(), Guid.NewGuid(), 2);
+        var draft = DraftRevision.Create(Guid.NewGuid(), Guid.NewGuid(), "Release", "Frozen").Value.ChangeSelection("add", root).Value;
+        var time = DateTimeOffset.Parse("2026-01-02T03:04:05+02:00");
+        var members = new[] { new ReleasedRevisionMember(root, "TC-001", "Procedure", true), new ReleasedRevisionMember(indirect, "R", "Requirement", false) };
+        var released = ReleasedRevision.Restore(draft, "approver", time, members).Value;
+        Assert.Equal("Released", released.State); Assert.Equal(draft.InternalId, released.InternalId);
+        Assert.Equal(draft.ProductInternalId, released.ProductInternalId); Assert.Equal(draft.Selections, released.Selections);
+        Assert.Equal("Frozen", released.Description); Assert.Equal("approver", released.ReleasedBy); Assert.Equal(time.UtcTicks, released.ReleasedAt.UtcTicks);
+        Assert.Equal(members, released.Members.ToArray()); Assert.False(draft.SameValues(released));
+        Assert.DoesNotContain(typeof(ReleasedRevision).GetMethods(), m => m.Name is "Edit" or "ChangeSelection" or "Reopen");
+        Assert.DoesNotContain(typeof(ReleasedRevision).GetProperties(), p => p.SetMethod?.IsPublic == true);
+        Assert.True(ReleasedRevision.Restore(draft, "", time, members).IsFailure);
+        Assert.True(ReleasedRevision.Restore(draft, "actor", default, members).IsFailure);
+        Assert.True(ReleasedRevision.Restore(draft, "actor", time, null).IsFailure);
+        Assert.True(ReleasedRevision.Restore(draft, "actor", time, [members[1]]).IsFailure);
+        Assert.True(ReleasedRevision.Restore(draft, "actor", time, [members[0], members[0]]).IsFailure);
+        Assert.True(ReleasedRevision.Restore(draft, "actor", time, [members[0] with { Explicit = false }]).IsFailure);
+        Assert.True(ReleasedRevision.Restore(draft, "actor", time, [null!]).IsFailure);
+        Assert.True(ReleasedRevision.Restore(DraftRevision.Create(Guid.NewGuid(), Guid.NewGuid(), "Empty", "").Value, "actor", time, members).IsFailure);
+    }
+
+    [Fact]
     public void MultipleVersionsCoexistReplacementIsAtomicAndInvalidDuplicateEndpointsFail()
     {
         var draft = DraftRevision.Create(Guid.NewGuid(), Guid.NewGuid(), "A", "").Value;
