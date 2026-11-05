@@ -11,84 +11,125 @@ else
     <MudPaper Class="pa-4" Elevation="0">
         <h2>Center: @_view.Center.Label</h2>
         @NodeContent(_view.Center)
-        <p>Direct relationships only. Following a connected entity makes its exact version the center.
-            Indirect expansion and link changes are not available on this page yet.</p>
-        <p>This view is read-only. Each relationship belongs to its Requirement owner, not necessarily the center.</p>
-        <p role="status">@_view.Edges.Count direct relationship(s).</p>
+        <p>Initially only direct relationships are loaded. Expand a connected exact version to reveal its neighborhood without changing the center.
+            Following its name makes it the center. Collapse hides branches, never deletes links; shared branches remain when reachable through another expanded entity.</p>
+        <p>This view is read-only. Each relationship belongs to its Requirement owner, not necessarily the center. Link changes are not available here.</p>
+        <p role="status">@_view.Edges.Count direct relationship(s). @_edges.Count relationship(s) in the explored view.</p>
     </MudPaper>
     <div class="my-4" role="group" aria-label="Relationship view">
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => ChangeView(false))" aria-pressed="@(!_table)">Graph view</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => ChangeView(true))" aria-pressed="@_table">Table view</MudButton>
     </div>
-    @if (_view.Edges.Count == 0) { <p>No direct relationships for this exact version.</p> }
-    else if (_table)
-    {
-        <MudTable T="RelationshipEdge" Items="_view.Edges" Dense="true" Hover="true" Elevation="0" aria-label="Direct relationships">
-            <HeaderContent><MudTh>Direction / relationship</MudTh><MudTh>From (owner)</MudTh><MudTh>To (target)</MudTh><MudTh>Ownership state</MudTh></HeaderContent>
-            <RowTemplate>
-                <MudTd DataLabel="Direction / relationship">@(context.Owner.VersionId == _view.Center.VersionId ? "Outgoing" : "Incoming") · @context.Relationship</MudTd>
-                <MudTd DataLabel="From (owner)">@NodeContent(context.Owner)</MudTd>
-                <MudTd DataLabel="To (target)">@NodeContent(context.Target)</MudTd>
-                <MudTd DataLabel="Ownership state">@context.Ownership(_view.Product.IsActive)</MudTd>
-            </RowTemplate>
-        </MudTable>
-    }
+    @if (_edges.Count == 0) { <p>No direct relationships for this exact version.</p> }
     else
     {
-        <div class="relationship-graph" role="region" aria-label="Direct relationship graph" tabindex="0">
-            <div class="branches">
-                <h3>Incoming →</h3>
-                @foreach (var edge in _view.Edges.Where(e => e.Target.VersionId == _view.Center.VersionId))
-                {
-                    <div class="branch incoming">
-                        <MudPaper Class="pa-4" Elevation="0">
-                            @NodeContent(edge.Owner)
-                            <p>@edge.Relationship → center</p>
-                            <p>@edge.Ownership(_view.Product.IsActive)</p>
-                        </MudPaper>
-                        <span class="connector" aria-hidden="true">→</span>
-                    </div>
-                }
-            </div>
-            <div class="graph-center"><MudPaper Class="pa-4" Elevation="0"><h3>Center</h3>@NodeContent(_view.Center)</MudPaper></div>
-            <div class="branches">
-                <h3>→ Outgoing</h3>
-                @foreach (var edge in _view.Edges.Where(e => e.Owner.VersionId == _view.Center.VersionId))
-                {
-                    <div class="branch outgoing">
-                        <span class="connector" aria-hidden="true">→</span>
-                        <MudPaper Class="pa-4" Elevation="0">
-                            <p>Center → @edge.Relationship</p>
-                            @NodeContent(edge.Target)
-                            <p>@edge.Ownership(_view.Product.IsActive)</p>
-                        </MudPaper>
-                    </div>
-                }
-            </div>
+        <p role="status">Page @(_page + 1) of @PageCount. Showing @PageEdges.Count of @_edges.Count explored relationships.
+            @(_edges.Count > PageEdges.Count ? "More relationships are on other pages." : "") Unexpanded neighborhoods may contain more relationships.</p>
+        <div role="group" aria-label="Relationship pages">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_page == 0)" OnClick="@(() => ChangePage(_page - 1))">Previous relationships</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_page + 1 >= PageCount)" OnClick="@(() => ChangePage(_page + 1))">Next relationships</MudButton>
         </div>
+        @if (_table)
+        {
+            <MudTable T="RelationshipEdge" Items="PageEdges" Dense="true" Hover="true" Elevation="0" aria-label="Explored relationships">
+                <HeaderContent><MudTh>Direction / relationship</MudTh><MudTh>From (owner)</MudTh><MudTh>To (target)</MudTh><MudTh>Ownership state</MudTh></HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Direction / relationship">@Direction(context) · @context.Relationship</MudTd>
+                    <MudTd DataLabel="From (owner)">@NodeContent(context.Owner)</MudTd>
+                    <MudTd DataLabel="To (target)">@NodeContent(context.Target)</MudTd>
+                    <MudTd DataLabel="Ownership state">@context.Ownership(_view.Product.IsActive)</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+        else
+        {
+            <div class="relationship-graph" role="region" aria-label="Explored relationship graph" tabindex="0">
+                <div class="branches">
+                    <h3>Incoming →</h3>
+                    @foreach (var edge in PageEdges.Where(e => e.Target.VersionId == _view.Center.VersionId))
+                    {
+                        <div class="branch incoming">
+                            <MudPaper Class="pa-4" Elevation="0">
+                                @NodeContent(edge.Owner)
+                                <p>@edge.Relationship → center</p>
+                                <p>@edge.Ownership(_view.Product.IsActive)</p>
+                            </MudPaper>
+                            <span class="connector" aria-hidden="true">→</span>
+                        </div>
+                    }
+                </div>
+                <div class="graph-center"><MudPaper Class="pa-4" Elevation="0"><h3>Center</h3>@NodeContent(_view.Center)</MudPaper></div>
+                <div class="branches">
+                    <h3>→ Outgoing</h3>
+                    @foreach (var edge in PageEdges.Where(e => e.Owner.VersionId == _view.Center.VersionId))
+                    {
+                        <div class="branch outgoing">
+                            <span class="connector" aria-hidden="true">→</span>
+                            <MudPaper Class="pa-4" Elevation="0">
+                                <p>Center → @edge.Relationship</p>
+                                @NodeContent(edge.Target)
+                                <p>@edge.Ownership(_view.Product.IsActive)</p>
+                            </MudPaper>
+                        </div>
+                    }
+                </div>
+            </div>
+            <h3>Indirect relationships</h3>
+            @foreach (var edge in PageEdges.Where(e => Direction(e) == "Indirect"))
+            {
+                <MudPaper Class="pa-4 my-4" Elevation="0">
+                    @NodeContent(edge.Owner)
+                    <p>→ @edge.Relationship →</p>
+                    @NodeContent(edge.Target)
+                    <p>@edge.Ownership(_view.Product.IsActive)</p>
+                </MudPaper>
+            }
+        }
     }
 }
 @code {
     [SupplyParameterFromQuery(Name = "kind")] public string? Kind { get; set; }
     [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
     [SupplyParameterFromQuery(Name = "version")] public Guid? VersionId { get; set; }
-    private RelationshipView? _view;
+    private const int PageSize = 20;
+    private RelationshipExploration? _exploration;
+    private RelationshipView? _view => _exploration?.Root;
+    private IReadOnlyList<RelationshipEdge> _edges = [];
     private string? _error;
     private bool _table;
     private int _load;
+    private int _page;
+    private int PageCount => Math.Max(1, (_edges.Count + PageSize - 1) / PageSize);
+    private IReadOnlyList<RelationshipEdge> PageEdges => _edges.Skip(_page * PageSize).Take(PageSize).ToArray();
 
-    protected override Task OnParametersSetAsync() => Load();
-    private async Task ChangeView(bool table) { _table = table; await Load(); }
-    private async Task Load()
+    protected override Task OnParametersSetAsync() { _page = 0; return Load([]); }
+    private async Task ChangeView(bool table) { _table = table; await Load(_exploration?.Expanded ?? []); }
+    private async Task ChangePage(int page) { _page = page; await Load(_exploration?.Expanded ?? []); }
+    private async Task Toggle(RelationshipNode node)
+    {
+        var expanded = _exploration?.Expanded ?? [];
+        _page = 0;
+        await Load(expanded.Contains(node.VersionId)
+            ? expanded.Where(id => id != node.VersionId).ToArray()
+            : expanded.Append(node.VersionId).ToArray());
+    }
+    private async Task Load(IReadOnlyCollection<Guid> expanded)
     {
         var load = ++_load;
-        _view = null; _error = null;
+        _exploration = null; _edges = []; _error = null;
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
-        var result = await Operations.Load(actor, Kind, Id, VersionId);
+        var result = await Operations.Explore(actor, Kind, Id, VersionId, expanded);
         if (load != _load) return; // An older async navigation must not replace the current center.
         if (result.IsFailure) _error = result.Error;
-        else _view = result.Value;
+        else
+        {
+            _exploration = result.Value;
+            _edges = result.Value.Edges;
+            _page = Math.Clamp(_page, 0, PageCount - 1);
+        }
     }
+    private string Direction(RelationshipEdge edge) => edge.Owner.VersionId == _view!.Center.VersionId ? "Outgoing"
+        : edge.Target.VersionId == _view.Center.VersionId ? "Incoming" : "Indirect";
     private RenderFragment NodeContent(RelationshipNode node) => @<div class="relationship-node">
         <MudLink Href="@node.LinksPath">@node.Label</MudLink>
         <p>@node.Title</p>
@@ -96,5 +137,11 @@ else
         <p>Product: @_view!.Product.Id – @_view.Product.Name @(!_view.Product.IsActive ? "(retired)" : "")</p>
         @if (node.HasNewerVersion) { <p>Newer version available; showing this exact version.</p> }
         <MudLink Href="@node.DetailsPath">Inspect exact version</MudLink>
+        @if (node.VersionId != _view.Center.VersionId)
+        {
+            var expanded = _exploration!.Expanded.Contains(node.VersionId);
+            <p>@(expanded ? "Neighborhood expanded." : "Neighborhood not expanded; more relationships may exist.")</p>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => Toggle(node))" aria-expanded="@expanded" aria-label="@($"{(expanded ? "Collapse" : "Expand")} {node.Label}")">@(expanded ? "Collapse" : "Expand") @node.Label</MudButton>
+        }
     </div>;
 }
