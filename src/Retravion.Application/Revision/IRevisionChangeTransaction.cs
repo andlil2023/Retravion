@@ -10,6 +10,8 @@ public interface IRevisionChangeTransaction
 {
     Task<Result<RevisionSnapshot>> Create(Guid operation, DraftRevision draft, AuditActor actor, DateTimeOffset time,
         Func<Task<bool>> authorized, CancellationToken token = default);
+    Task<Result<RevisionSnapshot>> Copy(Guid operation, DraftRevision destination, Guid sourceId, AuditActor actor, DateTimeOffset time,
+        Func<Task<bool>> authorized, CancellationToken token = default);
     Task<Result<RevisionSnapshot>> Edit(Guid operation, RevisionSnapshot expected, string? identifier, string? description,
         AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default);
     Task<Result<RevisionSnapshot>> Select(Guid operation, RevisionSnapshot expected, string action, RevisionSelection target,

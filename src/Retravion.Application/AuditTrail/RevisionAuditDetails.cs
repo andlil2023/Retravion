@@ -7,4 +7,4 @@ public sealed record RevisionAuditValues(string Identifier, string Description, 
     RevisionReleaseEvidence? Release = null);
 public sealed record RevisionReleaseEvidence(string Actor, DateTimeOffset OccurredAt, ImmutableArray<ReleasedRevisionMember> Members);
 public sealed record RevisionAuditDetails(Guid ProductInternalId, Guid InternalId, Guid OperationId,
-    RevisionAuditValues? Before, RevisionAuditValues? After);
+    RevisionAuditValues? Before, RevisionAuditValues? After, Guid? SourceRevisionInternalId = null);

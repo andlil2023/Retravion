@@ -16,7 +16,9 @@
             <p>@_product!.Id – @_product.Name · Draft</p>
             <MudTextField @bind-Value="_identifier" Label="Revision identifier" HelperText="Required; up to 100 Unicode characters. Unique within this Product without regard to case." Immediate="true" Disabled="@(_busy || _uncertain)" />
             <MudTextField @bind-Value="_description" Label="Description (optional)" Lines="4" Immediate="true" Disabled="@(_busy || _uncertain)" />
-            <p>New revisions start empty. Manage exact-version selections from details.</p>
+            @if (_source is not null)
+            { <p>Copying Released revision @_source.Identifier. Exact explicit selections will be copied without upgrades; release evidence is not copied. The new Draft resolves its own closure.</p> }
+            else { <p>New revisions start empty. Manage exact-version selections from details.</p> }
         </form>
     </MudPaper>
     <div class="mt-4">
@@ -33,6 +35,8 @@
 @code {
     [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
     [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "source")] public Guid? SourceId { get; set; }
+    private ReleasedRevision? _source;
     private Retravion.Domain.Product.Product? _product;
     private RevisionSnapshot? _existing;
     private Guid _recordId, _operation;
@@ -42,7 +46,7 @@
     private string BackPath => $"/revisions?product={Uri.EscapeDataString(ProductId ?? "")}";
     protected override async Task OnParametersSetAsync()
     {
-        _ready = false; _error = _message = null; _existing = null; _uncertain = false;
+        _ready = false; _error = _message = null; _existing = null; _source = null; _uncertain = false;
         _identifier = _description = "";
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         var product = await Products.Retrieve(actor, ProductId);
@@ -58,6 +62,14 @@
             if (found.Value.Record is not { Deleted: false, Value: DraftRevision } row) { _error = "Editable Draft revision not found."; return; }
             _existing = row; _identifier = row.Value.Identifier; _description = row.Value.Description;
         }
+        else if (SourceId is { } sourceId)
+        {
+            var found = await Operations.Retrieve(actor, _product.InternalId, sourceId);
+            if (found.IsFailure) { _error = found.Error; return; }
+            if (found.Value.Record is not { Deleted: false, Value: ReleasedRevision source })
+            { _error = "Released source revision not found."; return; }
+            _source = source;
+        }
         _ready = true;
     }
     private async Task Save()
@@ -68,7 +80,9 @@
         {
             var actor = (await Authentication.GetAuthenticationStateAsync()).User;
             var result = _existing is null
-                ? await Operations.Create(actor, _operation, _recordId, _product!.InternalId, _identifier, _description)
+                ? _source is not null
+                    ? await Operations.Copy(actor, _operation, _recordId, _product!.InternalId, _source.InternalId, _identifier, _description)
+                    : await Operations.Create(actor, _operation, _recordId, _product!.InternalId, _identifier, _description)
                 : await Operations.Edit(actor, _operation, _existing, _identifier, _description);
             if (result.IsFailure)
             {
