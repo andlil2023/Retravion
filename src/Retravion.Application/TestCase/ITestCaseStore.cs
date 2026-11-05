@@ -5,12 +5,16 @@ using Case = Retravion.Domain.TestCase.TestCase;
 
 namespace Retravion.Application.TestCase;
 
-public sealed record TestCaseSnapshot(Case TestCase, long Revision);
+public sealed record TestCaseSnapshot(Case TestCase, long Revision, int? LatestApprovedVersionNumber = null);
+
+public sealed record TestCaseHistory(AuditActor Actor, DateTimeOffset OccurredAt, string Action, TestCaseAuditDetails Change);
 
 public interface ITestCaseStore
 {
     Task<Result<IReadOnlyList<TestCaseSnapshot>>> List(Guid productInternalId, CancellationToken cancellationToken = default);
     Task<Result<Maybe<TestCaseSnapshot>>> Find(Guid internalId, Guid? versionId = null, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<TestCaseSnapshot>>> Versions(Guid internalId, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<TestCaseHistory>>> History(Guid internalId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Owns transactional numbering, Product eligibility, concurrency and atomic business/audit writes.</summary>
@@ -20,4 +24,12 @@ public interface ITestCaseChangeTransaction
         DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
     Task<Result<TestCaseSnapshot>> Update(TestCaseSnapshot expected, TestCaseContent content, AuditActor actor,
         DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+    Task<Result<TestCaseSnapshot>> Review(TestCaseSnapshot expected, string decision, string? comment, AuditActor actor,
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+    Task<Result<TestCaseSnapshot>> CreateSuccessor(TestCaseSnapshot expected, string? reason, AuditActor actor,
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+    Task<Result<TestCaseSnapshot>> Reopen(TestCaseSnapshot expected, string? reason, AuditActor actor,
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+    Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target,
+        TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
 }

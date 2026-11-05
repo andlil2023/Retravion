@@ -44,21 +44,37 @@ public sealed partial class AccountManagementTests
         using var scope = factory.Services.CreateScope();
         var operations = scope.ServiceProvider.GetRequiredService<TestCaseOperations>();
         var expected = new TestCaseSnapshot(Case.Create(Guid.NewGuid(), 1, TestCaseContent.Create("secret", "", "", []).Value).Value, 1);
-        foreach (var principal in new[] { new ClaimsPrincipal(new ClaimsIdentity()), restricted, revoked })
+        var actions = new[] { "test-case.create", "test-case.edit", "test-case.review.InReview", "test-case.review.Approved",
+            "test-case.review.Draft", "test-case.review", "test-case.version.create", "test-case.reopen", "test-case.link.add",
+            "test-case.link.remove", "test-case.link.retarget", "test-case.link" };
+        async Task Mutations(ClaimsPrincipal principal)
         {
-            audit.Events.Clear();
             foreach (var steps in new TestCaseStep[][] { [new("secret-action", "secret-result")], [null!] })
             {
                 Assert.True((await operations.Create(principal, expected.TestCase.ProductInternalId, "secret-title", "secret-description", "secret-preconditions", steps)).IsFailure);
                 Assert.True((await operations.Edit(principal, expected, "secret-title", "secret-description", "secret-preconditions", steps)).IsFailure);
             }
+            foreach (var decision in new[] { "InReview", "Approved", "Draft", "secret-decision" })
+                Assert.True((await operations.Review(principal, expected, decision, "secret-comment")).IsFailure);
+            Assert.True((await operations.CreateSuccessor(principal, expected, "secret-reason")).IsFailure);
+            Assert.True((await operations.Reopen(principal, expected, "secret-reason")).IsFailure);
+            foreach (var operation in new[] { "add", "remove", "retarget", "secret-operation" })
+                Assert.True((await operations.ChangeLink(principal, expected, operation, new(Guid.NewGuid(), Guid.NewGuid()),
+                    new(Guid.NewGuid(), Guid.NewGuid()))).IsFailure);
+        }
+        foreach (var principal in new[] { new ClaimsPrincipal(new ClaimsIdentity()), restricted, revoked })
+        {
+            audit.Events.Clear();
+            await Mutations(principal);
             Assert.True((await operations.List(principal, expected.TestCase.ProductInternalId)).IsFailure);
             Assert.True((await operations.Find(principal, expected.TestCase.InternalId)).IsFailure);
             Assert.True((await operations.Find(principal, expected.TestCase.InternalId, expected.TestCase.VersionId)).IsFailure);
-            Assert.Equal(4, audit.Events.Count);
+            Assert.True((await operations.Versions(principal, expected.TestCase.InternalId)).IsFailure);
+            Assert.True((await operations.History(principal, expected.TestCase.InternalId)).IsFailure);
+            Assert.Equal(14, audit.Events.Count);
             Assert.All(audit.Events, e =>
             {
-                Assert.Contains(e.Action, new[] { "test-case.create", "test-case.edit" });
+                Assert.Contains(e.Action, actions);
                 Assert.Equal(AuditActionOutcome.Failure, e.Outcome); Assert.IsType<AuditTarget.Unknown>(e.Target);
                 Assert.Null(e.TestCaseChange);
                 if (principal.Identity?.IsAuthenticated == true) Assert.Equal(new AuditActor.Identified("admin"), e.Actor);
@@ -68,10 +84,9 @@ public sealed partial class AccountManagementTests
         foreach (var throws in new[] { false, true })
         {
             audit.Fail = true; audit.Throw = throws;
-            Assert.True((await operations.Create(revoked, Guid.Empty, "secret", "secret", "secret", [null!])).IsFailure);
-            Assert.True((await operations.Edit(revoked, expected, "secret", "secret", "secret", [null!])).IsFailure);
+            await Mutations(revoked);
         }
-        Assert.Equal(4, logger.Messages.Count);
+        Assert.Equal(28, logger.Messages.Count);
         Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Test Case change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
     }
@@ -101,6 +116,18 @@ public sealed partial class AccountManagementTests
         public Task<Result<IReadOnlyList<TestCaseSnapshot>>> List(Guid productInternalId, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException(); }
         public Task<Result<Maybe<TestCaseSnapshot>>> Find(Guid internalId, Guid? versionId = null, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<IReadOnlyList<TestCaseSnapshot>>> Versions(Guid internalId, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<IReadOnlyList<TestCaseHistory>>> History(Guid internalId, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<TestCaseSnapshot>> Review(TestCaseSnapshot expected, string decision, string? comment, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<TestCaseSnapshot>> CreateSuccessor(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<TestCaseSnapshot>> Reopen(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException(); }
         public Task<Result<TestCaseSnapshot>> Create(Guid productInternalId, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException(); }

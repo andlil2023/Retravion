@@ -27,8 +27,11 @@ else
         <RowTemplate>
             <MudTd DataLabel="ID"><MudLink Href="@($"/test-cases/details?id={context.TestCase.InternalId}&version={context.TestCase.VersionId}")">@context.TestCase.Id</MudLink></MudTd>
             <MudTd DataLabel="Title">@context.TestCase.Content.Title</MudTd>
-            <MudTd DataLabel="Version">@($"v{context.TestCase.VersionNumber}")</MudTd>
-            <MudTd DataLabel="Status">@context.TestCase.Status</MudTd>
+            <MudTd DataLabel="Version">@($"v{context.TestCase.VersionNumber}")
+                @if (context.LatestApprovedVersionNumber is { } approved && approved != context.TestCase.VersionNumber)
+                { <span> · @($"v{approved} Approved")</span> }
+            </MudTd>
+            <MudTd DataLabel="Status">@(context.TestCase.Status == "InReview" ? "In Review" : context.TestCase.Status)</MudTd>
         </RowTemplate>
         <NoRecordsContent><p>@(_cases.Count == 0 ? "No Test Cases yet." : "No Test Cases match these filters.")</p></NoRecordsContent>
     </MudTable>

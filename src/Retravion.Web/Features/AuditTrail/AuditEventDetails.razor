@@ -74,6 +74,29 @@
                     </dl>
                 </section>
             }
+            <dl>
+                <dt>Version</dt><dd>@($"v{testCaseChange.VersionNumber}")</dd>
+                @if (testCaseChange.SourceVersionId is { } source)
+                { <dt>Source version</dt><dd><a href="@($"/test-cases/details?id={testCaseChange.InternalId}&version={source}")">Exact source Test Case version</a></dd> }
+                @if (testCaseChange.Decision is not null)
+                { <dt>Decision</dt><dd>@testCaseChange.Decision</dd><dt>Comment</dt><dd class="recorded-value">@(testCaseChange.Comment ?? "Not provided")</dd> }
+                @if (testCaseChange.Reason is not null)
+                { <dt>Successor reason</dt><dd class="recorded-value">@testCaseChange.Reason</dd> }
+                @if (testCaseChange.Before?.Links is { } oldLinks)
+                {
+                    <dt>Old exact Requirement endpoints</dt><dd><ul>
+                        @foreach (var endpoint in oldLinks)
+                        { <li><a href="@($"/requirements/details?id={endpoint.RequirementInternalId}&version={endpoint.RequirementVersionId}")">Exact Requirement version</a></li> }
+                    </ul>@(oldLinks.Count == 0 ? "None" : "")</dd>
+                }
+                @if (testCaseChange.After.Links is { } newLinks)
+                {
+                    <dt>New exact Requirement endpoints</dt><dd><ul>
+                        @foreach (var endpoint in newLinks)
+                        { <li><a href="@($"/requirements/details?id={endpoint.RequirementInternalId}&version={endpoint.RequirementVersionId}")">Exact Requirement version</a></li> }
+                    </ul>@(newLinks.Count == 0 ? "None" : "")</dd>
+                }
+            </dl>
         }
         else if (Event.AiWorkflowChange is { } settings)
         {

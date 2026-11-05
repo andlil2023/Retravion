@@ -26,7 +26,7 @@ public sealed class TestCaseTests
         Assert.NotEqual(Guid.Empty, value.VersionId);
         Assert.NotEqual(value.InternalId, value.VersionId);
         var empty = TestCaseContent.Create(null, null, null, null).Value;
-        var edited = value.Edit(empty);
+        var edited = value.Edit(empty).Value;
         Assert.Equal(value.InternalId, edited.InternalId);
         Assert.Equal(value.VersionId, edited.VersionId);
         Assert.Equal(product, edited.ProductInternalId);
@@ -59,6 +59,49 @@ public sealed class TestCaseTests
         Assert.True(TestCaseContent.Create("", "", "", [null!]).IsFailure);
         Assert.True(TestCaseContent.Create("", "", "", [new(null!, "")]).IsFailure);
         Assert.True(TestCaseContent.Create("", "", "", [new("", null!)]).IsFailure);
+    }
+
+    [Fact]
+    public void LifecycleRequiresCompleteContentLinksAndApprovedTargetsAndPreservesIdentity()
+    {
+        var content = TestCaseContent.Create("Title", "", "", [new("Action", "Result")]).Value;
+        var draft = Case.Create(Guid.NewGuid(), 1, content).Value;
+        Assert.True(draft.SubmitForReview().IsFailure);
+        var endpoint = new TestCaseRequirementLink(Guid.NewGuid(), Guid.NewGuid());
+        foreach (var incomplete in new[] {
+            TestCaseContent.Create(" \n", "", "", content.Steps).Value,
+            TestCaseContent.Create("Title", "", "", []).Value,
+            TestCaseContent.Create("Title", "", "", [new(" \t", "Result")]).Value,
+            TestCaseContent.Create("Title", "", "", [new("Action", " \n")]).Value })
+            Assert.True(draft.Edit(incomplete).Value.ChangeLinks([endpoint]).Value.SubmitForReview().IsFailure);
+        Assert.True(draft.ChangeLinks([endpoint, endpoint]).IsFailure);
+        Assert.True(draft.ChangeLinks([endpoint, endpoint with { RequirementVersionId = Guid.NewGuid() }]).IsFailure);
+        Assert.True(draft.ChangeLinks([new(Guid.Empty, Guid.NewGuid())]).IsFailure);
+        var review = draft.ChangeLinks([endpoint]).Value.SubmitForReview().Value;
+        Assert.Equal(draft.VersionId, review.VersionId);
+        Assert.Equal("InReview", review.Status);
+        Assert.True(review.Edit(content).IsFailure); Assert.True(review.ChangeLinks([]).IsFailure);
+        Assert.True(review.Approve(false).IsFailure);
+        var rejected = review.ReturnToDraft().Value;
+        Assert.Equal(review.VersionId, rejected.VersionId); Assert.Equal(1, rejected.VersionNumber);
+        var approved = rejected.SubmitForReview().Value.Approve(true).Value;
+        Assert.True(approved.Edit(content).IsFailure); Assert.True(approved.ChangeLinks([]).IsFailure);
+        Assert.True(approved.SubmitForReview().IsFailure); Assert.True(approved.ReturnToDraft().IsFailure);
+        Assert.True(approved.CreateSuccessor(" \n").IsFailure);
+        var successor = approved.CreateSuccessor(" Fixed reason ").Value;
+        Assert.NotEqual(approved.VersionId, successor.VersionId);
+        Assert.Equal(approved.VersionId, successor.SourceVersionId);
+        Assert.Equal(approved.InternalId, successor.InternalId); Assert.Equal(approved.ProductInternalId, successor.ProductInternalId);
+        Assert.Equal(approved.Id, successor.Id); Assert.Equal(2, successor.VersionNumber); Assert.Equal("Draft", successor.Status);
+        Assert.Equal(" Fixed reason ", successor.CreationReason);
+        Assert.True(approved.Content.SameContent(successor.Content)); Assert.Equal(approved.Links.ToArray(), successor.Links.ToArray());
+        Assert.Equal(successor.CreationReason, successor.Edit(content).Value.CreationReason);
+        Assert.True(Case.Restore(draft.InternalId, draft.ProductInternalId, draft.VersionId, 1, content, "Bogus").IsFailure);
+        Assert.True(Case.Restore(draft.InternalId, draft.ProductInternalId, draft.VersionId, 1, content, "Approved").IsFailure);
+        Assert.True(Case.Restore(draft.InternalId, draft.ProductInternalId, draft.VersionId, 1, content, versionNumber: 2).IsFailure);
+        var limit = Case.Restore(draft.InternalId, draft.ProductInternalId, draft.VersionId, 1, content, "Approved", int.MaxValue,
+            "Reason", Guid.NewGuid(), [endpoint]).Value;
+        Assert.True(limit.CreateSuccessor("Next").IsFailure);
     }
 
     [Fact]
