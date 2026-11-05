@@ -82,11 +82,64 @@ The first implementation is web-only. Existing [relationship rules](Relationship
 - Reads, navigation, history expansion, no-op saves, ordinary validation failures, duplicate/invalid links, unapproved-target approval rejection, release-protection rejection, older-version reopening, second-working-version conflicts, and stale-write rejections produce no change event or successful history entry. Unauthorized-attempt auditing still applies even if input also fails validation.
 - These are explicit Test Case decisions, not automatic adoption of Product-specific REQ-SW-AUDIT-007–009. Reuse the small common audit event contract; do not introduce entity-specific submission methods or a speculative auditing framework. Any necessary public contract extension requires separate approval.
 
+### REQ-TC-007 — Access Test Cases through Local MCP
+
+**Requirement:** The system shall provide authenticated local MCP list/read/create/Draft-edit access to Test Cases under the contracts below.
+
+Approved documentation-only decisions for [PBI #158](https://github.com/andlil2023/Retravion/issues/158). These are future contracts, not implemented tools or authorization to implement them. No new permission model, transport, package, persistence strategy, or public runtime API is introduced by this specification.
+
+**Acceptance criteria:**
+- Reuse existing local MCP transport, bearer/session validation, container connectivity and server-side web authorization. Anonymous, password-restricted, revoked-session and otherwise unauthorized access is denied. Remote access and new roles are excluded. Enforce authorization before disclosing Product or Test Case lookup results.
+- Authorized readers can inspect every status and retired Products. Creation requires an eligible active Product; editing requires an authorized editable Draft. Recheck authorization, Product retirement, exact version, concurrency revision, lifecycle and release protection at mutation time under REQ-TC-001 and REQ-LINK-009, including concurrent changes.
+- MCP may create Draft v1 and edit an existing eligible Draft, including a successor created through the web. It cannot submit, approve, reject, reopen, create successors, change status, or add/remove/retarget links. These actions remain web-only; exact-version selection never grants mutation authority. Creation starts with no links; content replacement preserves all existing exact links.
+- Reject unknown arguments rather than silently ignoring them, including injected actor, status, ownership, generated IDs, version number, reasons, or link changes. Nested step objects accept only `action` and `expectedResult`; never accept editable step numbers. Malformed requests do not mutate records.
+
+#### Tool Requests
+
+Argument/property names are case-sensitive camel case. GUIDs are immutable identities, not TC IDs or version numbers. Required arguments must be present with the stated type; omitted optional arguments use the defaults below.
+
+| Tool | Arguments | Successful result |
+|---|---|---|
+| `list_test_cases` | Required `productId`: Product manual ID string. | Snapshot array, one entry per entity in that Product, using its working Draft/InReview version otherwise latest Approved. Include all statuses and latest-Approved designation when a working version also exists. No search, filter or pagination arguments in this increment; ordering is not guaranteed. |
+| `read_test_case` | Required `internalId`: entity GUID; optional `versionId`: version GUID or null. | Object with `testCase`: selected snapshot, `versions`: all version summaries, and `history`: retained history for the entity. Omitted/null `versionId` follows the list default. Exact selection must belong to this entity; missing entity/version or mismatched ownership fails without substitution. |
+| `create_draft_test_case` | Required `productId`: Product manual ID string. Optional `title`, `description`, `preconditions`: strings or null; optional `steps`: step array or null. | New Draft v1 snapshot with system-allocated TC ID and entity/version GUIDs. Missing/null text normalizes to empty strings; missing/null steps normalizes to an empty array. |
+| `edit_draft_test_case` | Required `internalId`: entity GUID, `versionId`: exact version GUID, `expectedRevision`: positive integer concurrency token, and `title`, `description`, `preconditions`: strings, `steps`: step array. None may be null. | Updated snapshot of that exact Draft, or unchanged snapshot for an authorized current no-op. Full content replacement, not a patch; empty strings/array deliberately clear content. No default-version fallback. |
+
+Each step is `{ "action": "Markdown text", "expectedResult": "Markdown text" }`. Both properties are required non-null strings; null elements, missing properties and wrong types fail. Empty/whitespace strings and an empty array are valid incomplete Drafts under REQ-TC-001. Array order determines displayed numbering and records reorder operations; step identities/numbers are not request fields. Title is plain text; description, preconditions, actions and expected results retain Markdown source, not rendered HTML.
+
+Creation must not require review-complete content or Requirement links. Editing keeps entity/Product/version identities, TC ID, version number, successor metadata, status and links unchanged. A stale revision or wrong version fails even when submitted content matches current content; no-op detection cannot bypass concurrency or eligibility checks. `expectedRevision` is the snapshot's concurrency token, not its version number or a Product Revision identifier.
+
+#### Response Shapes and Errors
+
+Successful tool results follow the existing MCP convention: a text content block containing camel-case JSON. Operation failures use `isError: true` with a safe text message, not a success-shaped payload. Preserve existing transport/authentication rejection behavior, including request-size, browser-origin and host restrictions. Protocol-shape errors are rejected before dispatch; this contract does not introduce new machine-readable error codes.
+
+- **Snapshot:** `internalId`, `productInternalId`, `id` (TC ID), `versionId`, `versionNumber`, `status` (`Draft`, `InReview`, `Approved`), `title`, `description`, `preconditions`, ordered `steps`, `links`, `revision` (positive integer concurrency token), `creationReason`, `sourceVersionId`, and nullable `latestApprovedVersionNumber`. Content strings and arrays are non-null. Creation reason/source are null for v1 and retain immutable successor metadata thereafter.
+- **Link:** `{ requirementInternalId, requirementVersionId }`, both exact GUIDs. These are read-only endpoints; no latest substitution or inferred coverage for a newer Requirement version.
+- **Version summary:** `internalId`, `versionId`, `versionNumber`, `status`, `revision`, `creationReason`, `sourceVersionId`. Return every version belonging to the entity, in ascending version-number order. `latestApprovedVersionNumber` describes current entity state, not a distinct lifecycle status.
+- **History entry:** `actor` (identifier string or null for unknown), `occurredAt` (UTC timestamp), `action`, and `change`. `change` includes `internalId`, `versionId`, `versionNumber`, nullable `before`, `after`, nullable `decision`, `comment`, `sourceVersionId`, and `reason`. Before/after values retain event-time `productInternalId`, `id`, `title`, `description`, `preconditions`, `status`, ordered `steps` and exact `links`. Preserve unavailable historical values as null rather than reconstructing them from current state. `before` is null for creation. History spans the entity's versions, with immutable version identities distinguishing entries; reading an exact version never replaces its content with history/current values.
+- Denied access reveals no protected record existence/content. Missing records, invalid input, stale revisions, non-Draft state, retirement and release protection remain failures with no successful mutation/history entry. Unexpected faults are not silently converted to ordinary validation failures or exposed with provider details.
+- Report write success only after confirmed commit. If commit confirmation is lost, including cancellation after an attempted commit, report uncertainty, not success or confirmed rollback. Advise authorized read/list retrieval before any user-directed retry; never automatically retry create or edit. For creation with no returned identity, compare the Product list and read candidate records; this is not guaranteed request correlation or deduplication. If the result remains ambiguous, do not advise blind recreation. No idempotency key or exactly-once guarantee is introduced.
+
+#### Future Mutation Audit Decisions and Verification
+
+Current #158 runtime write paths: **N/A — documentation only**. Future tools must apply REQ-TC-006 and REQ-SYS-AUDIT-003 through the common audit submission contract, not infer policy from Product-specific REQ-SW-AUDIT-007–009.
+
+| Proposed operation | Required event and retained values | Planned verification |
+|---|---|---|
+| `create_draft_test_case` | `test-case.create`: actor, occurrence time, success outcome, immutable entity/version target identities and version number; initial Product identity, generated TC ID, Draft status, normalized title/description/preconditions and ordered steps, initially empty exact links. | TC-TC-023, TC-TC-027–029; incomplete/complete creates, concurrent allocation, event values, atomic failures and uncertainty. |
+| `edit_draft_test_case` | `test-case.edit` only for actual changes: actor, occurrence time, success outcome, immutable entity/version identities and version number; before/after Product/TC identity, status, all content and ordered steps, preserving exact links. Step addition/removal/edit/reorder is part of this one edit event, not duplicate per-step events. | TC-TC-024–029; field/step changes, preserved links, current no-op versus stale no-op, access, races, atomic failures and uncertainty. |
+
+Commit business state, required owning-version history and required success audit together. Audit submission/write failure, business failure or history failure before commit prevents all parts from committing; failure to confirm an attempted commit follows the uncertainty rule above. Test both actual committed and uncommitted outcomes, including cancellation after attempt. No partial state/history/audit or automatic retries are permitted.
+
+For each recognized create/edit call denied by authorization or the transport access gate, submit one failure event for the corresponding action with occurrence time, actor if known otherwise unknown, failure outcome and unknown target. Denial takes precedence over content validation when the mutation can be identified, including invalid submitted content. Do not retain submitted identifiers, revision tokens, fields, steps, endpoints or comments. Keep denial effective if audit submission fails/throws; log only a safe audit-failure message, without submitted data, credentials or provider exception details. Logging does not replace or guarantee an event. Unparseable, oversized or unidentifiable protocol requests have no identifiable Test Case mutation event obligation; existing protocol rejection remains effective. Reads, including denied reads, are not mutation attempts.
+
+Authorized reads/list/history, unchanged current saves, ordinary validation/protocol failures, stale/wrong-version requests, lifecycle/retirement/release rejections produce no change event or successful history. Unauthorized recognized mutations still use the denied-attempt rule even if their arguments would otherwise be excluded. No MCP lifecycle/link writes exist, so their audit events are not generated by these tools.
+
 ## Boundaries and Deferred Work
 
 No application functionality is implemented by #144. Execution/results, Test Runs, CI integration, release-baseline selection and release machinery are excluded. REQ-LINK-009 specifies approved future release protection, not a completed revision design. Future release write operations still need their own audit decision and verification plan before implementation.
 
-Future MCP must support reading, creating, and updating Test Cases subject to the same permissions, validation, lifecycle, retirement, concurrency, and release protections. This first implementation provides no Test Case MCP operations; public APIs and detailed MCP lifecycle capabilities need separate approval.
+REQ-TC-007 specifies approved future MCP list/read/create/Draft-edit contracts from #158, including web-only lifecycle/link boundaries and per-write audit plans. This documentation introduces no Test Case MCP operations. Public runtime contract implementation requires a separately approved PBI; preserve permissions, validation, retirement, concurrency and release protection.
 
 Product-scoped shared module grouping (for example AUTH/AUDIT), filtering by module, and optional module-qualified IDs such as TC-AUTH-001 are deferred proposals, not approved implementation. Moving items, module renaming, and numbering rules require later decisions; current TC IDs remain simple and immutable.
 
@@ -102,6 +155,6 @@ Field size limits, numbering format beyond the TC-001 convention and allocation 
 4. **Test Case Requirement links:** storage and owner rules, submission/approval checks, inheritance, retargeting, history/audit; coordinate with #135–140. Review and links may need one coherent increment if independently testable boundaries cannot preserve the required gates.
 5. **Shared Links-page Test Case integration:** graph/table navigation and equivalent authorized link actions.
 6. **Revision release closure:** separately specify/implement baseline selection, all-Approved transitive validation, permanent protection, mutation/release concurrency, and release-specific audit decisions. This is a prerequisite for claiming release-based evidence protection.
-7. **Future MCP Test Case access:** separately approve list/read/create/update contracts and tests. Shared modules/numbering remain a later proposal.
+7. **Future MCP Test Case access:** implement the contracts and prospective tests specified by #158 only under separately approved implementation scope. Shared modules/numbering remain a later proposal.
 
 Each proposed implementation requires a separately approved PBI with its own file scope, applicable requirement IDs, write-path audit decisions, and focused verification. No follow-up issues are created by this specification.
