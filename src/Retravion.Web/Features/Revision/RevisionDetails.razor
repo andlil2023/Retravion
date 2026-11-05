@@ -46,6 +46,12 @@
             <MudButton Href="@($"/revisions/edit?product={Uri.EscapeDataString(ProductId ?? "")}&id={Id}")" Disabled="@Locked">Edit metadata</MudButton>
         </div>
     }
+    @if (_product?.IsActive == true && _row is { Deleted: false, Value: ReleasedRevision })
+    {
+        <div class="mt-4">
+            <MudButton Href="@($"/revisions/create?product={Uri.EscapeDataString(ProductId ?? "")}&source={Id}")" Disabled="@Locked" Variant="Variant.Filled" Color="Color.Primary">Copy to new Draft</MudButton>
+        </div>
+    }
     @if (_pendingAction is not null && !Locked)
     {
         <MudPaper Class="pa-4 mt-4" Elevation="0">

@@ -16,6 +16,8 @@
         {
             <h3>Revision evidence</h3>
             <p>Operation: @revision.OperationId · Revision: @revision.InternalId</p>
+            @if (revision.SourceRevisionInternalId is { } sourceId)
+            { <p>Copied from Released revision: @sourceId</p> }
             @foreach (var entry in new[] { (Label: "Prior values", Values: revision.Before), (Label: "New values", Values: revision.After) })
             {
                 <section aria-label="@entry.Label">

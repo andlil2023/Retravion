@@ -58,6 +58,15 @@ internal sealed class RevisionOperations(IAuthorizationService authorization, Se
                 : Task.FromResult(Result.Failure<RevisionSnapshot>(draft.Error));
         }, token);
 
+    public Task<Result<RevisionSnapshot>> Copy(ClaimsPrincipal principal, Guid operation, Guid id, Guid product, Guid sourceId,
+        string? identifier, string? description, CancellationToken token = default) =>
+        Change(principal, "revision.copy", (actor, now, allowed) =>
+        {
+            var destination = DraftRevision.Create(id, product, identifier, description);
+            return destination.IsSuccess ? changes.Copy(operation, destination.Value, sourceId, actor, now, allowed, token)
+                : Task.FromResult(Result.Failure<RevisionSnapshot>(destination.Error));
+        }, token);
+
     public Task<Result<RevisionSnapshot>> Edit(ClaimsPrincipal principal, Guid operation, RevisionSnapshot expected,
         string? identifier, string? description, CancellationToken token = default) =>
         Change(principal, "revision.edit", (actor, now, allowed) => changes.Edit(operation, expected, identifier, description, actor, now, allowed, token), token);

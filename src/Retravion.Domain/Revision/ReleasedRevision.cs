@@ -16,6 +16,11 @@ public sealed record ReleasedRevision : Revision
         : base(draft.InternalId, draft.ProductInternalId, draft.Identifier, draft.Description, draft.Selections) =>
         (ReleasedBy, ReleasedAt, Members) = (actor, time.ToUniversalTime(), members);
 
+    public Result<DraftRevision> CopyToDraft(Guid id, string? identifier, string? description) =>
+        id == InternalId
+            ? Result.Failure<DraftRevision>("A copied revision requires a new immutable identity.")
+            : DraftRevision.Restore(id, ProductInternalId, identifier, description ?? "", Selections);
+
     // All-Approved validation and exact closure resolution are performed under the transaction's entity locks.
     // Construction validates the frozen evidence's internal invariants, including exact root membership.
     public static Result<ReleasedRevision> Restore(DraftRevision draft, string? actor, DateTimeOffset time,

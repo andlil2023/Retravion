@@ -318,12 +318,102 @@ public sealed partial class PostgresProductTests
         Assert.Empty(renderer.Errors);
     }
 
+    [PostgresFact]
+    public async Task RevisionCopyUiCreatesIndependentDraftAndRequiresAuthorizedRetrievalBeforeRetryInBothOutcomes()
+    {
+        await using var db = await Database.Create();
+        var products = new PostgresProductStore(db.ConnectionString); var store = new PostgresRevisionStore(db.ConnectionString);
+        var writes = new RevisionWriteHook(store);
+        await using var host = new McpTestHost(s =>
+        {
+            s.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            s.AddSingleton<IRevisionStore>(store); s.AddSingleton<IRevisionChangeTransaction>(writes);
+        });
+        await host.Login(); await host.Replace(); var credential = await host.Authenticate();
+        var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(credential);
+        using var scope = host.Factory.Services.CreateScope(); var navigation = new CaseNavigation();
+        await using var services = new ServiceCollection().AddLogging().AddMudServices().AddSingleton<IJSRuntime, CaseJS>()
+            .AddSingleton<NavigationManager>(navigation).AddSingleton<AuthenticationStateProvider>(new CaseAuthentication(principal))
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<RevisionOperations>()).AddSingleton(scope.ServiceProvider.GetRequiredService<ProductOperations>()).BuildServiceProvider();
+        await using var renderer = new CaseRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var g = await PrepareRelease(db.ConnectionString);
+            var source = (await ReleaseNow(store, await ReleasePreview(store, g.Row))).Value;
+            var sourceId = source.Value.InternalId;
+            async Task MountCopy(Guid id)
+            {
+                navigation.Go($"revisions/create?product={g.Product.Id}&source={id}");
+                await renderer.Mount(typeof(RevisionEditor), new() { [nameof(RevisionEditor.ProductId)] = g.Product.Id, [nameof(RevisionEditor.SourceId)] = id });
+            }
+            await renderer.Mount(typeof(RevisionDetails), new() { [nameof(RevisionDetails.ProductId)] = g.Product.Id, [nameof(RevisionDetails.Id)] = sourceId });
+            Assert.Contains($"source={sourceId}", renderer.Button("Copy to new Draft").Href);
+            var empty = await RevCreate(store, g.Product.InternalId, "Not Released");
+            await MountCopy(empty.Value.InternalId); Assert.Empty(renderer.Elements("form")); Assert.Contains("Released source revision not found", renderer.Text());
+            await MountCopy(Guid.NewGuid()); Assert.Empty(renderer.Elements("form"));
+            await MountCopy(sourceId);
+            Assert.Contains("Exact explicit selections", renderer.Text()); Assert.Contains("release evidence is not copied", renderer.Text());
+            var events = (await new PostgresAuditQuery(db.ConnectionString).FindAsync(new())).Count;
+            await renderer.Event("onsubmit", EventArgs.Empty); Assert.Contains("identifier is required", renderer.Text());
+            await renderer.Field("Revision identifier").ValueChanged.InvokeAsync(source.Value.Identifier);
+            await renderer.Event("onsubmit", EventArgs.Empty); Assert.Contains("already in use", renderer.Text());
+            Assert.Equal(events, (await new PostgresAuditQuery(db.ConnectionString).FindAsync(new())).Count);
+            await renderer.Field("Revision identifier").ValueChanged.InvokeAsync("First copied Draft");
+            await renderer.Field("Description (optional)").ValueChanged.InvokeAsync("UI copy description");
+            await renderer.Event("onsubmit", EventArgs.Empty);
+            var first = Assert.Single((await store.List(g.Product.InternalId)).Value, r => r.Value.Identifier == "First copied Draft");
+            Assert.IsType<DraftRevision>(first.Value); Assert.Equal(source.Value.Selections.ToArray(), first.Value.Selections.ToArray());
+            Assert.Equal("UI copy description", first.Value.Description);
+            await renderer.Mount(typeof(RevisionDetails), new() { [nameof(RevisionDetails.ProductId)] = g.Product.Id, [nameof(RevisionDetails.Id)] = first.Value.InternalId });
+            Assert.Contains("Copied from Released revision", renderer.Text()); Assert.Contains(sourceId.ToString(), renderer.Text());
+            Assert.Contains("Full current Draft closure", renderer.Text()); Assert.DoesNotContain("Frozen release evidence", renderer.Text());
+            foreach (var committed in new[] { false, true })
+            {
+                await MountCopy(sourceId);
+                var identifier = "Uncertain copy " + Guid.NewGuid();
+                await renderer.Field("Revision identifier").ValueChanged.InvokeAsync(identifier);
+                writes.Store = new PostgresRevisionStore(db.ConnectionString, async (t, token) =>
+                { if (committed) await t.CommitAsync(token); throw new OperationCanceledException("private details"); });
+                var before = writes.Calls;
+                await renderer.Event("onsubmit", EventArgs.Empty);
+                Assert.Equal(before + 1, writes.Calls); Assert.Contains("could not be confirmed", renderer.Text());
+                Assert.Contains("No automatic retry", renderer.Text()); Assert.True(renderer.Button("Save Draft").Disabled);
+                await renderer.Event("onsubmit", EventArgs.Empty); Assert.Equal(before + 1, writes.Calls);
+                await renderer.Click("Retrieve outcome"); Assert.Equal(before + 1, writes.Calls);
+                writes.Store = store;
+                if (committed) Assert.Contains("/revisions/details", navigation.Uri);
+                else
+                {
+                    Assert.Contains("operation did not commit", renderer.Text()); Assert.False(renderer.Button("Save Draft").Disabled);
+                    await renderer.Event("onsubmit", EventArgs.Empty); Assert.Equal(before + 2, writes.Calls);
+                }
+                var copy = Assert.Single((await store.List(g.Product.InternalId)).Value, r => r.Value.Identifier == identifier);
+                Assert.IsType<DraftRevision>(copy.Value); Assert.Equal(source.Value.Selections.ToArray(), copy.Value.Selections.ToArray());
+                Assert.Equal("revision.copy", Assert.Single((await store.History(g.Product.InternalId, copy.Value.InternalId)).Value).Action);
+            }
+            // Lost access cannot unlock an uncertain creation for retry or disclose its outcome.
+            await MountCopy(sourceId); await renderer.Field("Revision identifier").ValueChanged.InvokeAsync("Denied retrieval");
+            writes.Store = new PostgresRevisionStore(db.ConnectionString, (_, _) => throw new IOException("private details"));
+            await renderer.Event("onsubmit", EventArgs.Empty); var calls = writes.Calls;
+            var sessions = host.Factory.Services.GetRequiredService<Retravion.Web.Features.Identity.Logout.SessionTicketStore>();
+            await sessions.RemoveAsync(principal.FindFirst(Retravion.Web.Features.Identity.Logout.SessionTicketStore.SessionClaim)!.Value);
+            await renderer.Click("Retrieve outcome"); Assert.Contains("Access denied", renderer.Text());
+            Assert.True(renderer.Button("Save Draft").Disabled); Assert.Equal(calls, writes.Calls);
+            var operations = scope.ServiceProvider.GetRequiredService<RevisionOperations>();
+            Assert.Equal("Access denied.", (await operations.Copy(principal, Guid.NewGuid(), Guid.NewGuid(), g.Product.InternalId, sourceId, "secret", "secret")).Error);
+            Assert.Equal(calls, writes.Calls);
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
     private sealed class RevisionWriteHook(PostgresRevisionStore store) : IRevisionChangeTransaction
     {
         internal PostgresRevisionStore Store = store;
         internal int Calls;
         public Task<Result<RevisionSnapshot>> Create(Guid op, DraftRevision d, AuditActor a, DateTimeOffset at, Func<Task<bool>> allowed, CancellationToken token = default)
         { Calls++; return Store.Create(op, d, a, at, allowed, token); }
+        public Task<Result<RevisionSnapshot>> Copy(Guid op, DraftRevision d, Guid sourceId, AuditActor a, DateTimeOffset at, Func<Task<bool>> allowed, CancellationToken token = default)
+        { Calls++; return Store.Copy(op, d, sourceId, a, at, allowed, token); }
         public Task<Result<RevisionSnapshot>> Edit(Guid op, RevisionSnapshot e, string? id, string? description, AuditActor a, DateTimeOffset at, Func<Task<bool>> allowed, CancellationToken token = default)
         { Calls++; return Store.Edit(op, e, id, description, a, at, allowed, token); }
         public Task<Result<RevisionSnapshot>> Select(Guid op, RevisionSnapshot e, string action, RevisionSelection target, RevisionSelection? replacement, AuditActor a, DateTimeOffset at, Func<Task<bool>> allowed, CancellationToken token = default)

@@ -141,6 +141,36 @@ public sealed partial class PostgresRevisionStore(string connectionString,
             return new RevisionSnapshot(draft, 1);
         }, token);
 
+    public Task<Result<RevisionSnapshot>> Copy(Guid operation, DraftRevision destination, Guid sourceId, AuditActor actor, DateTimeOffset time,
+        Func<Task<bool>> authorized, CancellationToken token = default) =>
+        Write(operation, actor, authorized, async (c, t) =>
+        {
+            if (destination is null || !destination.Selections.IsEmpty)
+                return Result.Failure<RevisionSnapshot>("Provide new Draft metadata without selections.");
+            if (!await ProductActive(c, t, destination.ProductInternalId, token)) return Inactive();
+            var found = await Find(c, t, destination.ProductInternalId, sourceId, token);
+            if (found.IsFailure) return Result.Failure<RevisionSnapshot>(found.Error);
+            if (found.Value.HasNoValue || found.Value.Value is not { Deleted: false, Value: ReleasedRevision source })
+                return Result.Failure<RevisionSnapshot>("Released source revision not found.");
+            var copied = source.CopyToDraft(destination.InternalId, destination.Identifier, destination.Description);
+            if (copied.IsFailure) return Result.Failure<RevisionSnapshot>(copied.Error);
+            foreach (var endpoint in copied.Value.Selections)
+            {
+                var target = await LoadEndpoint(c, t, destination.ProductInternalId, endpoint, token);
+                if (target.IsFailure) return Result.Failure<RevisionSnapshot>(target.Error);
+            }
+            await using var insert = new NpgsqlCommand("""
+                INSERT INTO retravion_revision.revision(internal_id,product_internal_id,identifier,description,state,selections,revision)
+                VALUES($1,$2,$3,$4,'Draft',$5,1)
+                """, c, t);
+            insert.Parameters.AddWithValue(copied.Value.InternalId); insert.Parameters.AddWithValue(copied.Value.ProductInternalId);
+            insert.Parameters.AddWithValue(copied.Value.Identifier); insert.Parameters.AddWithValue(copied.Value.Description);
+            insert.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(copied.Value.Selections));
+            await insert.ExecuteNonQueryAsync(token);
+            await Evidence(c, t, operation, actor, time, "revision.copy", null, copied.Value, false, token, source.InternalId);
+            return new RevisionSnapshot(copied.Value, 1);
+        }, token);
+
     public Task<Result<RevisionSnapshot>> Edit(Guid operation, RevisionSnapshot expected, string? identifier, string? description,
         AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default) =>
         Mutate(operation, expected, actor, time, authorized, "revision.edit", d => d.Edit(identifier, description), false, token);
@@ -206,11 +236,11 @@ public sealed partial class PostgresRevisionStore(string connectionString,
     }
 
     private static async Task Evidence(NpgsqlConnection c, NpgsqlTransaction t, Guid operation, AuditActor actor, DateTimeOffset time,
-        string action, Retravion.Domain.Revision.Revision? before, Retravion.Domain.Revision.Revision after, bool delete, CancellationToken token)
+        string action, Retravion.Domain.Revision.Revision? before, Retravion.Domain.Revision.Revision after, bool delete, CancellationToken token, Guid? sourceId = null)
     {
         static RevisionAuditValues Values(Retravion.Domain.Revision.Revision d) => new(d.Identifier, d.Description, d.State, d.Selections,
             d is ReleasedRevision r ? new(r.ReleasedBy, r.ReleasedAt, r.Members) : null);
-        var change = new RevisionAuditDetails(after.ProductInternalId, after.InternalId, operation, before is null ? null : Values(before), delete ? null : Values(after));
+        var change = new RevisionAuditDetails(after.ProductInternalId, after.InternalId, operation, before is null ? null : Values(before), delete ? null : Values(after), sourceId);
         await using var history = new NpgsqlCommand("INSERT INTO retravion_revision.history(internal_id,operation_id,actor_identifier,occurred_at_utc_ticks,action,change) VALUES($1,$2,$3,$4,$5,$6)", c, t);
         history.Parameters.AddWithValue(after.InternalId); history.Parameters.AddWithValue(operation);
         history.Parameters.AddWithValue(((AuditActor.Identified)actor).Identifier); history.Parameters.AddWithValue(time.UtcTicks);
