@@ -26,6 +26,10 @@ public interface IRequirementLinkStore
         DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
     Task<Result<RequirementSnapshot>> ReplaceParent(RequirementSnapshot expected, RequirementParentLink target,
         AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+    /// <summary>Atomically change an existing link to another exact version of the same User Need.</summary>
+    Task<Result<RequirementSnapshot>> RetargetLink(RequirementSnapshot expected, RequirementUserNeedLink target,
+        RequirementUserNeedLink replacement, AuditActor actor, DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default);
     Task<Result<RequirementSnapshot>> ChangeLink(RequirementSnapshot expected, RequirementUserNeedLink target, bool add,
         AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
 }

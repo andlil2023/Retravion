@@ -60,6 +60,15 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
                 confirmed: operation is "remove" or "retarget", token: token);
             return result.IsSuccess ? Result.Success() : Result.Failure(result.Error);
         }
+        if (owner.Snapshot is { } snapshot && operation == "retarget" && replacement is not null)
+        {
+            var result = relationship == NeedRelationship
+                ? await requirements.RetargetLink(actor, snapshot, new(target.InternalId, target.VersionId),
+                    new(replacement.InternalId, replacement.VersionId), token)
+                : await requirements.RetargetParent(actor, snapshot, new(target.InternalId, target.VersionId),
+                    new(replacement.InternalId, replacement.VersionId), token);
+            return result.IsSuccess ? Result.Success() : Result.Failure(result.Error);
+        }
         if (owner.Snapshot is null || operation is not ("add" or "remove"))
             return Result.Failure("Unsupported relationship change.");
         var changed = await Change(actor, owner.Snapshot, target, relationship, operation == "add", token);
