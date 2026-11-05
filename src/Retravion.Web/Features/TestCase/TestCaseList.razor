@@ -1,0 +1,57 @@
+@page "/test-cases"
+@inject TestCaseOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Test Cases · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Test Cases" BackHref="@ProductPath" BackText="Product details">
+        <Actions>@if (_product?.IsActive == true) { <MudButton Href="@CreatePath" StartIcon="@Icons.Material.Outlined.Add">Create Test Case</MudButton> }</Actions>
+    </PageHeader>
+</SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+else if (_cases is null) { <p role="status">Loading Test Cases…</p> }
+else
+{
+    <p>@_product!.Id – @_product.Name</p>
+    @if (!_product.IsActive) { <p>Test Cases are read-only while this Product is retired.</p> }
+    <MudTextField T="string" @bind-Value="_search" Label="Search ID or title" Immediate="true" />
+    <MudSelect T="string" @bind-Value="_status" Label="Status filter">
+        <MudSelectItem Value="@("All")">All statuses</MudSelectItem>
+        <MudSelectItem Value="@("Draft")">Draft</MudSelectItem>
+        <MudSelectItem Value="@("InReview")">In Review</MudSelectItem>
+        <MudSelectItem Value="@("Approved")">Approved</MudSelectItem>
+    </MudSelect>
+    <MudTable Items="Filtered" Dense="true" Hover="true" Elevation="0" aria-label="Test Cases">
+        <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Version</MudTh><MudTh>Status</MudTh></HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="ID"><MudLink Href="@($"/test-cases/details?id={context.TestCase.InternalId}&version={context.TestCase.VersionId}")">@context.TestCase.Id</MudLink></MudTd>
+            <MudTd DataLabel="Title">@context.TestCase.Content.Title</MudTd>
+            <MudTd DataLabel="Version">@($"v{context.TestCase.VersionNumber}")</MudTd>
+            <MudTd DataLabel="Status">@context.TestCase.Status</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><p>@(_cases.Count == 0 ? "No Test Cases yet." : "No Test Cases match these filters.")</p></NoRecordsContent>
+    </MudTable>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private IReadOnlyList<TestCaseSnapshot>? _cases;
+    private string? _error;
+    private string _search = "", _status = "All";
+    private IEnumerable<TestCaseSnapshot> Filtered => (_cases ?? []).Where(row =>
+        (_status == "All" || row.TestCase.Status == _status) &&
+        (row.TestCase.Id.Contains(_search, StringComparison.OrdinalIgnoreCase) || row.TestCase.Content.Title.Contains(_search, StringComparison.OrdinalIgnoreCase)));
+    private string ProductPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
+    private string CreatePath => $"/test-cases/create?product={Uri.EscapeDataString(ProductId ?? "")}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _cases = null; _product = null; _error = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, ProductId);
+        if (product.IsFailure) { _error = product.Error; return; }
+        _product = product.Value;
+        var result = await Operations.List(actor, _product.InternalId);
+        if (result.IsFailure) _error = result.Error; else _cases = result.Value;
+    }
+}

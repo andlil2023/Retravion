@@ -1,0 +1,59 @@
+@page "/test-cases/details"
+@inject TestCaseOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Test Case details · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Test Case details" BackHref="@BackPath" BackText="Test Cases" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_case is not null && _product is not null)
+{
+    var value = _case.TestCase;
+    <p>@_product.Id – @_product.Name</p>
+    <h2>@value.Id – @value.Content.Title</h2>
+    <p>@($"v{value.VersionNumber}") · @value.Status</p>
+    @if (!_product.IsActive) { <p>This Test Case is read-only because its Product is retired.</p> }
+    <MudPaper Class="product-card pa-4" Elevation="0">
+        <section aria-label="Description"><h3>Description</h3><ProductMarkdownView Markdown="@value.Content.Description" /></section>
+        <section aria-label="Preconditions"><h3>Preconditions</h3><ProductMarkdownView Markdown="@value.Content.Preconditions" /></section>
+        <section aria-label="Steps">
+            <h3>Steps</h3>
+            @if (value.Content.Steps.IsEmpty) { <p>No steps yet.</p> }
+            @for (var i = 0; i < value.Content.Steps.Length; i++)
+            {
+                var step = value.Content.Steps[i];
+                <section aria-label="@($"Step {i + 1}")">
+                    <h4>Step @(i + 1)</h4>
+                    <h5>Action</h5><ProductMarkdownView Markdown="@step.Action" />
+                    <h5>Expected result</h5><ProductMarkdownView Markdown="@step.ExpectedResult" />
+                </section>
+            }
+        </section>
+        <p>Requirement links, review, and successor versions are not available yet.</p>
+    </MudPaper>
+    @if (_product.IsActive)
+    {
+        <div class="product-actions"><MudButton Href="@($"/test-cases/edit?id={value.InternalId}&version={value.VersionId}")" Variant="Variant.Filled" Color="Color.Primary">Edit Draft</MudButton></div>
+    }
+}
+@code {
+    [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "version")] public Guid? VersionId { get; set; }
+    private TestCaseSnapshot? _case;
+    private Retravion.Domain.Product.Product? _product;
+    private string? _error;
+    private string BackPath => _product is null ? "/products" : $"/test-cases?product={Uri.EscapeDataString(_product.Id)}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _case = null; _product = null; _error = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var found = await Operations.Find(actor, Id, VersionId);
+        if (found.IsFailure) { _error = found.Error; return; }
+        if (found.Value.HasNoValue) { _error = "Test Case version not found."; return; }
+        var products = await Products.List(actor);
+        if (products.IsFailure) { _error = products.Error; return; }
+        _product = products.Value.SingleOrDefault(product => product.InternalId == found.Value.Value.TestCase.ProductInternalId);
+        if (_product is null) { _error = "Product not found."; return; }
+        _case = found.Value.Value;
+    }
+}

@@ -29,6 +29,9 @@ using Retravion.Web.Features.Mcp;
 using Retravion.Application.Requirement;
 using Retravion.Infrastructure.Requirement;
 using Retravion.Web.Features.Requirement;
+using Retravion.Application.TestCase;
+using Retravion.Infrastructure.TestCase;
+using Retravion.Web.Features.TestCase;
 using ModelContextProtocol.AspNetCore;
 using Retravion.Application.AiWorkflow;
 using Retravion.Infrastructure.AiWorkflow;
@@ -127,6 +130,13 @@ builder.Services.AddSingleton<IRequirementLinkStore>(_ => new PostgresRequiremen
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddScoped<RequirementOperations>();
+builder.Services.AddSingleton<ITestCaseStore>(_ => new PostgresTestCaseStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<ITestCaseChangeTransaction>(_ => new PostgresTestCaseStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddScoped<TestCaseOperations>();
 builder.Services.AddSingleton<AccountCreation>();
 builder.Services.AddScoped<UserOperations>();
 builder.Services.AddScoped<AccountAudit>();

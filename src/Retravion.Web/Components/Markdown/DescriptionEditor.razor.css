@@ -42,6 +42,9 @@
 .description-layout.side-by-side {
     grid-template-columns: minmax(0, var(--markdown-source-width, 1fr)) 1.5rem minmax(0, var(--markdown-preview-width, 1fr));
 }
+.description-layout.field-only { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.field-only .description-source textarea { min-height: 10rem; }
+.field-only .description-preview { block-size: 14rem; }
 .description-splitter {
     position: relative;
     cursor: col-resize;
