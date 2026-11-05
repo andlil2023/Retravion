@@ -14,6 +14,8 @@ public interface IRevisionChangeTransaction
         AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default);
     Task<Result<RevisionSnapshot>> Select(Guid operation, RevisionSnapshot expected, string action, RevisionSelection target,
         RevisionSelection? replacement, AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default);
+    Task<Result<RevisionSnapshot>> Release(Guid operation, RevisionSnapshot expected, string baselineToken,
+        AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default);
     Task<Result<RevisionSnapshot>> Delete(Guid operation, RevisionSnapshot expected, AuditActor actor, DateTimeOffset time,
         Func<Task<bool>> authorized, CancellationToken token = default);
 }

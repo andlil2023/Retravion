@@ -98,7 +98,7 @@ public sealed partial class PostgresProductTests
             Assert.True(detailResponse.IsSuccessStatusCode, detail.Split("HEADERS", StringSplitOptions.None)[0]);
             Assert.Contains("<table>", detail); Assert.Contains("<strong>Second</strong>", detail); Assert.Contains("&lt;b&gt;UI title&lt;/b&gt;", detail);
             Assert.DoesNotContain("<script>bad", detail); Assert.Contains("Exact Requirement links", detail);
-            Assert.Contains("Submit for review", detail); Assert.Contains("Reopening is unavailable", detail);
+            Assert.Contains("Submit for review", detail); Assert.Contains("no Released-revision protection", detail);
             var wrong = await host.Browser.GetStringAsync($"/test-cases/details?id={created.TestCase.InternalId}&version={Guid.NewGuid()}");
             Assert.Contains("Test Case version not found", wrong); Assert.DoesNotContain("UI title", wrong);
             await store.Create(product.InternalId, CaseContent("Other match"), CaseActor, CaseTime);
@@ -183,7 +183,7 @@ public sealed partial class PostgresProductTests
             async Task Mount(Guid? version = null) => await renderer.Mount(typeof(TestCaseDetails), new()
                 { [nameof(TestCaseDetails.Id)] = row.TestCase.InternalId, [nameof(TestCaseDetails.VersionId)] = version });
             await Mount();
-            Assert.Contains("Reopening is unavailable", renderer.Text());
+            Assert.Contains("no Released-revision protection", renderer.Text());
             await renderer.Click("Submit for review"); Assert.Contains("at least one Requirement link", renderer.Text());
             await renderer.Components<MudSelect<Guid>>().Single().ValueChanged.InvokeAsync(target.Requirement.VersionId);
             await renderer.Click("Add Requirement link");
@@ -216,8 +216,14 @@ public sealed partial class PostgresProductTests
             Assert.Contains("Submission <b>evidence</b>", renderer.Text());
             Assert.Contains("Reject and correct", renderer.Text()); Assert.Contains("Approved evidence", renderer.Text());
             Assert.DoesNotContain(renderer.Components<MudButton>(), button => button.Href?.Contains("/test-cases/edit") == true);
+            await renderer.Click("Reopen to Draft"); Assert.Contains("reopening reason is required", renderer.Text());
+            await renderer.Field("Change reason").ValueChanged.InvokeAsync("Correction UI reason");
+            await renderer.Click("Reopen to Draft");
+            Assert.Equal("Draft", (await store.Find(row.TestCase.InternalId)).Value.Value.TestCase.Status);
+            Assert.Contains("Correction UI reason", renderer.Text());
+            await renderer.Click("Submit for review"); await renderer.Click("Approve");
             await renderer.Click("Create successor Draft"); Assert.Contains("change reason is required", renderer.Text());
-            await renderer.Field("Successor change reason").ValueChanged.InvokeAsync("Fixed UI reason");
+            await renderer.Field("Change reason").ValueChanged.InvokeAsync("Fixed UI reason");
             await renderer.Click("Create successor Draft");
             var successor = (await store.Find(row.TestCase.InternalId)).Value.Value;
             Assert.Equal(2, successor.TestCase.VersionNumber); Assert.Equal("Fixed UI reason", successor.TestCase.CreationReason);
@@ -282,7 +288,7 @@ public sealed partial class PostgresProductTests
                 var calls = writes.Calls;
                 writes.Store = new PostgresTestCaseStore(database.ConnectionString, async (transaction, cancellationToken) =>
                 { if (committed) await transaction.CommitAsync(cancellationToken); throw new OperationCanceledException("Lost confirmation"); });
-                if (operation == "successor") await renderer.Field("Successor change reason").ValueChanged.InvokeAsync("Preserved reason");
+                if (operation is "successor" or "reopen") await renderer.Field("Change reason").ValueChanged.InvokeAsync("Preserved reason");
                 if (operation is "InReview" or "Draft" or "Approved") await renderer.Field("Review comment (optional)").ValueChanged.InvokeAsync("Preserved comment");
                 if (operation is "add" or "retarget")
                     await renderer.Components<MudSelect<Guid>>().Single().ValueChanged.InvokeAsync(operation == "add" ? scenario.Target.RequirementVersionId : scenario.Replacement.RequirementVersionId);
@@ -293,14 +299,23 @@ public sealed partial class PostgresProductTests
                 }
                 await renderer.Click(operation switch
                 {
-                    "successor" => "Create successor Draft", "InReview" => "Submit for review", "Draft" => "Return to Draft", "Approved" => "Approve",
+                    "successor" => "Create successor Draft", "reopen" => "Reopen to Draft", "InReview" => "Submit for review", "Draft" => "Return to Draft", "Approved" => "Approve",
                     "add" => "Add Requirement link", _ => "Confirm link change"
                 });
                 Assert.Equal(calls + 1, writes.Calls);
                 Assert.Contains("could not be confirmed", renderer.Text()); Assert.Contains("Reload", renderer.Text());
-                if (operation == "successor") Assert.Equal("Preserved reason", renderer.Field("Successor change reason").GetState(field => field.Value));
+                if (operation is "successor" or "reopen") Assert.Equal("Preserved reason", renderer.Field("Change reason").GetState(field => field.Value));
                 if (operation is "InReview" or "Draft" or "Approved") Assert.Equal("Preserved comment", renderer.Field("Review comment (optional)").GetState(field => field.Value));
                 if (operation is "remove" or "retarget") Assert.Contains("Confirm link change", renderer.Text());
+                var attemptedButton = operation switch
+                {
+                    "successor" => "Create successor Draft", "reopen" => "Reopen to Draft", "InReview" => "Submit for review", "Draft" => "Return to Draft", "Approved" => "Approve",
+                    "add" => "Add Requirement link", _ => "Confirm link change"
+                };
+                await renderer.Click(attemptedButton); Assert.Equal(calls + 1, writes.Calls);
+                Assert.Contains("No automatic retry", renderer.Text());
+                await renderer.Click("Retrieve current Test Case");
+                Assert.DoesNotContain("No automatic retry", renderer.Text()); Assert.Equal(calls + 1, writes.Calls);
                 var persisted = (await store.Find(scenario.Row.TestCase.InternalId)).Value.Value;
                 Assert.Equal(scenario.Row.Revision + (committed ? 1 : 0), persisted.Revision);
                 writes.Store = store;

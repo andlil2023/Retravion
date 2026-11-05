@@ -39,11 +39,11 @@ public sealed partial class PostgresProductTests
         await RevCreate(store, product.InternalId, longId);
         var renameOperation = Guid.NewGuid();
         var edited = (await store.Edit(renameOperation, original, " Renamed ", "<b>event value</b>", RevActor, RevTime, RevAllowed)).Value;
-        Assert.Equal(original.Draft.InternalId, edited.Draft.InternalId); Assert.Equal(product.InternalId, edited.Draft.ProductInternalId);
+        Assert.Equal(original.Value.InternalId, edited.Value.InternalId); Assert.Equal(product.InternalId, edited.Value.ProductInternalId);
         Assert.Equal(original.Revision + 1, edited.Revision);
         Assert.True((await store.Edit(Guid.NewGuid(), edited, "ALPHA", "", RevActor, RevTime, RevAllowed)).IsFailure);
         Assert.True((await store.Edit(Guid.NewGuid(), original, "stale", "", RevActor, RevTime, RevAllowed)).IsFailure);
-        var forged = edited with { Draft = DraftRevision.Create(edited.Draft.InternalId, other.InternalId, edited.Draft.Identifier, edited.Draft.Description).Value };
+        var forged = edited with { Value = DraftRevision.Create(edited.Value.InternalId, other.InternalId, edited.Value.Identifier, edited.Value.Description).Value };
         Assert.True((await store.Delete(Guid.NewGuid(), forged, RevActor, RevTime, RevAllowed)).IsFailure);
         var unchanged = (await store.Edit(Guid.NewGuid(), edited, " Renamed ", "<b>event value</b>", RevActor, RevTime, RevAllowed)).Value;
         Assert.Equal(edited.Revision, unchanged.Revision);
@@ -51,24 +51,24 @@ public sealed partial class PostgresProductTests
         var deleteOperation = Guid.NewGuid();
         var deleted = (await store.Delete(deleteOperation, edited, RevActor, RevTime, RevAllowed)).Value;
         Assert.True(deleted.Deleted); Assert.Equal(edited.Revision + 1, deleted.Revision);
-        Assert.DoesNotContain((await store.List(product.InternalId)).Value, r => r.Draft.InternalId == edited.Draft.InternalId);
-        var retained = (await new PostgresRevisionStore(db.ConnectionString).Retrieve(product.InternalId, edited.Draft.InternalId, deleteOperation)).Value;
+        Assert.DoesNotContain((await store.List(product.InternalId)).Value, r => r.Value.InternalId == edited.Value.InternalId);
+        var retained = (await new PostgresRevisionStore(db.ConnectionString).Retrieve(product.InternalId, edited.Value.InternalId, deleteOperation)).Value;
         Assert.True(retained.Record!.Deleted); Assert.Equal("revision.delete", retained.Operation!.Action);
         Assert.Equal("Renamed", retained.Operation.Change.Before!.Identifier); Assert.Null(retained.Operation.Change.After);
-        Assert.True((await store.Retrieve(other.InternalId, edited.Draft.InternalId, deleteOperation)).Value.Record is null);
-        Assert.Empty((await store.History(other.InternalId, edited.Draft.InternalId)).Value);
+        Assert.True((await store.Retrieve(other.InternalId, edited.Value.InternalId, deleteOperation)).Value.Record is null);
+        Assert.Empty((await store.History(other.InternalId, edited.Value.InternalId)).Value);
         Assert.True((await store.Delete(Guid.NewGuid(), edited, RevActor, RevTime, RevAllowed)).IsFailure);
         await RevCreate(store, product.InternalId, "renamed"); // Deleted identifiers may be reused, never identities.
-        var history = (await store.History(product.InternalId, original.Draft.InternalId)).Value;
+        var history = (await store.History(product.InternalId, original.Value.InternalId)).Value;
         Assert.Equal(new[] { "revision.create", "revision.edit", "revision.delete" }, history.Select(h => h.Action));
         Assert.All(history, h => { Assert.Equal(RevActor, h.Actor); Assert.Equal(RevTime.UtcTicks, h.OccurredAt.UtcTicks); Assert.Equal(product.InternalId, h.Change.ProductInternalId); });
-        Assert.Equal(original.Draft.Identifier, history[0].Change.After!.Identifier);
-        Assert.Equal(original.Draft.Description, history[0].Change.After!.Description);
+        Assert.Equal(original.Value.Identifier, history[0].Change.After!.Identifier);
+        Assert.Equal(original.Value.Description, history[0].Change.After!.Description);
         Assert.Empty(history[0].Change.After!.Selections);
-        var events = (await new PostgresAuditQuery(db.ConnectionString).FindAsync(new())).Where(e => e.RevisionChange?.InternalId == original.Draft.InternalId).ToArray();
-        Assert.Equal(3, events.Length); Assert.All(events, e => { Assert.Equal(AuditActionOutcome.Success, e.Outcome); Assert.Equal(new AuditTarget.Identified(original.Draft.InternalId.ToString()), e.Target); });
+        var events = (await new PostgresAuditQuery(db.ConnectionString).FindAsync(new())).Where(e => e.RevisionChange?.InternalId == original.Value.InternalId).ToArray();
+        Assert.Equal(3, events.Length); Assert.All(events, e => { Assert.Equal(AuditActionOutcome.Success, e.Outcome); Assert.Equal(new AuditTarget.Identified(original.Value.InternalId.ToString()), e.Target); });
         Assert.Equal(renameOperation, events.Single(e => e.Action == "revision.edit").RevisionChange!.OperationId);
-        Assert.Equal(accent.Draft.InternalId, (await store.Retrieve(product.InternalId, accent.Draft.InternalId)).Value.Record!.Draft.InternalId);
+        Assert.Equal(accent.Value.InternalId, (await store.Retrieve(product.InternalId, accent.Value.InternalId)).Value.Record!.Value.InternalId);
     }
 
     [PostgresFact]
@@ -85,19 +85,19 @@ public sealed partial class PostgresProductTests
         var empty = await RevCreate(store, product.InternalId);
         var one = (await store.Select(Guid.NewGuid(), empty, "add", e1, null, RevActor, RevTime, RevAllowed)).Value;
         var both = (await store.Select(Guid.NewGuid(), one, "add", e2, null, RevActor, RevTime, RevAllowed)).Value;
-        Assert.Equal(2, both.Draft.Selections.Length);
+        Assert.Equal(2, both.Value.Selections.Length);
         Assert.True((await store.Select(Guid.NewGuid(), one, "replace", e1, e2, RevActor, RevTime, RevAllowed)).IsFailure);
         var removed = (await store.Select(Guid.NewGuid(), both, "remove", e1, null, RevActor, RevTime, RevAllowed)).Value;
         var replaced = (await store.Select(Guid.NewGuid(), removed, "replace", e2, e1, RevActor, RevTime, RevAllowed)).Value;
-        Assert.Equal(e1, Assert.Single(replaced.Draft.Selections));
+        Assert.Equal(e1, Assert.Single(replaced.Value.Selections));
         foreach (var endpoint in new[] { e1 with { VersionNumber = 8 }, e1 with { InternalId = Guid.NewGuid() }, e1 with { VersionId = Guid.NewGuid() } })
             Assert.True((await store.Select(Guid.NewGuid(), replaced, "add", endpoint, null, RevActor, RevTime, RevAllowed)).IsFailure);
         Assert.Equal(second.Revision, (await requirements.Find(first.Requirement.InternalId)).Value.Value.Revision);
-        var history = (await store.History(product.InternalId, empty.Draft.InternalId)).Value;
+        var history = (await store.History(product.InternalId, empty.Value.InternalId)).Value;
         Assert.Equal(5, history.Count);
         Assert.Equal(new[] { e2 }, history[^1].Change.Before!.Selections.ToArray()); Assert.Equal(new[] { e1 }, history[^1].Change.After!.Selections.ToArray());
         await store.Delete(Guid.NewGuid(), replaced, RevActor, RevTime, RevAllowed);
-        Assert.Equal(e1, Assert.Single((await store.History(product.InternalId, empty.Draft.InternalId)).Value[^1].Change.Before!.Selections));
+        Assert.Equal(e1, Assert.Single((await store.History(product.InternalId, empty.Value.InternalId)).Value[^1].Change.Before!.Selections));
         Assert.Equal(2, (await requirements.Versions(first.Requirement.InternalId)).Value.Count);
     }
 
@@ -153,12 +153,12 @@ public sealed partial class PostgresProductTests
         foreach (var json in new[] { "[null]", "[{}]", "[1]" })
         {
             await using var corrupt = new NpgsqlCommand("UPDATE retravion_revision.revision SET selections=$1::jsonb WHERE internal_id=$2", c);
-            corrupt.Parameters.AddWithValue(json); corrupt.Parameters.AddWithValue(row.Draft.InternalId); await corrupt.ExecuteNonQueryAsync();
-            Assert.True((await store.Retrieve(product.InternalId, row.Draft.InternalId)).IsFailure);
+            corrupt.Parameters.AddWithValue(json); corrupt.Parameters.AddWithValue(row.Value.InternalId); await corrupt.ExecuteNonQueryAsync();
+            Assert.True((await store.Retrieve(product.InternalId, row.Value.InternalId)).IsFailure);
             Assert.True((await store.List(product.InternalId)).IsFailure);
         }
         using var canceled = new CancellationTokenSource(); canceled.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.Retrieve(product.InternalId, row.Draft.InternalId, token: canceled.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.Retrieve(product.InternalId, row.Value.InternalId, token: canceled.Token));
     }
 
     [PostgresFact]
@@ -192,10 +192,10 @@ public sealed partial class PostgresProductTests
             foreach (var attempt in attempts)
             {
                 var result = await attempt(); Assert.True(result.IsFailure); Assert.DoesNotContain("private", result.Error);
-                var saved = (await store.Retrieve(product.InternalId, row.Draft.InternalId)).Value.Record!;
-                Assert.False(saved.Deleted); Assert.Equal(row.Revision, saved.Revision); Assert.True(row.Draft.SameValues(saved.Draft));
+                var saved = (await store.Retrieve(product.InternalId, row.Value.InternalId)).Value.Record!;
+                Assert.False(saved.Deleted); Assert.Equal(row.Revision, saved.Revision); Assert.True(row.Value.SameValues(saved.Value));
                 Assert.Single((await store.List(product.InternalId)).Value);
-                Assert.Equal(2, (await store.History(product.InternalId, row.Draft.InternalId)).Value.Count);
+                Assert.Equal(2, (await store.History(product.InternalId, row.Value.InternalId)).Value.Count);
                 Assert.Equal(2, (await new PostgresAuditQuery(db.ConnectionString).FindAsync(new())).Count(e => e.RevisionChange is not null));
             }
             await using var remove = new NpgsqlCommand($"DROP TRIGGER reject_revision ON {table}", c); await remove.ExecuteNonQueryAsync();
@@ -230,7 +230,7 @@ public sealed partial class PostgresProductTests
                 _ => await uncertain.Select(operation, before, action, action == "add" ? e2 : e1, action == "replace" ? e2 : null, RevActor, RevTime, RevAllowed)
             };
             Assert.True(result.IsFailure); Assert.Contains("could not be confirmed", result.Error); Assert.Contains("do not retry automatically", result.Error); Assert.Equal(1, attempts);
-            var id = action == "create" ? draft.InternalId : before.Draft.InternalId;
+            var id = action == "create" ? draft.InternalId : before.Value.InternalId;
             var retrieved = (await store.Retrieve(product.InternalId, id, operation)).Value;
             Assert.Equal(committed, retrieved.Operation is not null);
             Assert.Equal(events + (committed ? 1 : 0), (await new PostgresAuditQuery(db.ConnectionString).FindAsync(new())).Count);
@@ -239,7 +239,7 @@ public sealed partial class PostgresProductTests
             {
                 Assert.Equal(committed && action == "delete", retrieved.Record!.Deleted);
                 Assert.Equal(before.Revision + (committed ? 1 : 0), retrieved.Record.Revision);
-                if (!committed) Assert.True(before.Draft.SameValues(retrieved.Record.Draft));
+                if (!committed) Assert.True(before.Value.SameValues(retrieved.Record.Value));
             }
         }
     }

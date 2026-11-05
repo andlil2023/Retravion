@@ -31,6 +31,15 @@
                             }
                         </ul>
                         @if (values.Selections.IsEmpty) { <p>No explicit selections.</p> }
+                        @if (values.Release is { } release)
+                        {
+                            <h4>Frozen release and permanent protection</h4>
+                            <p>@release.Actor · @release.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)</p>
+                            <ul aria-label="Protected release members">
+                                @foreach (var member in release.Members)
+                                { <li>@member.Endpoint.Kind @member.Identifier · v@member.Endpoint.VersionNumber · @member.Endpoint.InternalId / @member.Endpoint.VersionId · @(member.Explicit ? "Explicit" : "Indirect") · Approved and permanently protected</li> }
+                            </ul>
+                        }
                     }
                     else { <p>@(revision.Before is null ? "Not yet created" : "Deleted")</p> }
                 </section>
@@ -105,7 +114,7 @@
                 @if (testCaseChange.Decision is not null)
                 { <dt>Decision</dt><dd>@testCaseChange.Decision</dd><dt>Comment</dt><dd class="recorded-value">@(testCaseChange.Comment ?? "Not provided")</dd> }
                 @if (testCaseChange.Reason is not null)
-                { <dt>Successor reason</dt><dd class="recorded-value">@testCaseChange.Reason</dd> }
+                { <dt>@(testCaseChange.Decision == "Reopened" ? "Reopening reason" : "Successor reason")</dt><dd class="recorded-value">@testCaseChange.Reason</dd> }
                 @if (testCaseChange.Before?.Links is { } oldLinks)
                 {
                     <dt>Old exact Requirement endpoints</dt><dd><ul>

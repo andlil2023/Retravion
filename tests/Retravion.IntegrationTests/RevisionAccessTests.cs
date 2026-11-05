@@ -42,6 +42,7 @@ public sealed partial class AccountManagementTests
             foreach (var action in new[] { "add", "remove", "replace", "secret invalid action" })
                 Assert.True((await operations.Select(principal, Guid.Empty, null!, action, null!, null, true)).IsFailure);
             Assert.True((await operations.Delete(principal, Guid.Empty, null!, true)).IsFailure);
+            Assert.True((await operations.Release(principal, Guid.Empty, null!, "secret token", true)).IsFailure);
         }
         foreach (var principal in new[] { new ClaimsPrincipal(new ClaimsIdentity()), restricted, revoked })
         {
@@ -52,7 +53,7 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.History(principal, product, id)).IsFailure);
             Assert.True((await operations.Candidates(principal, product)).IsFailure);
             Assert.True((await operations.Baseline(principal, product, id)).IsFailure);
-            Assert.Equal(7, audit.Events.Count);
+            Assert.Equal(8, audit.Events.Count);
             Assert.All(audit.Events, e =>
             {
                 Assert.StartsWith("revision.", e.Action); Assert.DoesNotContain("secret", e.Action);
@@ -61,7 +62,7 @@ public sealed partial class AccountManagementTests
             });
         }
         foreach (var throws in new[] { false, true }) { audit.Fail = true; audit.Throw = throws; await Mutations(revoked); }
-        Assert.Equal(14, logger.Messages.Count); Assert.All(logger.Messages, m => Assert.Equal("Unauthorized revision change audit submission failed.", m));
+        Assert.Equal(16, logger.Messages.Count); Assert.All(logger.Messages, m => Assert.Equal("Unauthorized revision change audit submission failed.", m));
         Assert.Equal(0, store.Calls);
     }
 
@@ -113,6 +114,7 @@ public sealed partial class AccountManagementTests
         public Task<Result<RevisionSnapshot>> Create(Guid operation, DraftRevision draft, AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default) => Unexpected<RevisionSnapshot>();
         public Task<Result<RevisionSnapshot>> Edit(Guid operation, RevisionSnapshot expected, string? identifier, string? description, AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default) => Unexpected<RevisionSnapshot>();
         public Task<Result<RevisionSnapshot>> Select(Guid operation, RevisionSnapshot expected, string action, RevisionSelection target, RevisionSelection? replacement, AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default) => Unexpected<RevisionSnapshot>();
+        public Task<Result<RevisionSnapshot>> Release(Guid operation, RevisionSnapshot expected, string baselineToken, AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default) => Unexpected<RevisionSnapshot>();
         public Task<Result<RevisionSnapshot>> Delete(Guid operation, RevisionSnapshot expected, AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default) => Unexpected<RevisionSnapshot>();
     }
 }

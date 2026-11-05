@@ -69,6 +69,12 @@ internal sealed class RevisionOperations(IAuthorizationService authorization, Se
                 ? Task.FromResult(Result.Failure<RevisionSnapshot>("Confirm the exact selection change first."))
                 : changes.Select(operation, expected, action, target, replacement, actor, now, allowed, token), token);
 
+    public Task<Result<RevisionSnapshot>> Release(ClaimsPrincipal principal, Guid operation, RevisionSnapshot expected,
+        string baselineToken, bool confirmed, CancellationToken token = default) =>
+        Change(principal, "revision.release", (actor, now, allowed) => confirmed
+            ? changes.Release(operation, expected, baselineToken, actor, now, allowed, token)
+            : Task.FromResult(Result.Failure<RevisionSnapshot>("Confirm the exact baseline before release.")), token);
+
     public Task<Result<RevisionSnapshot>> Delete(ClaimsPrincipal principal, Guid operation, RevisionSnapshot expected, bool confirmed,
         CancellationToken token = default) => Change(principal, "revision.delete", (actor, now, allowed) => confirmed
             ? changes.Delete(operation, expected, actor, now, allowed, token)

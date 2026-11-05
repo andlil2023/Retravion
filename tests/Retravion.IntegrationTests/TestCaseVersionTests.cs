@@ -58,7 +58,7 @@ public sealed partial class PostgresProductTests
         Assert.True((await store.Update(row, CaseContent("Frozen"), CaseActor, CaseTime)).IsFailure);
         Assert.True((await store.Review(row, "InReview", null, CaseActor, CaseTime)).IsFailure);
         Assert.True((await store.CreateSuccessor(row, " \n", CaseActor, CaseTime)).IsFailure);
-        Assert.True((await store.Reopen(row, "Reason", CaseActor, CaseTime)).IsFailure);
+        Assert.True((await store.Reopen(row, " \n", CaseActor, CaseTime)).IsFailure);
         Assert.Equal(count, (await new PostgresAuditQuery(database.ConnectionString).FindAsync(new())).Count);
         var approved = row;
         var candidates = await Task.WhenAll(Enumerable.Range(0, 6).Select(i =>
@@ -139,7 +139,7 @@ public sealed partial class PostgresProductTests
     }
 
     private sealed record CaseScenario(TestCaseSnapshot Row, TestCaseRequirementLink Target, TestCaseRequirementLink Replacement);
-    private static readonly string[] CaseOperations = ["create", "edit", "InReview", "Draft", "Approved", "successor", "add", "remove", "retarget"];
+    private static readonly string[] CaseOperations = ["create", "edit", "InReview", "Draft", "Approved", "successor", "reopen", "add", "remove", "retarget"];
 
     private static async Task<CaseScenario> PrepareCaseOperation(PostgresTestCaseStore store, PostgresRequirementStore requirements, Guid product, string operation)
     {
@@ -147,8 +147,8 @@ public sealed partial class PostgresProductTests
         var second = await ParentApprove(requirements, (await requirements.CreateSuccessor(first, "Target next", CaseActor, CaseTime)).Value);
         var row = (await store.Create(product, CaseContent(), CaseActor, CaseTime)).Value;
         if (operation != "add") row = (await store.ChangeLink(row, "add", CaseEndpoint(first), null, CaseActor, CaseTime)).Value;
-        if (operation is "Draft" or "Approved" or "successor") row = await CaseReview(store, row, "InReview");
-        if (operation == "successor") row = await CaseReview(store, row, "Approved");
+        if (operation is "Draft" or "Approved" or "successor" or "reopen") row = await CaseReview(store, row, "InReview");
+        if (operation is "successor" or "reopen") row = await CaseReview(store, row, "Approved");
         return new(row, CaseEndpoint(first), CaseEndpoint(second));
     }
     private static Task<Result<TestCaseSnapshot>> RunCaseOperation(PostgresTestCaseStore store, CaseScenario scenario, string operation) => operation switch
@@ -156,6 +156,7 @@ public sealed partial class PostgresProductTests
         "create" => store.Create(scenario.Row.TestCase.ProductInternalId, CaseContent("New"), CaseActor, CaseTime),
         "edit" => store.Update(scenario.Row, CaseContent("Edited"), CaseActor, CaseTime),
         "successor" => store.CreateSuccessor(scenario.Row, "Fixed successor reason", CaseActor, CaseTime),
+        "reopen" => store.Reopen(scenario.Row, "Reopening reason", CaseActor, CaseTime),
         "add" or "remove" => store.ChangeLink(scenario.Row, operation, scenario.Target, null, CaseActor, CaseTime),
         "retarget" => store.ChangeLink(scenario.Row, operation, scenario.Target, scenario.Replacement, CaseActor, CaseTime),
         _ => store.Review(scenario.Row, operation, "Decision comment", CaseActor, CaseTime)

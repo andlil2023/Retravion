@@ -45,7 +45,7 @@ public sealed partial class PostgresProductTests
         await cases.ChangeLink(incoming, "add", new(parent.Requirement.InternalId, parent.Requirement.VersionId), null, RevActor, RevTime);
         var store = new PostgresRevisionStore(db.ConnectionString);
         var row = await RevCreate(store, product.InternalId);
-        Assert.Empty((await store.Baseline(product.InternalId, row.Draft.InternalId)).Value.Members);
+        Assert.Empty((await store.Baseline(product.InternalId, row.Value.InternalId)).Value.Members);
         var roots = new[]
         {
             new RevisionSelection(RevisionEntityKind.TestCase,c1.TestCase.InternalId,c1.TestCase.VersionId,1),
@@ -54,7 +54,7 @@ public sealed partial class PostgresProductTests
             new RevisionSelection(RevisionEntityKind.UserNeed,n2.Need.InternalId,n2.Need.VersionId,2)
         };
         foreach (var endpoint in roots) row = (await store.Select(Guid.NewGuid(), row, "add", endpoint, null, RevActor, RevTime, RevAllowed)).Value;
-        var baseline = (await store.Baseline(product.InternalId, row.Draft.InternalId)).Value;
+        var baseline = (await store.Baseline(product.InternalId, row.Value.InternalId)).Value;
         Assert.Equal(7, baseline.Members.Count); Assert.Equal(4, baseline.Members.Count(m => m.Explicit));
         Assert.All(roots, e => Assert.Contains(baseline.Members, m => m.Endpoint == e && m.Explicit));
         Assert.Contains(baseline.Members, m => m.Endpoint.VersionId == n1.Need.VersionId && !m.Explicit);
@@ -69,7 +69,7 @@ public sealed partial class PostgresProductTests
         Assert.DoesNotContain((await store.Candidates(product.InternalId)).Value, m => m.Endpoint == foreignEndpoint);
         var approved = await ApprovedNeed(needs, product.InternalId, "Unrelated newer");
         await needs.CreateSuccessor(approved, "not a root", RevActor, RevTime);
-        Assert.Equal(baseline.Members.Select(m => m.Endpoint), (await store.Baseline(product.InternalId, row.Draft.InternalId)).Value.Members.Select(m => m.Endpoint));
+        Assert.Equal(baseline.Members.Select(m => m.Endpoint), (await store.Baseline(product.InternalId, row.Value.InternalId)).Value.Members.Select(m => m.Endpoint));
         await using var c = new NpgsqlConnection(db.ConnectionString); await c.OpenAsync();
         await using (var cycle = new NpgsqlCommand("INSERT INTO retravion_requirement.parent_link VALUES($1,$2,$3)", c))
         {
@@ -77,17 +77,17 @@ public sealed partial class PostgresProductTests
             await cycle.ExecuteNonQueryAsync();
         }
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        Assert.Equal(7, (await store.Baseline(product.InternalId, row.Draft.InternalId, timeout.Token)).Value.Members.Count);
+        Assert.Equal(7, (await store.Baseline(product.InternalId, row.Value.InternalId, timeout.Token)).Value.Members.Count);
         // A broken/cross-Product endpoint fails the whole read, never silently omitting part of the closure.
         await using (var corrupt = new NpgsqlCommand("UPDATE retravion_requirement.parent_link SET target_internal_id=$1,target_version_id=$2 WHERE owner_version_id=$3", c))
         {
             corrupt.Parameters.AddWithValue(foreign.Requirement.InternalId); corrupt.Parameters.AddWithValue(foreign.Requirement.VersionId); corrupt.Parameters.AddWithValue(child.Requirement.VersionId);
             await corrupt.ExecuteNonQueryAsync();
         }
-        Assert.True((await store.Baseline(product.InternalId, row.Draft.InternalId)).IsFailure);
-        Assert.True((await store.Baseline(other.InternalId, row.Draft.InternalId)).IsFailure);
+        Assert.True((await store.Baseline(product.InternalId, row.Value.InternalId)).IsFailure);
+        Assert.True((await store.Baseline(other.InternalId, row.Value.InternalId)).IsFailure);
         await using var missing = new NpgsqlCommand("DROP TABLE retravion_requirement.parent_link", c); await missing.ExecuteNonQueryAsync();
-        var incomplete = await store.Baseline(product.InternalId, row.Draft.InternalId);
+        var incomplete = await store.Baseline(product.InternalId, row.Value.InternalId);
         Assert.True(incomplete.IsFailure); Assert.Contains("complete outgoing reference storage", incomplete.Error);
     }
 }

@@ -4,11 +4,11 @@ using Retravion.Domain.Revision;
 
 namespace Retravion.Application.Revision;
 
-public sealed record RevisionSnapshot(DraftRevision Draft, long Revision, bool Deleted = false);
+public sealed record RevisionSnapshot(Retravion.Domain.Revision.Revision Value, long Revision, bool Deleted = false);
 public sealed record RevisionHistory(AuditActor Actor, DateTimeOffset OccurredAt, string Action, RevisionAuditDetails Change);
 public sealed record RevisionRetrieval(RevisionSnapshot? Record, RevisionHistory? Operation);
 public sealed record RevisionBaselineMember(RevisionSelection Endpoint, string Identifier, string Title, string Status, bool Explicit);
-public sealed record RevisionBaseline(RevisionSnapshot Revision, IReadOnlyList<RevisionBaselineMember> Members);
+public sealed record RevisionBaseline(RevisionSnapshot Revision, IReadOnlyList<RevisionBaselineMember> Members, string Token = "");
 
 /// <summary>All exact-version reads and outcome retrieval coordinate with in-flight writes.</summary>
 public interface IRevisionStore

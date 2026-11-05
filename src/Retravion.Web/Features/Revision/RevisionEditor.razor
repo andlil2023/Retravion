@@ -55,8 +55,8 @@
         {
             var found = await Operations.Retrieve(actor, _product.InternalId, Id);
             if (found.IsFailure) { _error = found.Error; return; }
-            if (found.Value.Record is not { Deleted: false } row) { _error = "Draft revision not found."; return; }
-            _existing = row; _identifier = row.Draft.Identifier; _description = row.Draft.Description;
+            if (found.Value.Record is not { Deleted: false, Value: DraftRevision } row) { _error = "Editable Draft revision not found."; return; }
+            _existing = row; _identifier = row.Value.Identifier; _description = row.Value.Description;
         }
         _ready = true;
     }

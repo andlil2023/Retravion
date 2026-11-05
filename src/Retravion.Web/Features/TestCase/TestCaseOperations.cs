@@ -63,9 +63,19 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
         CancellationToken token = default) => Change(principal, "test-case.version.create",
         (actor, now) => changes.CreateSuccessor(expected, reason, actor, now, token), token);
 
-    public Task<Result<TestCaseSnapshot>> Reopen(ClaimsPrincipal principal, TestCaseSnapshot expected, string? reason,
-        CancellationToken token = default) => Change(principal, "test-case.reopen",
-        (actor, now) => changes.Reopen(expected, reason, actor, now, token), token);
+    public async Task<Result<TestCaseSnapshot>> Reopen(ClaimsPrincipal principal, TestCaseSnapshot expected, string? reason,
+        CancellationToken token = default)
+    {
+        // Order this newly enabled write with logout/reset revocation, including database-lock waits.
+        // Authorization must be checked inside the gate, which remains held through the outcome.
+        await sessions.MutationGate.WaitAsync(token);
+        try
+        {
+            return await Change(principal, "test-case.reopen",
+                (actor, now) => changes.Reopen(expected, reason, actor, now, token), token);
+        }
+        finally { sessions.MutationGate.Release(); }
+    }
 
     public Task<Result<TestCaseSnapshot>> ChangeLink(ClaimsPrincipal principal, TestCaseSnapshot expected, string operation,
         TestCaseRequirementLink target, TestCaseRequirementLink? replacement = null, bool confirmed = false, CancellationToken token = default) =>

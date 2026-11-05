@@ -64,6 +64,7 @@ public sealed partial class PostgresRequirementStore(string connectionString,
             CHECK ((version_number=1 AND creation_reason IS NULL AND source_version_id IS NULL) OR
                 (version_number>1 AND creation_reason IS NOT NULL AND length(btrim(creation_reason))>0 AND source_version_id IS NOT NULL))
         );
+        ALTER TABLE retravion_requirement.requirement_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
         CREATE UNIQUE INDEX IF NOT EXISTS requirement_one_working_version ON retravion_requirement.requirement_version(internal_id) WHERE status<>2;
         INSERT INTO retravion_requirement.requirement_version SELECT internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,
             version_id,version_number,ever_approved,creation_reason,source_version_id FROM retravion_requirement.requirement
@@ -198,6 +199,9 @@ public sealed partial class PostgresRequirementStore(string connectionString,
         return Execute(async (connection, transaction) =>
         {
             if (!await ProductActive(connection, transaction, before.ProductInternalId, token)) return Inactive();
+            if (replacement.VersionId == before.VersionId && replacement != before &&
+                await Protected(connection, transaction, before.VersionId, token))
+                return Result.Failure<RequirementSnapshot>("This exact version is permanently protected by a Released revision. Create a successor for changes.");
             if (decision == "Approved")
             {
                 var approval = await ValidateTargets(connection, transaction, before.VersionId, token);
@@ -287,6 +291,13 @@ public sealed partial class PostgresRequirementStore(string connectionString,
             """, connection, transaction);
         command.Parameters.AddWithValue(id);
         return await command.ExecuteNonQueryAsync(token) == 1;
+    }
+
+    private static async Task<bool> Protected(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid version, CancellationToken token)
+    {
+        await using var command = new NpgsqlCommand("SELECT release_protected FROM retravion_requirement.requirement_version WHERE version_id=$1", connection, transaction);
+        command.Parameters.AddWithValue(version);
+        return await command.ExecuteScalarAsync(token) is true;
     }
 
     private static string? Text(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);

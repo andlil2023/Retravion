@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Npgsql;
@@ -74,23 +75,41 @@ public sealed partial class PostgresRevisionStore
         {
             var found = await Find(c, t, product, id, token);
             if (found.IsFailure) return Result.Failure<RevisionBaseline>(found.Error);
-            if (found.Value.HasNoValue || found.Value.Value.Deleted) return Result.Failure<RevisionBaseline>("Draft revision not found.");
-            var row = found.Value.Value;
-            var roots = row.Draft.Selections.ToHashSet();
-            var visited = new Dictionary<(RevisionEntityKind, Guid), RevisionBaselineMember>();
-            var pending = new Queue<RevisionSelection>(roots);
-            while (pending.TryDequeue(out var endpoint))
-            {
-                if (visited.ContainsKey((endpoint.Kind, endpoint.VersionId))) continue;
-                var member = await LoadEndpoint(c, t, product, endpoint, token);
-                if (member.IsFailure) return Result.Failure<RevisionBaseline>(member.Error);
-                visited.Add((endpoint.Kind, endpoint.VersionId), member.Value with { Explicit = roots.Contains(endpoint) });
-                var outgoing = await Outgoing(c, t, product, endpoint, token);
-                if (outgoing.IsFailure) return Result.Failure<RevisionBaseline>(outgoing.Error);
-                foreach (var next in outgoing.Value) pending.Enqueue(next);
-            }
-            return new RevisionBaseline(row, visited.Values.OrderBy(m => m.Endpoint.Kind).ThenBy(m => m.Identifier).ThenBy(m => m.Endpoint.VersionNumber).ToArray());
+            if (found.Value.HasNoValue || found.Value.Value.Deleted) return Result.Failure<RevisionBaseline>("Revision not found.");
+            return await Resolve(c, t, found.Value.Value, token);
         }, token);
+
+    private static async Task<Result<RevisionBaseline>> Resolve(NpgsqlConnection c, NpgsqlTransaction t, RevisionSnapshot row, CancellationToken token)
+    {
+        if (row.Value is ReleasedRevision released)
+            return new RevisionBaseline(row, released.Members.Select(m => new RevisionBaselineMember(m.Endpoint, m.Identifier, m.Title, "Approved", m.Explicit)).ToArray());
+        var product = row.Value.ProductInternalId;
+        var roots = row.Value.Selections.ToHashSet();
+        var visited = new Dictionary<(RevisionEntityKind, Guid), RevisionBaselineMember>();
+        var revisions = new Dictionary<(RevisionEntityKind, Guid), long>();
+        var pending = new Queue<RevisionSelection>(roots);
+        while (pending.TryDequeue(out var endpoint))
+        {
+            if (visited.ContainsKey((endpoint.Kind, endpoint.VersionId))) continue;
+            var member = await LoadEndpoint(c, t, product, endpoint, token);
+            if (member.IsFailure) return Result.Failure<RevisionBaseline>(member.Error);
+            visited.Add((endpoint.Kind, endpoint.VersionId), member.Value with { Explicit = roots.Contains(endpoint) });
+            await using (var version = new NpgsqlCommand($"SELECT revision FROM {Table(endpoint.Kind)} WHERE version_id=$1", c, t))
+            {
+                version.Parameters.AddWithValue(endpoint.VersionId);
+                revisions.Add((endpoint.Kind, endpoint.VersionId), (long)(await version.ExecuteScalarAsync(token))!);
+            }
+            var outgoing = await Outgoing(c, t, product, endpoint, token);
+            if (outgoing.IsFailure) return Result.Failure<RevisionBaseline>(outgoing.Error);
+            foreach (var next in outgoing.Value) pending.Enqueue(next);
+        }
+        var members = visited.Values.OrderBy(m => m.Endpoint.Kind).ThenBy(m => m.Endpoint.VersionId).ToArray();
+        // Include every exact version's optimistic revision: reopening/reapproval or owned-link edits
+        // invalidate confirmation even when the final closure identities happen to be unchanged.
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(new { row.Value.InternalId, row.Revision,
+            Members = members.Select(m => new { Member = m, Revision = revisions[(m.Endpoint.Kind, m.Endpoint.VersionId)] }) });
+        return new RevisionBaseline(row, members, Convert.ToHexString(SHA256.HashData(bytes)));
+    }
 
     private static async Task<Result<IReadOnlyList<RevisionSelection>>> Outgoing(NpgsqlConnection c, NpgsqlTransaction t,
         Guid product, RevisionSelection owner, CancellationToken token)

@@ -163,8 +163,8 @@ public sealed partial class PostgresProductTests
         Assert.True(winner.TestCase.SameState((await store.Find(winner.TestCase.InternalId)).Value.Value.TestCase));
         Assert.True((await store.Update(fixture.Row, fixture.Row.TestCase.Content, CaseActor, CaseTime)).IsFailure); // Stale no-op.
         var countAfter = (await new PostgresAuditQuery(database.ConnectionString).FindAsync(new())).Count;
-        var reopen = await store.Reopen(winner, "Not supported", CaseActor, CaseTime);
-        Assert.True(reopen.IsFailure); Assert.Contains("unavailable", reopen.Error);
+        var reopen = await store.Reopen(winner, "Correction", CaseActor, CaseTime);
+        Assert.True(reopen.IsFailure); Assert.Equal("Only Approved Test Cases can reopen.", reopen.Error);
         Assert.Equal(countAfter, (await new PostgresAuditQuery(database.ConnectionString).FindAsync(new())).Count);
     }
 

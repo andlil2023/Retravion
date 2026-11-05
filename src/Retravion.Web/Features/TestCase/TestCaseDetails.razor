@@ -10,6 +10,11 @@
 <PageTitle>Test Case details · Retravion</PageTitle>
 <SectionContent SectionName="product-page-header"><PageHeader Title="Test Case details" BackHref="@BackPath" BackText="Test Cases" /></SectionContent>
 @if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_uncertain)
+{
+    <p>No automatic retry. Retrieve the current Test Case before deciding on another change.</p>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="RetrieveOutcome">Retrieve current Test Case</MudButton>
+}
 @if (_case is not null && _product is not null)
 {
     var value = _case.TestCase;
@@ -103,12 +108,13 @@
             }
             else
             {
-                <MudTextField @bind-Value="_reason" Label="Successor change reason" Required="true" Disabled="_busy" />
+                <MudTextField @bind-Value="_reason" Label="Change reason" Required="true" Disabled="_busy" />
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="CreateSuccessor">Create successor Draft</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Reopen">Reopen to Draft</MudButton>
             }
         </div>
     }
-    <p>Reopening is unavailable until Released-revision eligibility checks are implemented. Approved corrections require a successor Draft. Approval is not release.</p>
+    <p>Reopening requires the latest Approved version, no successor, a reason and no Released-revision protection. Protected corrections require a successor Draft. Approval is not release.</p>
     <MudPaper Class="product-card pa-4 mt-4" Elevation="0">
         <h3>History</h3>
         @if (_history.Count == 0) { <p>No history recorded.</p> }
@@ -150,7 +156,7 @@
     private string? _error, _comment, _reason, _pendingOperation;
     private TestCaseRequirementLink? _pendingTarget, _pendingReplacement;
     private Guid _selectedVersion;
-    private bool _busy;
+    private bool _busy, _uncertain;
     private bool IsLatest => _versions.LastOrDefault()?.TestCase.VersionId == _case?.TestCase.VersionId;
     private bool Editable => _product?.IsActive == true && IsLatest && _case?.TestCase.Status == "Draft";
     private string BackPath => _product is null ? "/products" : $"/test-cases?product={Uri.EscapeDataString(_product.Id)}";
@@ -194,6 +200,14 @@
             if (targets.IsFailure) { _error = targets.Error; return; }
             _targets.AddRange(targets.Value);
         }
+        _uncertain = false;
+    }
+    private async Task RetrieveOutcome()
+    {
+        if (_busy || !_uncertain) return;
+        _busy = true;
+        try { await Load(); }
+        finally { _busy = false; }
     }
     private TestCaseRequirementLink? Selected => _targets.FirstOrDefault(row => row.Requirement.VersionId == _selectedVersion) is { } target
         ? new(target.Requirement.InternalId, target.Requirement.VersionId) : null;
@@ -209,14 +223,19 @@
         ? Change((actor, expected) => Operations.ChangeLink(actor, expected, operation, target, _pendingReplacement, confirmed: true)) : Task.CompletedTask;
     private Task Review(string decision) => Change((actor, expected) => Operations.Review(actor, expected, decision, _comment));
     private Task CreateSuccessor() => Change((actor, expected) => Operations.CreateSuccessor(actor, expected, _reason));
+    private Task Reopen() => Change((actor, expected) => Operations.Reopen(actor, expected, _reason));
     private async Task Change(Func<System.Security.Claims.ClaimsPrincipal, TestCaseSnapshot, Task<CSharpFunctionalExtensions.Result<TestCaseSnapshot>>> operation)
     {
-        if (_busy || _case is null) return;
+        if (_busy || _uncertain || _case is null) return;
         _busy = true; _error = null;
         try
         {
             var result = await operation((await Authentication.GetAuthenticationStateAsync()).User, _case);
-            if (result.IsFailure) _error = result.Error;
+            if (result.IsFailure)
+            {
+                _error = result.Error;
+                _uncertain = result.Error.Contains("could not be confirmed", StringComparison.Ordinal);
+            }
             else
             {
                 _comment = null; _reason = null; VersionId = result.Value.TestCase.VersionId;

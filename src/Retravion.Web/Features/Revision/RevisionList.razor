@@ -13,10 +13,10 @@
     <MudTable T="RevisionSnapshot" Items="_rows" Dense="true" Hover="true" Elevation="0" aria-label="Product revisions">
         <HeaderContent><MudTh>Identifier</MudTh><MudTh>Description</MudTh><MudTh>State</MudTh></HeaderContent>
         <RowTemplate>
-            <MudTd DataLabel="Identifier"><MudLink Href="@($"/revisions/details?product={Uri.EscapeDataString(_product.Id)}&id={context.Draft.InternalId}")">@context.Draft.Identifier</MudLink></MudTd>
-            <MudTd DataLabel="Description">@context.Draft.Description</MudTd><MudTd DataLabel="State">Draft</MudTd>
+            <MudTd DataLabel="Identifier"><MudLink Href="@($"/revisions/details?product={Uri.EscapeDataString(_product.Id)}&id={context.Value.InternalId}")">@context.Value.Identifier</MudLink></MudTd>
+            <MudTd DataLabel="Description">@context.Value.Description</MudTd><MudTd DataLabel="State">@context.Value.State</MudTd>
         </RowTemplate>
-        <NoRecordsContent><MudText>No Draft revisions.</MudText></NoRecordsContent>
+        <NoRecordsContent><MudText>No revisions.</MudText></NoRecordsContent>
     </MudTable>
     @if (_product.IsActive)
     { <div class="mt-4"><MudButton Href="@($"/revisions/create?product={Uri.EscapeDataString(_product.Id)}")" Variant="Variant.Filled" Color="Color.Primary">Create empty Draft</MudButton></div> }

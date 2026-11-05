@@ -87,6 +87,14 @@ public sealed class TestCaseTests
         var approved = rejected.SubmitForReview().Value.Approve(true).Value;
         Assert.True(approved.Edit(content).IsFailure); Assert.True(approved.ChangeLinks([]).IsFailure);
         Assert.True(approved.SubmitForReview().IsFailure); Assert.True(approved.ReturnToDraft().IsFailure);
+        Assert.True(draft.Reopen("Reason").IsFailure); Assert.True(review.Reopen("Reason").IsFailure);
+        Assert.True(approved.Reopen(" \n").IsFailure);
+        var reopened = approved.Reopen("Correction").Value;
+        Assert.Equal("Draft", reopened.Status); Assert.Equal("Approved", approved.Status);
+        Assert.Equal(approved.InternalId, reopened.InternalId); Assert.Equal(approved.VersionId, reopened.VersionId);
+        Assert.Equal(approved.VersionNumber, reopened.VersionNumber); Assert.Equal(approved.Links.ToArray(), reopened.Links.ToArray());
+        Assert.True(approved.Content.SameContent(reopened.Content)); Assert.True(reopened.Approve(true).IsFailure);
+        Assert.True(reopened.SubmitForReview().Value.Approve(true).IsSuccess);
         Assert.True(approved.CreateSuccessor(" \n").IsFailure);
         var successor = approved.CreateSuccessor(" Fixed reason ").Value;
         Assert.NotEqual(approved.VersionId, successor.VersionId);

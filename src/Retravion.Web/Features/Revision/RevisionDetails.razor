@@ -4,20 +4,22 @@
 @inject ProductOperations Products
 @inject AuthenticationStateProvider Authentication
 
-<PageTitle>Draft revision · Retravion</PageTitle>
-<SectionContent SectionName="product-page-header"><PageHeader Title="Draft revision" BackHref="@ListPath" BackText="Revisions" /></SectionContent>
+<PageTitle>Revision · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Revision" BackHref="@ListPath" BackText="Revisions" /></SectionContent>
 @if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
 @if (_message is not null) { <MudAlert Severity="Severity.Info" role="status">@_message</MudAlert> }
 @if (_row is not null)
 {
     <MudPaper Class="pa-4" Elevation="0">
-        <h2>@_row.Draft.Identifier</h2><p>@_row.Draft.Description</p>
-        <p>@_product!.Id – @_product.Name · @(_row.Deleted ? "Deleted Draft — retained evidence" : "Draft")</p>
+        <h2>@_row.Value.Identifier</h2><p>@_row.Value.Description</p>
+        <p>@_product!.Id – @_product.Name · @(_row.Deleted ? "Deleted Draft — retained evidence" : _row.Value.State)</p>
+        @if (_row.Value is ReleasedRevision released)
+        { <p>Released by @released.ReleasedBy · @released.ReleasedAt.ToString("O"). This revision and its complete outgoing baseline are permanently protected.</p> }
         @if (!_product.IsActive) { <p>Product retired: read-only.</p> }
         <h3>Explicit exact-version selections</h3>
-        @if (_row.Draft.Selections.IsEmpty) { <p>No explicit selections. Empty Drafts are valid.</p> }
+        @if (_row.Value.Selections.IsEmpty) { <p>No explicit selections. Empty Drafts are valid.</p> }
         <ul>
-            @foreach (var selection in _row.Draft.Selections)
+            @foreach (var selection in _row.Value.Selections)
             {
                 <li>
                     <MudLink Href="@EndpointPath(selection)">@Label(selection)</MudLink>
@@ -47,7 +49,9 @@
     @if (_pendingAction is not null && !Locked)
     {
         <MudPaper Class="pa-4 mt-4" Elevation="0">
-            @if (_pendingAction == "delete") { <p>Confirm deletion of Draft @_row.Draft.Identifier. Referenced records and prior evidence will remain.</p> }
+            @if (_pendingAction == "delete") { <p>Confirm deletion of Draft @_row.Value.Identifier. Referenced records and prior evidence will remain.</p> }
+            else if (_pendingAction == "release")
+            { <p>Confirm release of @_row.Value.Identifier with the exact complete baseline below. Every listed version will be permanently protected. The server will revalidate before committing.</p> }
             else
             {
                 <p>Confirm @(_pendingAction == "replace" ? "replacement" : "removal") of @Label(_pendingTarget!).</p>
@@ -59,7 +63,15 @@
     @if (_baseline is not null)
     {
         <h2>Complete outgoing baseline</h2>
-        <p>This is the full current Draft closure, not a partial graph or frozen release. No incoming neighbors are included.</p>
+        <p>@(_row.Value is ReleasedRevision ? "Frozen release evidence; no current-link traversal." : "Full current Draft closure, not a partial graph. No incoming neighbors are included.")</p>
+        @if (CanChange && (_baseline.Members.Count == 0 || _baseline.Members.Any(m => m.Status != "Approved")))
+        {
+            <MudAlert Severity="Severity.Warning" role="status">Release blocked: select at least one version and approve every outgoing member.</MudAlert>
+            <ul aria-label="Release blockers">
+                @foreach (var blocker in _baseline.Members.Where(m => m.Status != "Approved"))
+                { <li><MudLink Href="@EndpointPath(blocker.Endpoint)">@MemberLabel(blocker)</MudLink> · @blocker.Status</li> }
+            </ul>
+        }
         <MudTable T="RevisionBaselineMember" Items="_baseline.Members" Dense="true" Hover="true" Elevation="0" aria-label="Complete revision baseline">
             <HeaderContent><MudTh>Exact version</MudTh><MudTh>Lifecycle</MudTh><MudTh>Membership</MudTh></HeaderContent>
             <RowTemplate>
@@ -71,7 +83,13 @@
         </MudTable>
     }
     @if (CanChange)
-    { <div class="mt-4"><MudButton OnClick="@(() => _pendingAction = "delete")" Disabled="@Locked" Variant="Variant.Filled" Color="Color.Primary">Delete Draft</MudButton></div> }
+    {
+        <div class="mt-4">
+            <MudButton OnClick="RefreshBaseline" Disabled="@Locked">Refresh baseline</MudButton>
+            <MudButton OnClick="ConfirmRelease" Disabled="@(Locked || !CanRelease)" Variant="Variant.Filled" Color="Color.Primary">Release revision</MudButton>
+            <MudButton OnClick="@(() => _pendingAction = "delete")" Disabled="@Locked" Variant="Variant.Filled" Color="Color.Primary">Delete Draft</MudButton>
+        </div>
+    }
     <h2>Retained history</h2>
     @foreach (var item in _history)
     {
@@ -99,7 +117,8 @@
     private RevisionSelection? _pendingTarget, _pendingReplacement;
     private Guid _operation;
     private bool _busy, _uncertain;
-    private bool CanChange => _product?.IsActive == true && _row is { Deleted: false };
+    private bool CanChange => _product?.IsActive == true && _row is { Deleted: false, Value: DraftRevision };
+    private bool CanRelease => _baseline is { Members.Count: > 0 } && _baseline.Members.All(m => m.Status == "Approved");
     private bool Locked => _busy || _uncertain;
     private string ListPath => $"/revisions?product={Uri.EscapeDataString(ProductId ?? "")}";
     private static string Key(RevisionSelection e) => $"{e.Kind}:{e.VersionId}";
@@ -155,11 +174,24 @@
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         await Run(op => Operations.Select(actor, op, _row!, "add", Selected));
     }
+    private void ConfirmRelease()
+    {
+        if (Locked || !CanChange || !CanRelease) return;
+        _pendingAction = "release";
+    }
+    private async Task RefreshBaseline()
+    {
+        if (Locked) return;
+        _busy = true; _error = _message = null; Cancel();
+        try { await Load(); }
+        finally { _busy = false; }
+    }
     private async Task Confirm()
     {
         if (Locked || !CanChange || _pendingAction is null) return;
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         await Run(op => _pendingAction == "delete" ? Operations.Delete(actor, op, _row!, true)
+            : _pendingAction == "release" ? Operations.Release(actor, op, _row!, _baseline!.Token, true)
             : Operations.Select(actor, op, _row!, _pendingAction, _pendingTarget!, _pendingReplacement, true));
     }
     private async Task Run(Func<Guid, Task<Result<RevisionSnapshot>>> change)
@@ -171,6 +203,7 @@
             if (result.IsFailure)
             {
                 _error = result.Error; _uncertain = result.Error.Contains("could not be confirmed", StringComparison.Ordinal);
+                if (!_uncertain) Cancel();
             }
             else { Cancel(); await Load(); }
         }

@@ -3,17 +3,12 @@ using CSharpFunctionalExtensions;
 
 namespace Retravion.Domain.Revision;
 
-public sealed record DraftRevision
+public sealed record DraftRevision : Revision
 {
-    public Guid InternalId { get; }
-    public Guid ProductInternalId { get; }
-    public string Identifier { get; }
-    public string Description { get; }
-    public ImmutableArray<RevisionSelection> Selections { get; }
-    public string State => "Draft";
+    public override string State => "Draft";
 
-    private DraftRevision(Guid id, Guid product, string identifier, string description, ImmutableArray<RevisionSelection> selections) =>
-        (InternalId, ProductInternalId, Identifier, Description, Selections) = (id, product, identifier, description, selections);
+    private DraftRevision(Guid id, Guid product, string identifier, string description, ImmutableArray<RevisionSelection> selections)
+        : base(id, product, identifier, description, selections) { }
 
     public static Result<DraftRevision> Create(Guid id, Guid product, string? identifier, string? description) =>
         Restore(id, product, identifier, description ?? "", []);
@@ -60,6 +55,4 @@ public sealed record DraftRevision
         return Restore(InternalId, ProductInternalId, Identifier, Description, selections);
     }
 
-    public bool SameValues(DraftRevision other) => InternalId == other.InternalId && ProductInternalId == other.ProductInternalId &&
-        Identifier == other.Identifier && Description == other.Description && Selections.SequenceEqual(other.Selections);
 }

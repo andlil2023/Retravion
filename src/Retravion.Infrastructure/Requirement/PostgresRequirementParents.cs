@@ -56,6 +56,8 @@ public sealed partial class PostgresRequirementStore
                 if (stored.Value.Revision != expected.Revision || stored.Value.Requirement != child)
                     return Result.Failure<RequirementSnapshot>("The Requirement changed or a newer version exists. Retrieve it again.");
             }
+            if (await Protected(connection, transaction, child.VersionId, token))
+                return Result.Failure<RequirementSnapshot>("This exact version and its owned links are permanently protected by a Released revision.");
             var before = await LoadParent(connection, transaction, child.VersionId, token);
             if (action == "add" && before.HasValue)
                 return Result.Failure<RequirementSnapshot>("The Requirement already has a parent. Replace it explicitly.");
