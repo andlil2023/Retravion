@@ -130,6 +130,7 @@ builder.Services.AddSingleton<IRequirementLinkStore>(_ => new PostgresRequiremen
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddScoped<RequirementOperations>();
+builder.Services.AddScoped<Retravion.Web.Features.Relationships.RelationshipOperations>();
 builder.Services.AddSingleton<ITestCaseStore>(_ => new PostgresTestCaseStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));

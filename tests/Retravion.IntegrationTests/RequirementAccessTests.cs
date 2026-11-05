@@ -19,11 +19,14 @@ public sealed partial class AccountManagementTests
     {
         var audit = new RequirementAuditRecorder(); var logger = new RequirementAuditLogger();
         var store = new RequirementStoreDouble();
+        var needStore = new NeedStoreDouble();
         await using var original = new AdministratorWebFactory(new StartupAdministratorStore(), "admin", Initial);
         await using var factory = original.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.AddSingleton<IRequirementStore>(store); services.AddSingleton<IRequirementChangeTransaction>(store);
             services.AddSingleton<IRequirementLinkStore>(store);
+            services.AddSingleton<Retravion.Application.UserNeed.IUserNeedStore>(needStore);
+            services.AddSingleton<Retravion.Application.UserNeed.IUserNeedChangeTransaction>(needStore);
             services.AddSingleton<IAuditSubmission>(audit); services.AddSingleton<ILogger<RequirementOperations>>(logger);
         }));
         using var client = Client(factory);
@@ -60,6 +63,11 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.RemoveParent(principal, expected)).IsFailure);
             Assert.True((await operations.ReplaceParent(principal, expected, parent)).IsFailure);
             Assert.True((await operations.Parent(principal, r.InternalId, r.VersionId)).IsFailure);
+            Assert.True((await operations.Children(principal, r.InternalId, r.VersionId)).IsFailure);
+            Assert.True((await operations.IncomingUserNeed(principal, target.UserNeedInternalId, target.UserNeedVersionId)).IsFailure);
+            var relationships = scope.ServiceProvider.GetRequiredService<Retravion.Web.Features.Relationships.RelationshipOperations>();
+            foreach (var kind in new[] { "requirement", "user-need" })
+                Assert.Equal("Access denied.", (await relationships.Load(principal, kind, r.InternalId, r.VersionId)).Error);
             Assert.Equal(failureMode == "throw" ? 0 : 13, audit.Events.Count);
             Assert.All(audit.Events, e =>
             {
@@ -74,6 +82,7 @@ public sealed partial class AccountManagementTests
         }
         Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Requirement change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
+        Assert.Equal(0, needStore.Calls);
     }
 
     [Fact]
@@ -92,7 +101,9 @@ public sealed partial class AccountManagementTests
             services.AddSingleton<IRequirementLinkStore>(new RequirementStoreDouble());
         }));
         using var client = Client(factory);
-        var paths = new[] { "/requirements?product=Owner", $"/requirements/details?id={r.InternalId}", "/requirements/create?product=Owner", $"/requirements/edit?id={r.InternalId}" };
+        var paths = new[] { "/requirements?product=Owner", $"/requirements/details?id={r.InternalId}", "/requirements/create?product=Owner", $"/requirements/edit?id={r.InternalId}",
+            $"/products/links?kind=requirement&id={r.InternalId}&version={r.VersionId}",
+            $"/products/links?kind=user-need&id={r.InternalId}&version={r.VersionId}" };
         foreach (var path in paths) { using var denied = await client.GetAsync(path); Assert.Equal(System.Net.HttpStatusCode.Redirect, denied.StatusCode); }
         var restricted = await ProductPrincipal(client, factory.Services, "admin", Initial, "/password-replacement");
         foreach (var path in paths) { using var denied = await client.GetAsync(path); Assert.Equal(System.Net.HttpStatusCode.Redirect, denied.StatusCode); }
@@ -169,6 +180,8 @@ public sealed partial class AccountManagementTests
     private sealed class RequirementStoreDouble : IRequirementStore, IRequirementChangeTransaction, IRequirementLinkStore
     {
         public int Calls;
+        public Task<Result<IReadOnlyList<RequirementVersionReference>>> IncomingUserNeed(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<IReadOnlyList<RequirementVersionReference>>> Children(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<Maybe<RequirementParentLink>>> Parent(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> AddParent(RequirementSnapshot expected, RequirementParentLink target, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> RemoveParent(RequirementSnapshot expected, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }

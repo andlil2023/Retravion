@@ -1,0 +1,100 @@
+@page "/products/links"
+@inject RelationshipOperations Operations
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Links · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Links" BackHref="@(_view?.Center.DetailsPath ?? "/products")" BackText="Details" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+else if (_view is null) { <p role="status">Loading relationships…</p> }
+else
+{
+    <MudPaper Class="pa-4" Elevation="0">
+        <h2>Center: @_view.Center.Label</h2>
+        @NodeContent(_view.Center)
+        <p>Direct relationships only. Following a connected entity makes its exact version the center.
+            Indirect expansion and link changes are not available on this page yet.</p>
+        <p>This view is read-only. Each relationship belongs to its Requirement owner, not necessarily the center.</p>
+        <p role="status">@_view.Edges.Count direct relationship(s).</p>
+    </MudPaper>
+    <div class="my-4" role="group" aria-label="Relationship view">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => ChangeView(false))" aria-pressed="@(!_table)">Graph view</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => ChangeView(true))" aria-pressed="@_table">Table view</MudButton>
+    </div>
+    @if (_view.Edges.Count == 0) { <p>No direct relationships for this exact version.</p> }
+    else if (_table)
+    {
+        <MudTable T="RelationshipEdge" Items="_view.Edges" Dense="true" Hover="true" Elevation="0" aria-label="Direct relationships">
+            <HeaderContent><MudTh>Direction / relationship</MudTh><MudTh>From (owner)</MudTh><MudTh>To (target)</MudTh><MudTh>Ownership state</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Direction / relationship">@(context.Owner.VersionId == _view.Center.VersionId ? "Outgoing" : "Incoming") · @context.Relationship</MudTd>
+                <MudTd DataLabel="From (owner)">@NodeContent(context.Owner)</MudTd>
+                <MudTd DataLabel="To (target)">@NodeContent(context.Target)</MudTd>
+                <MudTd DataLabel="Ownership state">@context.Ownership(_view.Product.IsActive)</MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+    else
+    {
+        <div class="relationship-graph" role="region" aria-label="Direct relationship graph" tabindex="0">
+            <div class="branches">
+                <h3>Incoming →</h3>
+                @foreach (var edge in _view.Edges.Where(e => e.Target.VersionId == _view.Center.VersionId))
+                {
+                    <div class="branch incoming">
+                        <MudPaper Class="pa-4" Elevation="0">
+                            @NodeContent(edge.Owner)
+                            <p>@edge.Relationship → center</p>
+                            <p>@edge.Ownership(_view.Product.IsActive)</p>
+                        </MudPaper>
+                        <span class="connector" aria-hidden="true">→</span>
+                    </div>
+                }
+            </div>
+            <div class="graph-center"><MudPaper Class="pa-4" Elevation="0"><h3>Center</h3>@NodeContent(_view.Center)</MudPaper></div>
+            <div class="branches">
+                <h3>→ Outgoing</h3>
+                @foreach (var edge in _view.Edges.Where(e => e.Owner.VersionId == _view.Center.VersionId))
+                {
+                    <div class="branch outgoing">
+                        <span class="connector" aria-hidden="true">→</span>
+                        <MudPaper Class="pa-4" Elevation="0">
+                            <p>Center → @edge.Relationship</p>
+                            @NodeContent(edge.Target)
+                            <p>@edge.Ownership(_view.Product.IsActive)</p>
+                        </MudPaper>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+@code {
+    [SupplyParameterFromQuery(Name = "kind")] public string? Kind { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "version")] public Guid? VersionId { get; set; }
+    private RelationshipView? _view;
+    private string? _error;
+    private bool _table;
+    private int _load;
+
+    protected override Task OnParametersSetAsync() => Load();
+    private async Task ChangeView(bool table) { _table = table; await Load(); }
+    private async Task Load()
+    {
+        var load = ++_load;
+        _view = null; _error = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var result = await Operations.Load(actor, Kind, Id, VersionId);
+        if (load != _load) return; // An older async navigation must not replace the current center.
+        if (result.IsFailure) _error = result.Error;
+        else _view = result.Value;
+    }
+    private RenderFragment NodeContent(RelationshipNode node) => @<div class="relationship-node">
+        <MudLink Href="@node.LinksPath">@node.Label</MudLink>
+        <p>@node.Title</p>
+        <p>Status: @node.Status</p>
+        <p>Product: @_view!.Product.Id – @_view.Product.Name @(!_view.Product.IsActive ? "(retired)" : "")</p>
+        @if (node.HasNewerVersion) { <p>Newer version available; showing this exact version.</p> }
+        <MudLink Href="@node.DetailsPath">Inspect exact version</MudLink>
+    </div>;
+}
