@@ -40,7 +40,7 @@ Version-dependent cases require the approved versioning specification and implem
 
 ## Approved Future Release-Closure Verification — PBI #144
 
-These cases cover the shared rule for User Needs, Requirements, and Test Cases. They do not implement baseline selection or claim runtime verification; release-specific audit decisions remain a prerequisite to revision implementation. Test Case link/cardinality/UI/audit cases are in [Test Case Management](Test%20Cases.md).
+These cases cover the shared rule for User Needs, Requirements, and Test Cases. They do not implement baseline selection or claim runtime verification. [Revision Management — Test Specifications](Revisions.md), added by [#157](https://github.com/andlil2023/Retravion/issues/157), supplies complementary baseline-selection, release-workflow, history/audit and failure cases against [Revision Management](../requirements/Revisions.md). Runtime implementation still requires separate approval and coordinated integration across all three entity types; keep TC-LINK-025–029 as closure-verification obligations. Test Case link/cardinality/UI/audit cases are in [Test Case Management](Test%20Cases.md).
 
 | Test ID | Verifies | Level | Preconditions and stimulus | Expected result | Automation candidate |
 |---|---|---|---|---|---|
