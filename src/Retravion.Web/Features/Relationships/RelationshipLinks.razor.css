@@ -1,0 +1,35 @@
+.relationship-graph {
+    display: grid;
+    grid-template-columns: minmax(18rem, 1fr) minmax(18rem, 1fr) minmax(18rem, 1fr);
+    gap: 1rem;
+    overflow-x: auto;
+    padding: 1rem 0;
+    color: var(--mud-palette-text-primary);
+}
+
+.graph-center {
+    align-self: center;
+    border: 2px solid var(--mud-palette-primary);
+    border-radius: var(--mud-default-borderradius);
+}
+
+.branch {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.branch ::deep .mud-paper {
+    flex: 1;
+    min-width: 0;
+}
+
+.connector {
+    flex: 0 0 2rem;
+    text-align: center;
+    border-bottom: 1px solid var(--mud-palette-text-secondary);
+}
+
+.relationship-node {
+    overflow-wrap: anywhere;
+}

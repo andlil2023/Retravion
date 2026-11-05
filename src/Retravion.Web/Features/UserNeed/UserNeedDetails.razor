@@ -35,6 +35,9 @@
             }
         }
     </MudPaper>
+    <div class="mt-4">
+        <MudButton Href="@($"/products/links?kind=user-need&id={_need.Need.InternalId}&version={_need.Need.VersionId}")">Links</MudButton>
+    </div>
     @if (_product.IsActive && IsLatest)
     {
         <div class="mt-4">

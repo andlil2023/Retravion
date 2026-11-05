@@ -93,6 +93,14 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
         RequirementParentLink target, CancellationToken token = default) =>
         Change(principal, "requirement.parent.replace", (actor, now) => links.ReplaceParent(expected, target, actor, now, token), token);
 
+    internal async Task<Result<IReadOnlyList<RequirementVersionReference>>> IncomingUserNeed(ClaimsPrincipal principal, Guid id,
+        Guid versionId, CancellationToken token = default) => await Allowed(principal)
+        ? await links.IncomingUserNeed(id, versionId, token) : Result.Failure<IReadOnlyList<RequirementVersionReference>>("Access denied.");
+
+    internal async Task<Result<IReadOnlyList<RequirementVersionReference>>> Children(ClaimsPrincipal principal, Guid id,
+        Guid versionId, CancellationToken token = default) => await Allowed(principal)
+        ? await links.Children(id, versionId, token) : Result.Failure<IReadOnlyList<RequirementVersionReference>>("Access denied.");
+
     internal async Task<Result<Maybe<RequirementParentLink>>> Parent(ClaimsPrincipal principal, Guid id,
         Guid versionId, CancellationToken token = default) => await Allowed(principal)
         ? await links.Parent(id, versionId, token) : Result.Failure<Maybe<RequirementParentLink>>("Access denied.");
