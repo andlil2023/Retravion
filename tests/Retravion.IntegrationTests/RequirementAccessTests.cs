@@ -20,11 +20,14 @@ public sealed partial class AccountManagementTests
         var audit = new RequirementAuditRecorder(); var logger = new RequirementAuditLogger();
         var store = new RequirementStoreDouble();
         var needStore = new NeedStoreDouble();
+        var caseStore = new CaseGateStore();
         await using var original = new AdministratorWebFactory(new StartupAdministratorStore(), "admin", Initial);
         await using var factory = original.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.AddSingleton<IRequirementStore>(store); services.AddSingleton<IRequirementChangeTransaction>(store);
             services.AddSingleton<IRequirementLinkStore>(store);
+            services.AddSingleton<Retravion.Application.TestCase.ITestCaseStore>(caseStore);
+            services.AddSingleton<Retravion.Application.TestCase.ITestCaseChangeTransaction>(caseStore);
             services.AddSingleton<Retravion.Application.UserNeed.IUserNeedStore>(needStore);
             services.AddSingleton<Retravion.Application.UserNeed.IUserNeedChangeTransaction>(needStore);
             services.AddSingleton<IAuditSubmission>(audit); services.AddSingleton<ILogger<RequirementOperations>>(logger);
@@ -87,6 +90,7 @@ public sealed partial class AccountManagementTests
         Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Requirement change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
         Assert.Equal(0, needStore.Calls);
+        Assert.Equal(0, caseStore.Calls);
     }
 
     [Fact]
