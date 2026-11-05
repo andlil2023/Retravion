@@ -55,6 +55,7 @@ public sealed partial class PostgresProductTests
         }
         await using var host = new McpTestHost(services =>
         {
+            RegisterRelationshipCases(services, database.ConnectionString);
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
             services.AddSingleton<IRequirementStore>(store); services.AddSingleton<IRequirementLinkStore>(store);
             services.AddSingleton<IRequirementChangeTransaction>(store);
@@ -131,6 +132,7 @@ public sealed partial class PostgresProductTests
         var d = await RelationshipSetup(products, store, needs);
         await using var host = new McpTestHost(services =>
         {
+            RegisterRelationshipCases(services, database.ConnectionString);
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
             services.AddSingleton<IRequirementStore>(store); services.AddSingleton<IRequirementLinkStore>(store);
             services.AddSingleton<IRequirementChangeTransaction>(store);
@@ -166,6 +168,7 @@ public sealed partial class PostgresProductTests
         }
         await using var host = new McpTestHost(services =>
         {
+            RegisterRelationshipCases(services, database.ConnectionString);
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
             services.AddSingleton<IRequirementStore>(store); services.AddSingleton<IRequirementLinkStore>(store);
             services.AddSingleton<IRequirementChangeTransaction>(store);

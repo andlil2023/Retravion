@@ -18,6 +18,7 @@
     <p>@($"v{value.VersionNumber}") · @Status(value.Status)</p>
     @if (!_product.IsActive) { <p>This Test Case is read-only because its Product is retired.</p> }
     @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
+    <MudLink Href="@($"/products/links?kind=test-case&id={value.InternalId}&version={value.VersionId}")">Links</MudLink>
     <nav aria-label="Test Case versions">
         @foreach (var version in _versions)
         { <MudLink Href="@($"/test-cases/details?id={Id}&version={version.TestCase.VersionId}")">@($"v{version.TestCase.VersionNumber}") · @Status(version.TestCase.Status)</MudLink><span> </span> }

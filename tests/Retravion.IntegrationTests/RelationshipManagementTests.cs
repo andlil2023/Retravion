@@ -22,8 +22,9 @@ namespace Retravion.IntegrationTests;
 public sealed partial class PostgresProductTests
 {
     private static McpTestHost ManagementHost(PostgresProductStore products, PostgresRequirementStore store,
-        PostgresUserNeedStore needs, Retravion.Application.AuditTrail.IAuditSubmission? audit = null) => new(services =>
+        PostgresUserNeedStore needs, string connectionString, Retravion.Application.AuditTrail.IAuditSubmission? audit = null) => new(services =>
         {
+            RegisterRelationshipCases(services, connectionString);
             if (audit is not null) services.AddSingleton(audit);
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
             services.AddSingleton<IRequirementStore>(store); services.AddSingleton<IRequirementLinkStore>(store);
@@ -49,7 +50,7 @@ public sealed partial class PostgresProductTests
         var needs = new PostgresUserNeedStore(database.ConnectionString);
         var d = await RelationshipSetup(products, store, needs);
         var audit = new PostgresAuditQuery(database.ConnectionString);
-        await using var host = ManagementHost(products, store, needs);
+        await using var host = ManagementHost(products, store, needs, database.ConnectionString);
         await host.Login(); await host.Replace(); var credential = await host.Authenticate();
         var actor = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(credential);
         using var scope = host.Factory.Services.CreateScope();
@@ -118,7 +119,7 @@ public sealed partial class PostgresProductTests
         var owner = await ParentDraft(store, d.Product.InternalId, "Expanded");
         owner = (await store.ChangeLink(owner, Endpoint(d.Need), true, RequirementActor, RequirementTime)).Value;
         var audit = new PostgresAuditQuery(database.ConnectionString);
-        await using var host = ManagementHost(products, store, needs);
+        await using var host = ManagementHost(products, store, needs, database.ConnectionString);
         await host.Login(); await host.Replace(); var credential = await host.Authenticate();
         var actor = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(credential);
         using var scope = host.Factory.Services.CreateScope();
@@ -173,7 +174,7 @@ public sealed partial class PostgresProductTests
         var store = new PostgresRequirementStore(database.ConnectionString);
         var needs = new PostgresUserNeedStore(database.ConnectionString);
         var d = await RelationshipSetup(products, store, needs);
-        await using var host = ManagementHost(products, store, needs, new PostgresAuditSubmission(database.ConnectionString));
+        await using var host = ManagementHost(products, store, needs, database.ConnectionString, new PostgresAuditSubmission(database.ConnectionString));
         await host.Login(); await host.Replace(); var credential = await host.Authenticate();
         var actor = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(credential);
         using var scope = host.Factory.Services.CreateScope();
@@ -242,7 +243,7 @@ public sealed partial class PostgresProductTests
                 if (committed) await transaction.CommitAsync(token);
                 throw new IOException("private-provider-details");
             });
-            await using var host = ManagementHost(products, uncertain, needs);
+            await using var host = ManagementHost(products, uncertain, needs, database.ConnectionString);
             await host.Login(); await host.Replace(); var credential = await host.Authenticate();
             var actor = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(credential);
             using var scope = host.Factory.Services.CreateScope();
@@ -331,7 +332,7 @@ public sealed partial class PostgresProductTests
                 }
                 await transaction.CommitAsync(token);
             });
-            await using var host = ManagementHost(products, delayed, needs);
+            await using var host = ManagementHost(products, delayed, needs, database.ConnectionString);
             await host.Login(); await host.Replace(); var credential = await host.Authenticate();
             var actor = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(credential);
             using var scope = host.Factory.Services.CreateScope();
@@ -387,7 +388,7 @@ public sealed partial class PostgresProductTests
             if (remove) owner = parent
                 ? (await store.AddParent(owner, ParentEndpoint(d.Parent), RequirementActor, RequirementTime)).Value
                 : (await store.ChangeLink(owner, Endpoint(d.Need), true, RequirementActor, RequirementTime)).Value;
-            await using var host = ManagementHost(products, store, needs);
+            await using var host = ManagementHost(products, store, needs, database.ConnectionString);
             await host.Login(); await host.Replace(); var credential = await host.Authenticate();
             var actor = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(credential);
             using var scope = host.Factory.Services.CreateScope();
