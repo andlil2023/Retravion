@@ -108,6 +108,26 @@ These requirements describe approved future behavior, not implemented or verifie
 - Earlier Approved versions retain their content, status, and owned links. Approving a newer version does not change older statuses; latest Approved is a designation, not another lifecycle state. Creating or approving a version never automatically retargets incoming links.
 - Existing records become v1 with their existing immutable entity identity, Product, content, current status, and history preserved. Allocate an immutable version GUID without reconstructing earlier versions from review snapshots. Preserve earlier snapshot evidence as recorded; do not present inferred version assignments as historical fact.
 
+### REQ-REQ-007 — Derive an Independent Requirement Across Products
+
+**Parent need:** UN-REQ-001
+
+**Parent requirements:** REQ-LINK-007, REQ-SYS-AUDIT-003
+
+**Requirement:** The web application shall create an independent Requirement in a different Product from a selected readable source Requirement version, retaining immutable copy-time provenance.
+
+**Acceptance criteria:**
+- From the source's exact-version details, outside the Links page, a user with source-read and destination-create permission may select a different active destination Product and copy any readable source version, including Draft, In Review, or Approved. Check both permissions again on submission. Existing restricted-session and retired-destination protections apply.
+- Require a new destination manual ID under REQ-REQ-001. Pre-fill title, statement, type, and rationale from the selected source; permit editing before creation. Apply existing field and Product-scoped uniqueness validation. A duplicate ID is rejected without creation.
+- Create a separate entity and Draft v1 with independent immutable entity/version identities, Product ownership, content and lifecycle, without ordinary links. Do not alter source content, lifecycle, or links; source changes never synchronize to the copy.
+- Preserve immutable provenance independently of the editable destination values: source Product and Requirement identities, exact version GUID and number, status at copy time, and the source ID, title, statement, type and rationale as copied. Preserve this evidence even if the source Draft later changes or the source is deleted. No provenance edit or removal is provided.
+- Show a read-only Derived from section on the copy's details with the stored identifiers, version, copy-time status and snapshot to users who can read the copy, even if they cannot access the source. Link to the exact source only when it exists and is accessible; otherwise retain the stored details as text. This does not grant access to other source Product records. Reverse Source for navigation is deferred to #143.
+- Revalidate source version and destination state at submission. Reject stale source or unsafe concurrent state without creating anything, and ask the user to reload and review. Do not automatically retry. Authorization is checked even when submitted input is invalid.
+- Creation and provenance commit together with the required audit event under REQ-REQ-005. A distinct success action records actor, time, outcome, immutable destination Product/entity/version identities, initial destination values, and source identity/version and copy-time snapshot. Failure of business, provenance or audit writes prevents partial commit or success. On uncertain commit outcome report uncertainty, advise retrieval before user-directed retry, and do not retry automatically. Unauthorized attempts submit sanitized failure events; audit-submission failures are safely logged. Reads, no-ops, ordinary validation failures, duplicate conflicts and stale rejections create no change event; unauthorized attempts remain audited even with invalid input.
+- Provenance is evidence, not an ordinary outgoing relationship: releasing the destination uses the retained snapshot and does not traverse, freeze, or require continued access to the live source. Other ordinary references still follow REQ-LINK-009. This specification does not implement release integration.
+
+Specified by [#174](https://github.com/andlil2023/Retravion/issues/174); implementation remains separately scoped under [#141](https://github.com/andlil2023/Retravion/issues/141). The snapshot and release rule are approved future behavior, not evidence of implementation.
+
 ## Boundaries and Open Details
 
 The first increment excludes relationships, automatic ID suggestions, Test Cases, separate verification criteria, and Product revision integration. The test specifications linked above are repository verification plans, not an application Test Case feature. Requirements remain a flat Product-scoped list.
