@@ -116,11 +116,13 @@ public sealed class ProductDescriptionEditorTests
             await renderer.Mount(parameters);
             renderer.AssertToolbarOrder();
             Assert.Single(js.Calls, call => call.Name == "initializeSplitter");
-            Assert.Contains("role=\"separator\"", renderer.Markup());
-            Assert.Contains("aria-orientation=\"vertical\"", renderer.Markup());
-            Assert.Contains("aria-valuemin=\"25\"", renderer.Markup());
-            Assert.Contains("aria-valuemax=\"75\"", renderer.Markup());
-            Assert.Contains("aria-valuenow=\"50\"", renderer.Markup());
+            // Dynamic aria-controls now creates element frames rather than a static markup frame.
+            // Assert the complete separator contract on the same element, not just static-frame text.
+            renderer.AssertElementAttributes("div", new Dictionary<string, object>
+            {
+                ["role"] = "separator", ["aria-orientation"] = "vertical", ["aria-controls"] = "product-markdown",
+                ["aria-valuemin"] = "25", ["aria-valuemax"] = "75", ["aria-valuenow"] = "50", ["tabindex"] = "0"
+            });
             const string draft = "## Unsaved **draft**";
             await renderer.Event("textarea", "oninput", new ChangeEventArgs { Value = draft });
             await renderer.Event("button", "onclick", new MouseEventArgs(), "Stacked");
@@ -186,6 +188,44 @@ public sealed class ProductDescriptionEditorTests
         Assert.Empty(renderer.Errors);
     }
 
+    [Fact]
+    public async Task FieldOnlyEditorHasUniqueControlIdentityLivePreviewAndNoFormOrFullscreenSideEffects()
+    {
+        var js = new RecordingJS();
+        await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton<IJSRuntime>(js).AddSingleton<NavigationManager, TestNavigation>().BuildServiceProvider();
+        await using var renderer = new EditorRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var changed = new List<string>();
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var parameters = new Dictionary<string, object?>
+            {
+                [nameof(DescriptionEditor.FieldOnly)] = true,
+                [nameof(DescriptionEditor.InputId)] = "unique-action",
+                [nameof(DescriptionEditor.Label)] = "Step action",
+                [nameof(DescriptionEditor.InitialDescription)] = "Initial",
+                [nameof(DescriptionEditor.DescriptionChanged)] = EventCallback.Factory.Create<string>(changed, (string value) => changed.Add(value))
+            };
+            await renderer.Mount(parameters);
+            renderer.AssertAttribute("id", "unique-action"); renderer.AssertAttribute("for", "unique-action");
+            renderer.AssertNoElement("form"); renderer.AssertNoElement("dialog");
+            Assert.DoesNotContain(js.Calls, call => call.Name is "initializeSplitter" or "setFullscreen");
+            await renderer.Event("textarea", "oninput", new ChangeEventArgs { Value = "**Action**" });
+            Assert.Contains("<strong>Action</strong>", renderer.Markup());
+            Assert.Equal(new[] { "**Action**" }, changed);
+            parameters[nameof(DescriptionEditor.Busy)] = true;
+            await renderer.Render(parameters);
+            await renderer.Event("textarea", "oninput", new ChangeEventArgs { Value = "Blocked" });
+            Assert.Single(changed); Assert.Contains("<strong>Action</strong>", renderer.Markup());
+            parameters[nameof(DescriptionEditor.Busy)] = false;
+            parameters[nameof(DescriptionEditor.ReadOnly)] = true;
+            await renderer.Render(parameters);
+            await renderer.Event("textarea", "oninput", new ChangeEventArgs { Value = "Blocked" });
+            Assert.Single(changed);
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
     private sealed class RecordingJS : IJSRuntime, IJSObjectReference
     {
         internal List<(string Name, object?[]? Args)> Calls { get; } = [];
@@ -231,6 +271,15 @@ public sealed class ProductDescriptionEditorTests
         internal string Markup() => string.Join("", Frames(_root).Where(frame => frame.FrameType == RenderTreeFrameType.Markup).Select(frame => frame.MarkupContent));
         internal void AssertAttribute(string name, object value) => Assert.Contains(Frames(_root), frame =>
             frame.FrameType == RenderTreeFrameType.Attribute && frame.AttributeName == name && Equals(frame.AttributeValue, value));
+        internal void AssertElementAttributes(string name, Dictionary<string, object> expected)
+        {
+            var frames = Frames(_root).ToArray();
+            Assert.Contains(Enumerable.Range(0, frames.Length).Where(i => frames[i].FrameType == RenderTreeFrameType.Element && frames[i].ElementName == name),
+                i => expected.All(pair => frames.Skip(i + 1).TakeWhile(frame => frame.FrameType == RenderTreeFrameType.Attribute)
+                    .Any(frame => frame.AttributeName == pair.Key && Equals(frame.AttributeValue, pair.Value))));
+        }
+        internal void AssertNoElement(string name) => Assert.DoesNotContain(Frames(_root), frame =>
+            frame.FrameType == RenderTreeFrameType.Element && frame.ElementName == name);
         internal void AssertToolbarOrder()
         {
             var frames = Frames(_root).ToArray();

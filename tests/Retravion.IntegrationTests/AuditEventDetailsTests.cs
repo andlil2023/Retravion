@@ -159,6 +159,29 @@ public sealed class AuditEventDetailsTests
         Assert.DoesNotContain(productId.ToString(), initial);
     }
 
+    [Fact]
+    public async Task TestCaseDetailsRetainOrderedOldNewStepsAndEncodeAllEventTimeContent()
+    {
+        var id = Guid.NewGuid(); var version = Guid.NewGuid(); var product = Guid.NewGuid();
+        var before = new TestCaseAuditValues(product, "TC-001", "Title", "# Description", "", "Draft",
+            [new("<script>old</script>", "First result"), new("Second", "")]);
+        var after = before with { Steps = [new("Second", ""), new("<script>new</script>", "Updated result")] };
+        var html = await Render(new(new AuditActor.Identified("author"), DateTimeOffset.UnixEpoch,
+            "test-case.edit", new AuditTarget.Identified(id.ToString()), AuditActionOutcome.Success,
+            testCaseChange: new(id, version, 1, before, after)));
+        Assert.Contains("Changed Test Case fields", html); Assert.Contains("Identified: TC-001", html);
+        Assert.Contains("Ordered steps", html); Assert.Contains("Step 1", html); Assert.Contains("Step 2", html);
+        Assert.Contains("&lt;script&gt;old&lt;/script&gt;", html); Assert.Contains("&lt;script&gt;new&lt;/script&gt;", html);
+        Assert.Contains("First result", html); Assert.Contains("Updated result", html);
+        Assert.DoesNotContain("<script", html); Assert.DoesNotContain("aria-label=\"Title\"", html);
+        Assert.DoesNotContain(product.ToString(), html); Assert.DoesNotContain(id.ToString(), html);
+        html = await Render(new(new AuditActor.Identified("author"), DateTimeOffset.UnixEpoch,
+            "test-case.create", new AuditTarget.Identified(id.ToString()), AuditActionOutcome.Success,
+            testCaseChange: new(id, version, 1, null, before)));
+        Assert.Contains("Initial Test Case values", html); Assert.Contains("(empty)", html);
+        Assert.DoesNotContain("Old value", html); Assert.Contains("Version", html);
+    }
+
     private static AuditInformation Event(ProductAuditDetails? details, string action = "product.edit") =>
         new(new AuditActor.Unknown(), DateTimeOffset.UnixEpoch, action, new AuditTarget.Unknown(), AuditActionOutcome.Success, details);
 

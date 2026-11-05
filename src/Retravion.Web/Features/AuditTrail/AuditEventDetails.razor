@@ -9,7 +9,7 @@
             <dt>Actor</dt><dd>@(Event.Actor is AuditActor.Identified actor ? $"Identified: {actor.Identifier}" : "Unknown")</dd>
             <dt>Time (UTC)</dt><dd><time datetime="@Event.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)">@Event.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)</time></dd>
             <dt>Action</dt><dd>@Event.Action</dd>
-            <dt>Target</dt><dd>@(Event.ProductChange is { } product ? $"Identified: {product.After.Id}" : Event.UserNeedChange is { } need ? $"Identified: {need.After.Id}" : Event.RequirementChange is { } requirement ? $"Identified: {requirement.After.Id}" : Event.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</dd>
+            <dt>Target</dt><dd>@(Event.ProductChange is { } product ? $"Identified: {product.After.Id}" : Event.UserNeedChange is { } need ? $"Identified: {need.After.Id}" : Event.RequirementChange is { } requirement ? $"Identified: {requirement.After.Id}" : Event.TestCaseChange is { } testCase ? $"Identified: {testCase.After.Id}" : Event.Target switch { AuditTarget.Identified target => $"Identified: {target.Identifier}", AuditTarget.Unknown => "Unknown", _ => "Not applicable" })</dd>
             <dt>Outcome</dt><dd>@Event.Outcome</dd>
         </dl>
         @if (Event.ProductChange is { } change)
@@ -60,6 +60,21 @@
                 <p>No recorded field changes.</p>
             }
         }
+        else if (Event.TestCaseChange is { } testCaseChange)
+        {
+            <h3>@(testCaseChange.Before is null ? "Initial Test Case values" : "Changed Test Case fields")</h3>
+            @foreach (var field in TestCaseFields(testCaseChange))
+            {
+                <section class="field-change" aria-label="@field.Name">
+                    <h4>@field.Name</h4>
+                    <dl>
+                        @if (testCaseChange.Before is not null)
+                        { <dt>Old value</dt><dd class="recorded-value">@(field.Old == "" ? "(empty)" : field.Old)</dd> }
+                        <dt>@(testCaseChange.Before is null ? "Initial value" : "New value")</dt><dd class="recorded-value">@(field.New == "" ? "(empty)" : field.New)</dd>
+                    </dl>
+                </section>
+            }
+        }
         else if (Event.AiWorkflowChange is { } settings)
         {
             <h3>AI Workflow settings</h3>
@@ -100,6 +115,25 @@
 
 @code {
     [Parameter, EditorRequired] public AuditInformation Event { get; set; } = default!;
+
+    private static IEnumerable<(string Name, string? Old, string New)> TestCaseFields(TestCaseAuditDetails change)
+    {
+        static string Steps(TestCaseAuditValues value) => string.Join("\n\n", value.Steps.Select((step, index) =>
+            $"Step {index + 1}\nAction: {step.Action}\nExpected result: {step.ExpectedResult}"));
+        var before = change.Before;
+        var after = change.After;
+        (string Name, string? Old, string New)[] fields =
+        [
+            ("Test Case ID", before?.Id, after.Id),
+            ("Version", change.VersionNumber.ToString(), change.VersionNumber.ToString()),
+            ("Title", before?.Title, after.Title),
+            ("Description", before?.Description, after.Description),
+            ("Preconditions", before?.Preconditions, after.Preconditions),
+            ("Status", before?.Status, after.Status),
+            ("Ordered steps", before is null ? null : Steps(before), Steps(after))
+        ];
+        return fields.Where(field => before is null || field.Old != field.New);
+    }
 
     private static IEnumerable<(string Name, string? Old, string New)> NeedFields(UserNeedAuditDetails change)
     {

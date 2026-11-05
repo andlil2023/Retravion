@@ -12,6 +12,7 @@ public sealed record AuditInformation
     public UserNeedAuditDetails? UserNeedChange { get; }
     public RequirementAuditDetails? RequirementChange { get; }
     public AiWorkflowAuditDetails? AiWorkflowChange { get; }
+    public TestCaseAuditDetails? TestCaseChange { get; }
 
     public AuditInformation(
         AuditActor actor,
@@ -22,7 +23,8 @@ public sealed record AuditInformation
         ProductAuditDetails? productChange = null,
         UserNeedAuditDetails? userNeedChange = null,
         RequirementAuditDetails? requirementChange = null,
-        AiWorkflowAuditDetails? aiWorkflowChange = null)
+        AiWorkflowAuditDetails? aiWorkflowChange = null,
+        TestCaseAuditDetails? testCaseChange = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
@@ -41,5 +43,6 @@ public sealed record AuditInformation
         UserNeedChange = userNeedChange;
         RequirementChange = requirementChange;
         AiWorkflowChange = aiWorkflowChange;
+        TestCaseChange = testCaseChange;
     }
 }
