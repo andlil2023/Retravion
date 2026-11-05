@@ -1,0 +1,190 @@
+@page "/revisions/details"
+@using CSharpFunctionalExtensions
+@inject RevisionOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Draft revision · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Draft revision" BackHref="@ListPath" BackText="Revisions" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_message is not null) { <MudAlert Severity="Severity.Info" role="status">@_message</MudAlert> }
+@if (_row is not null)
+{
+    <MudPaper Class="pa-4" Elevation="0">
+        <h2>@_row.Draft.Identifier</h2><p>@_row.Draft.Description</p>
+        <p>@_product!.Id – @_product.Name · @(_row.Deleted ? "Deleted Draft — retained evidence" : "Draft")</p>
+        @if (!_product.IsActive) { <p>Product retired: read-only.</p> }
+        <h3>Explicit exact-version selections</h3>
+        @if (_row.Draft.Selections.IsEmpty) { <p>No explicit selections. Empty Drafts are valid.</p> }
+        <ul>
+            @foreach (var selection in _row.Draft.Selections)
+            {
+                <li>
+                    <MudLink Href="@EndpointPath(selection)">@Label(selection)</MudLink>
+                    @if (CanChange)
+                    {
+                        <MudButton OnClick="@(() => ConfirmSelection("remove", selection))" Disabled="@Locked">Remove selection</MudButton>
+                        <MudButton OnClick="@(() => ConfirmSelection("replace", selection))" Disabled="@Locked">Replace selection</MudButton>
+                    }
+                </li>
+            }
+        </ul>
+        @if (CanChange)
+        {
+            <MudSelect T="string" @bind-Value="_selected" Label="Exact version to select" Disabled="@Locked">
+                @foreach (var member in _candidates)
+                { <MudSelectItem Value="@Key(member.Endpoint)">@MemberLabel(member)</MudSelectItem> }
+            </MudSelect>
+        }
+    </MudPaper>
+    @if (CanChange)
+    {
+        <div class="mt-4">
+            <MudButton OnClick="Add" Disabled="@Locked" Variant="Variant.Filled" Color="Color.Primary">Add exact selection</MudButton>
+            <MudButton Href="@($"/revisions/edit?product={Uri.EscapeDataString(ProductId ?? "")}&id={Id}")" Disabled="@Locked">Edit metadata</MudButton>
+        </div>
+    }
+    @if (_pendingAction is not null && !Locked)
+    {
+        <MudPaper Class="pa-4 mt-4" Elevation="0">
+            @if (_pendingAction == "delete") { <p>Confirm deletion of Draft @_row.Draft.Identifier. Referenced records and prior evidence will remain.</p> }
+            else
+            {
+                <p>Confirm @(_pendingAction == "replace" ? "replacement" : "removal") of @Label(_pendingTarget!).</p>
+                @if (_pendingReplacement is not null) { <p>New exact selection: @Label(_pendingReplacement)</p> }
+            }
+        </MudPaper>
+        <div class="mt-4"><MudButton OnClick="Confirm" Variant="Variant.Filled" Color="Color.Primary">Confirm change</MudButton><MudButton OnClick="Cancel">Cancel change</MudButton></div>
+    }
+    @if (_baseline is not null)
+    {
+        <h2>Complete outgoing baseline</h2>
+        <p>This is the full current Draft closure, not a partial graph or frozen release. No incoming neighbors are included.</p>
+        <MudTable T="RevisionBaselineMember" Items="_baseline.Members" Dense="true" Hover="true" Elevation="0" aria-label="Complete revision baseline">
+            <HeaderContent><MudTh>Exact version</MudTh><MudTh>Lifecycle</MudTh><MudTh>Membership</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Exact version"><MudLink Href="@EndpointPath(context.Endpoint)">@MemberLabel(context)</MudLink></MudTd>
+                <MudTd DataLabel="Lifecycle">@(context.Status == "InReview" ? "In Review" : context.Status)</MudTd>
+                <MudTd DataLabel="Membership">@(context.Explicit ? "Explicit" : "Indirect")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText>Empty baseline.</MudText></NoRecordsContent>
+        </MudTable>
+    }
+    @if (CanChange)
+    { <div class="mt-4"><MudButton OnClick="@(() => _pendingAction = "delete")" Disabled="@Locked" Variant="Variant.Filled" Color="Color.Primary">Delete Draft</MudButton></div> }
+    <h2>Retained history</h2>
+    @foreach (var item in _history)
+    {
+        <p>@item.Action · @item.OccurredAt.ToUniversalTime().ToString("O")</p>
+        <Retravion.Web.Features.AuditTrail.AuditEventDetails Event="@(new Retravion.Application.AuditTrail.AuditInformation(item.Actor, item.OccurredAt, item.Action, new Retravion.Application.AuditTrail.AuditTarget.Identified(Id.ToString()), Retravion.Application.AuditTrail.AuditActionOutcome.Success, revisionChange: item.Change))" />
+    }
+}
+@if (_uncertain)
+{
+    <p>No automatic retry. Retrieve the outcome before making another change.</p>
+    <MudButton OnClick="RetrieveOutcome" Disabled="_busy" Variant="Variant.Filled" Color="Color.Primary">Retrieve outcome</MudButton>
+    <MudLink Href="@($"/revisions/details?product={Uri.EscapeDataString(ProductId ?? "")}&id={Id}&operation={_operation}")">Outcome retrieval link</MudLink>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "operation")] public Guid? OperationId { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private RevisionSnapshot? _row;
+    private RevisionBaseline? _baseline;
+    private IReadOnlyList<RevisionHistory> _history = [];
+    private IReadOnlyList<RevisionBaselineMember> _candidates = [];
+    private string? _error, _message, _pendingAction;
+    private string _selected = "";
+    private RevisionSelection? _pendingTarget, _pendingReplacement;
+    private Guid _operation;
+    private bool _busy, _uncertain;
+    private bool CanChange => _product?.IsActive == true && _row is { Deleted: false };
+    private bool Locked => _busy || _uncertain;
+    private string ListPath => $"/revisions?product={Uri.EscapeDataString(ProductId ?? "")}";
+    private static string Key(RevisionSelection e) => $"{e.Kind}:{e.VersionId}";
+    private static string KindLabel(RevisionEntityKind kind) => kind switch { RevisionEntityKind.UserNeed => "User Need", RevisionEntityKind.Requirement => "Requirement", _ => "Test Case" };
+    private static string MemberLabel(RevisionBaselineMember m) => $"{KindLabel(m.Endpoint.Kind)} {m.Identifier} · v{m.Endpoint.VersionNumber} · {m.Title}";
+    private string Label(RevisionSelection e) => _candidates.Concat(_baseline?.Members ?? []).FirstOrDefault(m => m.Endpoint == e) is { } member
+        ? MemberLabel(member) : $"{KindLabel(e.Kind)} · v{e.VersionNumber} · {e.InternalId} / {e.VersionId}";
+    private static string EndpointPath(RevisionSelection e) => $"/{(e.Kind == RevisionEntityKind.UserNeed ? "user-needs" : e.Kind == RevisionEntityKind.Requirement ? "requirements" : "test-cases")}/details?id={e.InternalId}&version={e.VersionId}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _error = _message = null; _row = null; _baseline = null; _history = []; _candidates = []; _uncertain = false; Cancel();
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, ProductId);
+        if (product.IsFailure) { _error = product.Error; return; }
+        _product = product.Value;
+        _operation = OperationId ?? Guid.Empty;
+        await Load(OperationId);
+    }
+    private async Task Load(Guid? operation = null)
+    {
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var found = await Operations.Retrieve(actor, _product!.InternalId, Id, operation);
+        if (found.IsFailure) { _error = found.Error; return; }
+        if (operation is not null)
+            _message = found.Value.Operation is null ? "The attempted operation did not commit. Current state retrieved." : "The attempted operation committed. Current state retrieved.";
+        _row = found.Value.Record;
+        if (_row is null) { _error = "No revision exists for this immutable identity."; return; }
+        var history = await Operations.History(actor, _product.InternalId, Id);
+        if (history.IsFailure) { _error = history.Error; _row = null; return; }
+        var candidates = await Operations.Candidates(actor, _product.InternalId);
+        if (candidates.IsFailure) { _error = candidates.Error; _row = null; return; }
+        _history = history.Value; _candidates = candidates.Value;
+        _baseline = null;
+        if (!_row.Deleted)
+        {
+            var baseline = await Operations.Baseline(actor, _product.InternalId, Id);
+            if (baseline.IsFailure) { _error = baseline.Error; _row = null; _history = []; _candidates = []; return; }
+            _baseline = baseline.Value; _row = baseline.Value.Revision;
+        }
+    }
+    private RevisionSelection? Selected => _candidates.FirstOrDefault(m => Key(m.Endpoint) == _selected)?.Endpoint;
+    private void ConfirmSelection(string action, RevisionSelection target)
+    {
+        if (Locked || !CanChange) return;
+        if (action == "replace" && Selected is null) { _error = "Select the new exact version first."; return; }
+        _pendingAction = action; _pendingTarget = target; _pendingReplacement = action == "replace" ? Selected : null;
+    }
+    private void Cancel() { _pendingAction = null; _pendingTarget = _pendingReplacement = null; }
+    private async Task Add()
+    {
+        if (Locked || !CanChange) return;
+        if (Selected is null) { _error = "Select an exact version first."; return; }
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        await Run(op => Operations.Select(actor, op, _row!, "add", Selected));
+    }
+    private async Task Confirm()
+    {
+        if (Locked || !CanChange || _pendingAction is null) return;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        await Run(op => _pendingAction == "delete" ? Operations.Delete(actor, op, _row!, true)
+            : Operations.Select(actor, op, _row!, _pendingAction, _pendingTarget!, _pendingReplacement, true));
+    }
+    private async Task Run(Func<Guid, Task<Result<RevisionSnapshot>>> change)
+    {
+        _busy = true; _error = _message = null; _operation = Guid.NewGuid();
+        try
+        {
+            var result = await change(_operation);
+            if (result.IsFailure)
+            {
+                _error = result.Error; _uncertain = result.Error.Contains("could not be confirmed", StringComparison.Ordinal);
+            }
+            else { Cancel(); await Load(); }
+        }
+        finally { _busy = false; }
+    }
+    private async Task RetrieveOutcome()
+    {
+        if (_busy || !_uncertain) return;
+        _busy = true; _error = null;
+        try
+        {
+            await Load(_operation);
+            if (_error is null) { _uncertain = false; Cancel(); }
+        }
+        finally { _busy = false; }
+    }
+}

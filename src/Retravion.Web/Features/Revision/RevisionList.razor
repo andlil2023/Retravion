@@ -1,0 +1,39 @@
+@page "/revisions"
+@inject RevisionOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Revisions · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Revisions" BackHref="/products" BackText="Products" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_product is not null)
+{
+    <p>@_product.Id – @_product.Name</p>
+    @if (!_product.IsActive) { <p>Product retired: revisions are read-only.</p> }
+    <MudTable T="RevisionSnapshot" Items="_rows" Dense="true" Hover="true" Elevation="0" aria-label="Product revisions">
+        <HeaderContent><MudTh>Identifier</MudTh><MudTh>Description</MudTh><MudTh>State</MudTh></HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Identifier"><MudLink Href="@($"/revisions/details?product={Uri.EscapeDataString(_product.Id)}&id={context.Draft.InternalId}")">@context.Draft.Identifier</MudLink></MudTd>
+            <MudTd DataLabel="Description">@context.Draft.Description</MudTd><MudTd DataLabel="State">Draft</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><MudText>No Draft revisions.</MudText></NoRecordsContent>
+    </MudTable>
+    @if (_product.IsActive)
+    { <div class="mt-4"><MudButton Href="@($"/revisions/create?product={Uri.EscapeDataString(_product.Id)}")" Variant="Variant.Filled" Color="Color.Primary">Create empty Draft</MudButton></div> }
+}
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private IReadOnlyList<RevisionSnapshot> _rows = [];
+    private string? _error;
+    protected override async Task OnParametersSetAsync()
+    {
+        _product = null; _rows = []; _error = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, ProductId);
+        if (product.IsFailure) { _error = product.Error; return; }
+        var rows = await Operations.List(actor, product.Value.InternalId);
+        if (rows.IsFailure) { _error = rows.Error; return; }
+        _product = product.Value; _rows = rows.Value;
+    }
+}

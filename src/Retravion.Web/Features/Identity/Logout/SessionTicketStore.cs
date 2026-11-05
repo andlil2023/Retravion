@@ -18,7 +18,17 @@ internal sealed class SessionTicketStore(TimeProvider? timeProvider = null) : IT
     // Audit submission deliberately occurs outside this gate.
     internal SemaphoreSlim CredentialGate { get; } = new(1, 1);
 
+    // Order revision writes and revocation in this single-host application. CredentialGate is acquired first when both are needed.
+    internal SemaphoreSlim MutationGate { get; } = new(1, 1);
+
     internal void RevokeAccount(string username)
+    {
+        MutationGate.Wait();
+        try { RevokeAccountWithinMutation(username); }
+        finally { MutationGate.Release(); }
+    }
+
+    internal void RevokeAccountWithinMutation(string username)
     {
         lock (_gate)
         {
@@ -70,14 +80,18 @@ internal sealed class SessionTicketStore(TimeProvider? timeProvider = null) : IT
                 ? TicketSerializer.Default.Deserialize(session.Ticket) : null);
     }
 
-    public Task RemoveAsync(string key)
+    public async Task RemoveAsync(string key)
     {
-        lock (_gate)
+        await MutationGate.WaitAsync();
+        try
         {
-            if (_tickets.Remove(key, out var session)) session.Timer?.Dispose();
+            lock (_gate)
+            {
+                if (_tickets.Remove(key, out var session)) session.Timer?.Dispose();
+            }
         }
+        finally { MutationGate.Release(); }
         Revoked?.Invoke();
-        return Task.CompletedTask;
     }
 
     internal bool IsActive(string? key)
@@ -102,14 +116,22 @@ internal sealed class SessionTicketStore(TimeProvider? timeProvider = null) : IT
     private Session? Active(string? key) => key is not null &&
         _tickets.TryGetValue(key, out var session) && session.Expires > _time.GetUtcNow() ? session : null;
 
-    private void Expire(string key)
+    private void Expire(string key) => _ = ExpireAsync(key);
+
+    private async Task ExpireAsync(string key)
     {
-        lock (_gate)
+        // IsActive already rejects expired sessions; this only orders removal/notification with an in-flight commit.
+        await MutationGate.WaitAsync();
+        try
         {
-            if (!_tickets.TryGetValue(key, out var session) || session.Expires > _time.GetUtcNow()) return;
-            _tickets.Remove(key);
-            session.Timer?.Dispose();
+            lock (_gate)
+            {
+                if (!_tickets.TryGetValue(key, out var session) || session.Expires > _time.GetUtcNow()) return;
+                _tickets.Remove(key);
+                session.Timer?.Dispose();
+            }
         }
+        finally { MutationGate.Release(); }
         Revoked?.Invoke();
     }
 

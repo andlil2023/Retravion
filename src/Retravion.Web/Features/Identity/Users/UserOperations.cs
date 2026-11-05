@@ -68,11 +68,19 @@ internal sealed class UserOperations(IAuthorizationService authorization, Sessio
                 var actorUsername = actor.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (!await Allowed(actor) || string.IsNullOrEmpty(actorUsername))
                     return new AccountTransactionResult<CreatedAccount>(Result.Failure<CreatedAccount>("Access denied."));
-                var result = await transaction.Execute(transactionalStore =>
-                    AccountPasswordReset.Reset(transactionalStore, hasher, actorUsername, username, cancellationToken),
-                    audit.Information(actor, action, username, AuditActionOutcome.Success, targetKnown: true), cancellationToken);
-                if (result.Result.IsSuccess || result.Uncertain) sessions.RevokeAccount(username);
-                return result;
+                await sessions.MutationGate.WaitAsync(cancellationToken);
+                try
+                {
+                    // A revision write that won this gate resolves before the password change/revocation.
+                    if (!await Allowed(actor))
+                        return new AccountTransactionResult<CreatedAccount>(Result.Failure<CreatedAccount>("Access denied."));
+                    var result = await transaction.Execute(transactionalStore =>
+                        AccountPasswordReset.Reset(transactionalStore, hasher, actorUsername, username, cancellationToken),
+                        audit.Information(actor, action, username, AuditActionOutcome.Success, targetKnown: true), cancellationToken);
+                    if (result.Result.IsSuccess || result.Uncertain) sessions.RevokeAccountWithinMutation(username);
+                    return result;
+                }
+                finally { sessions.MutationGate.Release(); }
             }
             finally { sessions.CredentialGate.Release(); }
         });
