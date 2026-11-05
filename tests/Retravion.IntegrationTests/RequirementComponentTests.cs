@@ -117,6 +117,7 @@ public sealed partial class PostgresProductTests
         internal RequirementRenderer(IServiceProvider services, ILoggerFactory logger) : base(services, logger) =>
             ElementReferenceContext = new WebElementReferenceContext(services.GetRequiredService<IJSRuntime>());
         private int root = -1;
+        private IComponent? current;
         public override Dispatcher Dispatcher { get; } = Dispatcher.CreateDefault();
         internal List<Exception> Errors { get; } = [];
         protected override void HandleException(Exception exception) => Errors.Add(exception);
@@ -125,10 +126,17 @@ public sealed partial class PostgresProductTests
         {
             if (root >= 0) RemoveRootComponent(root);
             var component = InstantiateComponent(type);
+            current = component;
             // The router normally supplies these query-only cascading parameters. This renderer
             // exercises the page callbacks without a router, so seed them before initialization.
             foreach (var (name, value) in parameters) type.GetProperty(name)!.SetValue(component, value);
             root = AssignRootComponentId(component);
+            await RenderRootComponentAsync(root, ParameterView.Empty);
+        }
+        internal async Task Navigate(Dictionary<string, object?> parameters)
+        {
+            // Reuse the routed page instance, as query-parameter navigation does in a live circuit.
+            foreach (var (name, value) in parameters) current!.GetType().GetProperty(name)!.SetValue(current, value);
             await RenderRootComponentAsync(root, ParameterView.Empty);
         }
         internal IEnumerable<T> Components<T>() => Frames(root).Where(f => f.FrameType == RenderTreeFrameType.Component).Select(f => f.Component).OfType<T>();
