@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using CSharpFunctionalExtensions;
+using Retravion.Application.Requirement;
+using Retravion.Domain.Requirement;
 using Retravion.Web.Features.Product;
 using Retravion.Web.Features.Requirement;
 using Retravion.Web.Features.UserNeed;
@@ -9,6 +11,9 @@ namespace Retravion.Web.Features.Relationships;
 internal sealed record RelationshipNode(string Kind, Guid InternalId, Guid VersionId, Guid ProductInternalId,
     string Id, string Title, int VersionNumber, string Status, bool HasNewerVersion)
 {
+    // Retain the displayed owner's concurrency token; never refresh it silently when saving.
+    internal RequirementSnapshot? Snapshot { get; init; }
+    public bool Editable => Kind == "requirement" && Status == "Draft" && !HasNewerVersion;
     public string LinksPath => $"/products/links?kind={Kind}&id={InternalId}&version={VersionId}";
     public string DetailsPath => $"/{(Kind == "requirement" ? "requirements" : "user-needs")}/details?id={InternalId}&version={VersionId}";
     public string Label => $"{(Kind == "requirement" ? "Requirement" : "User Need")} {Id} · v{VersionNumber}";
@@ -33,9 +38,59 @@ internal sealed record RelationshipExploration(RelationshipView Root, IReadOnlyL
     public IReadOnlyList<Guid> Expanded => Neighborhoods.Skip(1).Select(v => v.Center.VersionId).ToArray();
 }
 
-// This Web-only read model composes the existing authorized feature contracts; no new mutation or MCP surface.
+// Web-only composition of existing authorized feature contracts; no new public or MCP surface.
 internal sealed class RelationshipOperations(RequirementOperations requirements, UserNeedOperations needs, ProductOperations products)
 {
+    internal const string NeedRelationship = "Addresses User Need";
+    internal const string ParentRelationship = "Child → parent Requirement";
+
+    internal Task<Result<RequirementSnapshot>> Change(ClaimsPrincipal actor, RequirementSnapshot owner,
+        RelationshipNode target, string relationship, bool add, CancellationToken token = default) =>
+        relationship == NeedRelationship
+            ? add ? requirements.AddLink(actor, owner, new(target.InternalId, target.VersionId), token)
+                  : requirements.RemoveLink(actor, owner, new(target.InternalId, target.VersionId), token)
+            : add ? requirements.AddParent(actor, owner, new(target.InternalId, target.VersionId), token)
+                  : requirements.RemoveParent(actor, owner, token);
+
+    internal async Task<Result<IReadOnlyList<RelationshipNode>>> Candidates(ClaimsPrincipal actor, Guid product,
+        string kind, bool ownersOnly, CancellationToken token = default)
+    {
+        var nodes = new List<RelationshipNode>();
+        if (kind == "requirement")
+        {
+            var records = await requirements.List(actor, product, token);
+            if (records.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(records.Error);
+            foreach (var record in records.Value)
+            {
+                var versions = await requirements.Versions(actor, record.Requirement.InternalId, token);
+                if (versions.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(versions.Error);
+                foreach (var version in versions.Value)
+                {
+                    var node = await Node(actor, kind, version.Requirement.InternalId, version.Requirement.VersionId, token);
+                    if (node.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(node.Error);
+                    if (!ownersOnly || node.Value.Editable) nodes.Add(node.Value);
+                }
+            }
+        }
+        else
+        {
+            var records = await needs.List(actor, product, token);
+            if (records.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(records.Error);
+            foreach (var record in records.Value)
+            {
+                var versions = await needs.Versions(actor, record.Need.InternalId, token);
+                if (versions.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(versions.Error);
+                foreach (var version in versions.Value)
+                {
+                    var node = await Node(actor, kind, version.Need.InternalId, version.Need.VersionId, token);
+                    if (node.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(node.Error);
+                    nodes.Add(node.Value);
+                }
+            }
+        }
+        return nodes.OrderBy(n => n.Id).ThenBy(n => n.VersionNumber).ToArray();
+    }
+
     internal async Task<Result<RelationshipView>> Load(ClaimsPrincipal actor, string? kind, Guid id, Guid? version,
         CancellationToken token = default)
     {
@@ -119,7 +174,7 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
             var r = found.Value.Value.Requirement;
             return new RelationshipNode(kind, r.InternalId, r.VersionId, r.ProductInternalId, r.Id, r.Title, r.VersionNumber,
                 r.Status == Retravion.Domain.Requirement.RequirementStatus.InReview ? "In Review" : r.Status.ToString(),
-                versions.Value.Any(v => v.Requirement.VersionNumber > r.VersionNumber));
+                versions.Value.Any(v => v.Requirement.VersionNumber > r.VersionNumber)) { Snapshot = found.Value.Value };
         }
         var need = await needs.Find(actor, id, token, version);
         if (need.IsFailure) return Result.Failure<RelationshipNode>(need.Error);
