@@ -93,6 +93,20 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
         RequirementParentLink target, CancellationToken token = default) =>
         Change(principal, "requirement.parent.replace", (actor, now) => links.ReplaceParent(expected, target, actor, now, token), token);
 
+    internal Task<Result<RequirementSnapshot>> RetargetParent(ClaimsPrincipal principal, RequirementSnapshot expected,
+        RequirementParentLink target, RequirementParentLink replacement, CancellationToken token = default) =>
+        Change(principal, "requirement.parent.replace", async (actor, now) =>
+        {
+            if (target.RequirementInternalId != replacement.RequirementInternalId)
+                return Result.Failure<RequirementSnapshot>("Retargeting must select a version of the same parent Requirement.");
+            var current = await links.Parent(expected.Requirement.InternalId, expected.Requirement.VersionId, token);
+            if (current.IsFailure) return Result.Failure<RequirementSnapshot>(current.Error);
+            if (current.Value.HasNoValue || current.Value.Value != target)
+                return Result.Failure<RequirementSnapshot>("The original parent link changed. Retrieve it again.");
+            // ReplaceParent validates the captured owner revision again inside its atomic, cycle-safe transaction.
+            return await links.ReplaceParent(expected, replacement, actor, now, token);
+        }, token);
+
     internal async Task<Result<IReadOnlyList<RequirementVersionReference>>> IncomingUserNeed(ClaimsPrincipal principal, Guid id,
         Guid versionId, CancellationToken token = default) => await Allowed(principal)
         ? await links.IncomingUserNeed(id, versionId, token) : Result.Failure<IReadOnlyList<RequirementVersionReference>>("Access denied.");
@@ -108,6 +122,10 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
     internal Task<Result<RequirementSnapshot>> AddLink(ClaimsPrincipal principal, RequirementSnapshot expected,
         RequirementUserNeedLink target, CancellationToken token = default) =>
         Change(principal, "requirement.link.add", (actor, now) => links.ChangeLink(expected, target, true, actor, now, token), token);
+
+    internal Task<Result<RequirementSnapshot>> RetargetLink(ClaimsPrincipal principal, RequirementSnapshot expected,
+        RequirementUserNeedLink target, RequirementUserNeedLink replacement, CancellationToken token = default) =>
+        Change(principal, "requirement.link.retarget", (actor, now) => links.RetargetLink(expected, target, replacement, actor, now, token), token);
 
     internal Task<Result<RequirementSnapshot>> RemoveLink(ClaimsPrincipal principal, RequirementSnapshot expected,
         RequirementUserNeedLink target, CancellationToken token = default) =>

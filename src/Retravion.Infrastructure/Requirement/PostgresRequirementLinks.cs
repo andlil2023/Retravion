@@ -27,7 +27,16 @@ public sealed partial class PostgresRequirementStore
     }, cancellationToken, Result.Success<IReadOnlyList<RequirementUserNeedLink>>([]));
 
     public Task<Result<RequirementSnapshot>> ChangeLink(RequirementSnapshot expected, RequirementUserNeedLink target, bool add,
-        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
+        ChangeLinkCore(expected, target, add, null, actor, occurredAt, cancellationToken);
+
+    public Task<Result<RequirementSnapshot>> RetargetLink(RequirementSnapshot expected, RequirementUserNeedLink target,
+        RequirementUserNeedLink replacement, AuditActor actor, DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default) =>
+        ChangeLinkCore(expected, target, false, replacement, actor, occurredAt, cancellationToken);
+
+    private Task<Result<RequirementSnapshot>> ChangeLinkCore(RequirementSnapshot expected, RequirementUserNeedLink target,
+        bool add, RequirementUserNeedLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken)
     {
         var editable = RequirementUserNeedLinks.CanChange(expected.Requirement);
         if (editable.IsFailure || actor is not AuditActor.Identified || expected.Revision <= 0)
@@ -49,7 +58,19 @@ public sealed partial class PostgresRequirementStore
             if (await Protected(connection, transaction, r.VersionId, cancellationToken))
                 return Result.Failure<RequirementSnapshot>("This exact version and its owned links are permanently protected by a Released revision.");
             var before = await LoadLinks(connection, transaction, r.VersionId, cancellationToken);
-            if (add)
+            if (replacement is not null)
+            {
+                if (!before.Contains(target)) return Result.Failure<RequirementSnapshot>("The original User Need link no longer exists. Retrieve it again.");
+                if (target.UserNeedInternalId != replacement.UserNeedInternalId)
+                    return Result.Failure<RequirementSnapshot>("Retargeting must select a version of the same User Need.");
+                if (target == replacement) return Result.Success(expected);
+                if (before.Contains(replacement)) return Result.Failure<RequirementSnapshot>("That exact User Need version is already linked.");
+                var need = await LoadTarget(connection, transaction, replacement, cancellationToken);
+                if (need.IsFailure) return Result.Failure<RequirementSnapshot>(need.Error);
+                var link = RequirementUserNeedLinks.Add(r, need.Value);
+                if (link.IsFailure) return Result.Failure<RequirementSnapshot>(link.Error);
+            }
+            else if (add)
             {
                 var need = await LoadTarget(connection, transaction, target, cancellationToken);
                 if (need.IsFailure) return Result.Failure<RequirementSnapshot>(need.Error);
@@ -58,11 +79,13 @@ public sealed partial class PostgresRequirementStore
                 if (before.Contains(target)) return Result.Failure<RequirementSnapshot>("That exact User Need version is already linked.");
             }
             else if (!before.Contains(target)) return Result.Success(expected); // Unchanged removal, after concurrency validation.
-            await using (var change = new NpgsqlCommand(add
-                ? "INSERT INTO retravion_requirement.user_need_link VALUES ($1,$2,$3)"
+            await using (var change = new NpgsqlCommand(replacement is not null
+                ? "UPDATE retravion_requirement.user_need_link SET target_version_id=$4 WHERE owner_version_id=$1 AND target_internal_id=$2 AND target_version_id=$3"
+                : add ? "INSERT INTO retravion_requirement.user_need_link VALUES ($1,$2,$3)"
                 : "DELETE FROM retravion_requirement.user_need_link WHERE owner_version_id=$1 AND target_internal_id=$2 AND target_version_id=$3", connection, transaction))
             {
                 change.Parameters.AddWithValue(r.VersionId); change.Parameters.AddWithValue(target.UserNeedInternalId); change.Parameters.AddWithValue(target.UserNeedVersionId);
+                if (replacement is not null) change.Parameters.AddWithValue(replacement.UserNeedVersionId);
                 await change.ExecuteNonQueryAsync(cancellationToken);
             }
             await using (var bump = new NpgsqlCommand("UPDATE retravion_requirement.requirement SET revision=revision+1 WHERE internal_id=$1", connection, transaction))
@@ -70,7 +93,7 @@ public sealed partial class PostgresRequirementStore
             if (!await SaveVersion(connection, transaction, r.InternalId, cancellationToken))
                 return Result.Failure<RequirementSnapshot>("The Requirement version identity is already in use.");
             var after = await LoadLinks(connection, transaction, r.VersionId, cancellationToken);
-            var decision = add ? "LinkAdded" : "LinkRemoved";
+            var decision = replacement is not null ? "LinkRetargeted" : add ? "LinkAdded" : "LinkRemoved";
             await using (var history = new NpgsqlCommand("INSERT INTO retravion_requirement.review (requirement_internal_id,actor_identifier,occurred_at_utc_ticks,decision,manual_id,title,statement,type,rationale,version_id,version_number,source_version_id) SELECT internal_id,$2,$3,$4,id,title,statement,type,rationale,version_id,version_number,source_version_id FROM retravion_requirement.requirement WHERE internal_id=$1", connection, transaction))
             {
                 history.Parameters.AddWithValue(r.InternalId); history.Parameters.AddWithValue(((AuditActor.Identified)actor).Identifier);
@@ -80,7 +103,7 @@ public sealed partial class PostgresRequirementStore
             await SetHistoryLinks(connection, transaction, r, before, after, cancellationToken);
             var values = new RequirementAuditValues(r.ProductInternalId, r.Id, r.Title, r.Statement, r.Type.ToString(), r.Rationale, r.Status.ToString());
             await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
-                new AuditInformation(actor, occurredAt, add ? "requirement.link.add" : "requirement.link.remove",
+                new AuditInformation(actor, occurredAt, replacement is not null ? "requirement.link.retarget" : add ? "requirement.link.add" : "requirement.link.remove",
                     new AuditTarget.Identified(r.InternalId.ToString()), AuditActionOutcome.Success,
                     requirementChange: new RequirementAuditDetails(r.InternalId, values, values, decision, null,
                         r.VersionId, r.VersionNumber, r.SourceVersionId, RelationshipType: RelationshipType, BeforeLinks: before, AfterLinks: after)), cancellationToken);

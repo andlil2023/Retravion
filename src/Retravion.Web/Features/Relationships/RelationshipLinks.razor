@@ -249,13 +249,13 @@ else
     }
     private async Task BeginRetarget(RelationshipEdge edge)
     {
-        if (ActionsDisabled || _view is null || !_view.Product.IsActive || !edge.Owner.Editable || edge.Owner.Kind != "test-case") return;
+        if (ActionsDisabled || _view is null || !_view.Product.IsActive || !edge.Owner.Editable) return;
         CancelAction(); _message = null; _retargeting = edge; _busy = true;
         var load = _load;
         try
         {
             var actor = (await Authentication.GetAuthenticationStateAsync()).User;
-            var result = await Operations.Candidates(actor, edge.Owner.ProductInternalId, "requirement", false);
+            var result = await Operations.Candidates(actor, edge.Owner.ProductInternalId, edge.Target.Kind, false);
             if (load != _load || _retargeting != edge) return;
             if (result.IsFailure) _candidateError = result.Error;
             else _candidates = result.Value.Where(n => n.InternalId == edge.Target.InternalId && n.VersionId != edge.Target.VersionId).ToArray();
@@ -323,11 +323,8 @@ else
     private RenderFragment RemoveControl(RelationshipEdge edge) => @<div class="mt-4">
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !_view!.Product.IsActive || !edge.Owner.Editable)"
             OnClick="@(() => BeginRemoval(edge))" aria-label="@($"Remove {edge.Relationship}: {edge.Owner.Label} → {edge.Target.Label}")">Remove link</MudButton>
-        @if (edge.Owner.Kind == "test-case")
-        {
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !_view!.Product.IsActive || !edge.Owner.Editable)"
-                OnClick="@(() => BeginRetarget(edge))" aria-label="@($"Retarget {edge.Relationship}: {edge.Owner.Label} → {edge.Target.Label}")">Retarget link</MudButton>
-        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !_view!.Product.IsActive || !edge.Owner.Editable)"
+            OnClick="@(() => BeginRetarget(edge))" aria-label="@($"Retarget {edge.Relationship}: {edge.Owner.Label} → {edge.Target.Label}")">Retarget link</MudButton>
     </div>;
     private RenderFragment NodeContent(RelationshipNode node) => @<div class="relationship-node">
         <MudLink Href="@node.LinksPath">@node.Label</MudLink>
