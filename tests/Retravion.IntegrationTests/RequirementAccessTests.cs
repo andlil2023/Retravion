@@ -67,7 +67,11 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.IncomingUserNeed(principal, target.UserNeedInternalId, target.UserNeedVersionId)).IsFailure);
             var relationships = scope.ServiceProvider.GetRequiredService<Retravion.Web.Features.Relationships.RelationshipOperations>();
             foreach (var kind in new[] { "requirement", "user-need" })
+            {
                 Assert.Equal("Access denied.", (await relationships.Load(principal, kind, r.InternalId, r.VersionId)).Error);
+                Assert.Equal("Access denied.", (await relationships.Explore(principal, kind, r.InternalId, r.VersionId,
+                    new[] { target.UserNeedVersionId, parent.VersionId })).Error);
+            }
             Assert.Equal(failureMode == "throw" ? 0 : 13, audit.Events.Count);
             Assert.All(audit.Events, e =>
             {

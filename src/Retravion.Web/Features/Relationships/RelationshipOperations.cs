@@ -26,6 +26,13 @@ internal sealed record RelationshipEdge(RelationshipNode Owner, RelationshipNode
 internal sealed record RelationshipView(RelationshipNode Center, Retravion.Domain.Product.Product Product,
     IReadOnlyList<RelationshipEdge> Edges);
 
+internal sealed record RelationshipExploration(RelationshipView Root, IReadOnlyList<RelationshipView> Neighborhoods)
+{
+    public IReadOnlyList<RelationshipEdge> Edges => Neighborhoods.SelectMany(v => v.Edges)
+        .DistinctBy(e => (e.Owner.VersionId, e.Target.VersionId, e.Relationship)).ToArray();
+    public IReadOnlyList<Guid> Expanded => Neighborhoods.Skip(1).Select(v => v.Center.VersionId).ToArray();
+}
+
 // This Web-only read model composes the existing authorized feature contracts; no new mutation or MCP surface.
 internal sealed class RelationshipOperations(RequirementOperations requirements, UserNeedOperations needs, ProductOperations products)
 {
@@ -73,6 +80,31 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
         if (product is null || edges.Any(e => e.Owner.ProductInternalId != product.InternalId || e.Target.ProductInternalId != product.InternalId))
             return Result.Failure<RelationshipView>("Relationship Product not available.");
         return new RelationshipView(center.Value, product, edges);
+    }
+
+    internal async Task<Result<RelationshipExploration>> Explore(ClaimsPrincipal actor, string? kind, Guid id,
+        Guid? version, IReadOnlyCollection<Guid> expanded, CancellationToken token = default)
+    {
+        var root = await Load(actor, kind, id, version, token);
+        if (root.IsFailure) return Result.Failure<RelationshipExploration>(root.Error);
+        var neighborhoods = new List<RelationshipView> { root.Value };
+        var visited = new HashSet<Guid> { root.Value.Center.VersionId };
+        // Only traverse explicitly expanded, reachable exact versions. Each neighborhood is loaded once,
+        // even in a non-hierarchical cycle; removing an expansion prunes unreachable descendants.
+        for (var index = 0; index < neighborhoods.Count; index++)
+        {
+            foreach (var node in neighborhoods[index].Edges.SelectMany(e => new[] { e.Owner, e.Target }))
+            {
+                if (!expanded.Contains(node.VersionId) || !visited.Add(node.VersionId)) continue;
+                var next = await Load(actor, node.Kind, node.InternalId, node.VersionId, token);
+                if (next.IsFailure) return Result.Failure<RelationshipExploration>(next.Error);
+                neighborhoods.Add(next.Value);
+            }
+        }
+        // Do not publish previously loaded data if the session was revoked during expansion.
+        var access = await products.List(actor, token);
+        if (access.IsFailure) return Result.Failure<RelationshipExploration>(access.Error);
+        return new RelationshipExploration(root.Value, neighborhoods);
     }
 
     private async Task<Result<RelationshipNode>> Node(ClaimsPrincipal actor, string kind, Guid id, Guid version, CancellationToken token)
