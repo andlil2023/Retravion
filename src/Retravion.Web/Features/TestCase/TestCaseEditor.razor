@@ -13,8 +13,8 @@
     <MudPaper Class="product-card" Elevation="0">
         <form id="test-case-form" @onsubmit="Save" @onsubmit:preventDefault aria-label="Save Test Case">
             <div class="pa-4">
-                <p>@_product!.Id – @_product.Name · @(_existing?.TestCase.Id ?? "ID assigned on creation") · v1 Draft</p>
-                <p>Drafts may be incomplete. Review and Requirement links are not available yet.</p>
+                <p>@_product!.Id – @_product.Name · @(_existing?.TestCase.Id ?? "ID assigned on creation") · @($"v{_existing?.TestCase.VersionNumber ?? 1}") Draft</p>
+                <p>Drafts may be incomplete. Manage exact Requirement links and submit for review from details.</p>
                 <MudTextField @bind-Value="_title" Label="Title" Immediate="true" Disabled="_busy" />
             </div>
             <DescriptionEditor @key="_formKey" FieldOnly="true" InputId="test-case-description" InitialDescription="@_description" DescriptionChanged="@(value => _description = value)" Label="Description" Busy="_busy" />
@@ -70,6 +70,11 @@
             if (found.IsFailure) { _error = found.Error; return; }
             if (found.Value.HasNoValue) { _error = "Test Case version not found."; return; }
             _existing = found.Value.Value;
+            if (_existing.TestCase.Status != "Draft") { _error = "Only Draft Test Cases can be edited."; return; }
+            var versions = await Operations.Versions(actor, Id);
+            if (versions.IsFailure) { _error = versions.Error; return; }
+            if (versions.Value.LastOrDefault()?.TestCase.VersionId != _existing.TestCase.VersionId)
+            { _error = "This earlier version is read-only because a newer version exists."; return; }
             var products = await Products.List(actor);
             if (products.IsFailure) { _error = products.Error; return; }
             _product = products.Value.SingleOrDefault(product => product.InternalId == _existing.TestCase.ProductInternalId);

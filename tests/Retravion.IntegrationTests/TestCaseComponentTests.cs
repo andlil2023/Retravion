@@ -41,6 +41,10 @@ public sealed partial class PostgresProductTests
         {
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
             services.AddSingleton<ITestCaseStore>(store); services.AddSingleton<ITestCaseChangeTransaction>(writes);
+            var requirements = new Retravion.Infrastructure.Requirement.PostgresRequirementStore(database.ConnectionString);
+            services.AddSingleton<Retravion.Application.Requirement.IRequirementStore>(requirements);
+            services.AddSingleton<Retravion.Application.Requirement.IRequirementChangeTransaction>(requirements);
+            services.AddSingleton<Retravion.Application.Requirement.IRequirementLinkStore>(requirements);
         });
         await host.Login(); await host.Replace(); var token = await host.Authenticate();
         var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(token);
@@ -89,10 +93,12 @@ public sealed partial class PostgresProductTests
             Assert.Equal("* Prepare", changed.TestCase.Content.Preconditions);
             Assert.Equal(new[] { "**Second** action", "Third action" }, changed.TestCase.Content.Steps.Select(step => step.Action));
             Assert.Equal(new[] { "Second result", "" }, changed.TestCase.Content.Steps.Select(step => step.ExpectedResult));
-            var detail = await host.Browser.GetStringAsync($"/test-cases/details?id={created.TestCase.InternalId}&version={created.TestCase.VersionId}");
+            using var detailResponse = await host.Browser.GetAsync($"/test-cases/details?id={created.TestCase.InternalId}&version={created.TestCase.VersionId}");
+            var detail = await detailResponse.Content.ReadAsStringAsync();
+            Assert.True(detailResponse.IsSuccessStatusCode, detail.Split("HEADERS", StringSplitOptions.None)[0]);
             Assert.Contains("<table>", detail); Assert.Contains("<strong>Second</strong>", detail); Assert.Contains("&lt;b&gt;UI title&lt;/b&gt;", detail);
-            Assert.DoesNotContain("<script>bad", detail); Assert.Contains("Requirement links, review, and successor versions are not available", detail);
-            Assert.DoesNotContain("Submit for review", detail);
+            Assert.DoesNotContain("<script>bad", detail); Assert.Contains("Exact Requirement links", detail);
+            Assert.Contains("Submit for review", detail); Assert.Contains("Reopening is unavailable", detail);
             var wrong = await host.Browser.GetStringAsync($"/test-cases/details?id={created.TestCase.InternalId}&version={Guid.NewGuid()}");
             Assert.Contains("Test Case version not found", wrong); Assert.DoesNotContain("UI title", wrong);
             await store.Create(product.InternalId, CaseContent("Other match"), CaseActor, CaseTime);
@@ -143,6 +149,166 @@ public sealed partial class PostgresProductTests
         Assert.Empty(renderer.Errors);
     }
 
+    [PostgresFact]
+    public async Task TestCaseDetailsCallbacksReviewConfirmLinksCreateVersionsAndRetainExactHistoricalEvidence()
+    {
+        await using var database = await Database.Create();
+        var products = new PostgresProductStore(database.ConnectionString);
+        var product = (await new CreateProduct(products).Execute("P", "Product", ProductKind.System, "")).Value;
+        var store = new PostgresTestCaseStore(database.ConnectionString);
+        var requirements = new Retravion.Infrastructure.Requirement.PostgresRequirementStore(database.ConnectionString);
+        var target = await ParentApprove(requirements, await ParentDraft(requirements, product.InternalId, "R"));
+        var nextTarget = (await requirements.CreateSuccessor(target, "Target next", CaseActor, CaseTime)).Value;
+        var row = (await store.Create(product.InternalId, CaseContent("UI review"), CaseActor, CaseTime)).Value;
+        await using var host = new McpTestHost(services =>
+        {
+            services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            services.AddSingleton<ITestCaseStore>(store); services.AddSingleton<ITestCaseChangeTransaction>(store);
+            services.AddSingleton<Retravion.Application.Requirement.IRequirementStore>(requirements);
+            services.AddSingleton<Retravion.Application.Requirement.IRequirementChangeTransaction>(requirements);
+            services.AddSingleton<Retravion.Application.Requirement.IRequirementLinkStore>(requirements);
+        });
+        await host.Login(); await host.Replace(); var token = await host.Authenticate();
+        var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(token);
+        using var scope = host.Factory.Services.CreateScope(); var navigation = new CaseNavigation();
+        await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton<IJSRuntime, CaseJS>().AddSingleton<NavigationManager>(navigation)
+            .AddSingleton<AuthenticationStateProvider>(new CaseAuthentication(principal))
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<TestCaseOperations>())
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<Retravion.Web.Features.Requirement.RequirementOperations>())
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<ProductOperations>()).BuildServiceProvider();
+        await using var renderer = new CaseRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            async Task Mount(Guid? version = null) => await renderer.Mount(typeof(TestCaseDetails), new()
+                { [nameof(TestCaseDetails.Id)] = row.TestCase.InternalId, [nameof(TestCaseDetails.VersionId)] = version });
+            await Mount();
+            Assert.Contains("Reopening is unavailable", renderer.Text());
+            await renderer.Click("Submit for review"); Assert.Contains("at least one Requirement link", renderer.Text());
+            await renderer.Components<MudSelect<Guid>>().Single().ValueChanged.InvokeAsync(target.Requirement.VersionId);
+            await renderer.Click("Add Requirement link");
+            Assert.Contains("newer Requirement version", renderer.Text());
+            await renderer.Components<MudSelect<Guid>>().Single().ValueChanged.InvokeAsync(nextTarget.Requirement.VersionId);
+            var before = (await store.Find(row.TestCase.InternalId)).Value.Value;
+            await renderer.Click("Retarget link"); Assert.Contains("Confirm retargeting", renderer.Text());
+            Assert.Contains("R v1", renderer.Text()); Assert.Contains("R v2", renderer.Text());
+            Assert.Equal(before.Revision, (await store.Find(row.TestCase.InternalId)).Value.Value.Revision);
+            await renderer.Click("Cancel link change");
+            Assert.Equal(before.Revision, (await store.Find(row.TestCase.InternalId)).Value.Value.Revision);
+            await renderer.Click("Retarget link"); await renderer.Click("Confirm link change");
+            Assert.Equal(CaseEndpoint(nextTarget), Assert.Single((await store.Find(row.TestCase.InternalId)).Value.Value.TestCase.Links));
+            await renderer.Click("Remove link"); Assert.Contains("Confirm removal", renderer.Text());
+            await renderer.Click("Cancel link change");
+            await renderer.Click("Remove link"); await renderer.Click("Confirm link change");
+            Assert.Empty((await store.Find(row.TestCase.InternalId)).Value.Value.TestCase.Links);
+            await renderer.Components<MudSelect<Guid>>().Single().ValueChanged.InvokeAsync(nextTarget.Requirement.VersionId);
+            await renderer.Click("Add Requirement link");
+            await renderer.Field("Review comment (optional)").ValueChanged.InvokeAsync("Submission <b>evidence</b>");
+            await renderer.Click("Submit for review");
+            Assert.DoesNotContain(renderer.Components<MudButton>(), button => button.Href?.Contains("/test-cases/edit") == true);
+            await renderer.Click("Approve"); Assert.Contains("must be Approved", renderer.Text());
+            await renderer.Field("Review comment (optional)").ValueChanged.InvokeAsync("Reject and correct");
+            await renderer.Click("Return to Draft");
+            await renderer.Click("Submit for review");
+            nextTarget = await ParentApprove(requirements, nextTarget);
+            await renderer.Field("Review comment (optional)").ValueChanged.InvokeAsync("Approved evidence");
+            await renderer.Click("Approve");
+            Assert.Contains("Submission <b>evidence</b>", renderer.Text());
+            Assert.Contains("Reject and correct", renderer.Text()); Assert.Contains("Approved evidence", renderer.Text());
+            Assert.DoesNotContain(renderer.Components<MudButton>(), button => button.Href?.Contains("/test-cases/edit") == true);
+            await renderer.Click("Create successor Draft"); Assert.Contains("change reason is required", renderer.Text());
+            await renderer.Field("Successor change reason").ValueChanged.InvokeAsync("Fixed UI reason");
+            await renderer.Click("Create successor Draft");
+            var successor = (await store.Find(row.TestCase.InternalId)).Value.Value;
+            Assert.Equal(2, successor.TestCase.VersionNumber); Assert.Equal("Fixed UI reason", successor.TestCase.CreationReason);
+            Assert.Contains($"version={successor.TestCase.VersionId}", navigation.Uri);
+            Assert.Contains("Successor creation reason: Fixed UI reason", renderer.Text());
+            await renderer.Mount(typeof(TestCaseList), new() { [nameof(TestCaseList.ProductId)] = "P" });
+            Assert.Contains("v2", renderer.Text()); Assert.Contains("v1 Approved", renderer.Text());
+            await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync("Draft");
+            await renderer.Field("Search ID or title").ValueChanged.InvokeAsync("UI review"); Assert.Contains("UI review", renderer.Text());
+            await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync("Approved"); Assert.Contains("No Test Cases match", renderer.Text());
+            await Mount(row.TestCase.VersionId);
+            Assert.Contains("earlier version is read-only", renderer.Text());
+            Assert.DoesNotContain(renderer.Components<MudButton>(), button => button.Href?.Contains("/test-cases/edit") == true);
+            Assert.DoesNotContain(renderer.Components<MudButton>(), button => button.OnClick.HasDelegate);
+            Assert.Contains(renderer.Components<MudLink>(), link => link.Href == $"/requirements/details?id={target.Requirement.InternalId}&version={nextTarget.Requirement.VersionId}");
+            navigation.Go($"test-cases/edit?id={row.TestCase.InternalId}&version={row.TestCase.VersionId}");
+            await renderer.Mount(typeof(TestCaseEditor), new() { [nameof(TestCaseEditor.Id)] = row.TestCase.InternalId, [nameof(TestCaseEditor.VersionId)] = row.TestCase.VersionId });
+            Assert.Contains("Only Draft", renderer.Text()); Assert.Empty(renderer.Elements("form"));
+            var audit = (await new PostgresAuditQuery(database.ConnectionString).FindAsync(new())).First(item => item.Action == "test-case.link.retarget");
+            await renderer.Mount(typeof(Retravion.Web.Features.AuditTrail.AuditEventDetails), new() { ["Event"] = audit });
+            Assert.Contains("LinkRetargeted", renderer.Text());
+            var hrefs = renderer.Elements("a").Select(attributes => attributes.Single(frame => frame.AttributeName == "href").AttributeValue).ToArray();
+            Assert.Contains($"/requirements/details?id={target.Requirement.InternalId}&version={target.Requirement.VersionId}", hrefs);
+            Assert.Contains($"/requirements/details?id={target.Requirement.InternalId}&version={nextTarget.Requirement.VersionId}", hrefs);
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    [PostgresFact]
+    public async Task TestCaseNewUiMutationCallbacksReportBothUncertainOutcomesWithoutRetryAndPreserveInputs()
+    {
+        await using var database = await Database.Create();
+        var products = new PostgresProductStore(database.ConnectionString);
+        var product = (await new CreateProduct(products).Execute("P", "Product", ProductKind.System, "")).Value;
+        var store = new PostgresTestCaseStore(database.ConnectionString); var writes = new CaseWriteHook(store);
+        var requirements = new Retravion.Infrastructure.Requirement.PostgresRequirementStore(database.ConnectionString);
+        await using var host = new McpTestHost(services =>
+        {
+            services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            services.AddSingleton<ITestCaseStore>(store); services.AddSingleton<ITestCaseChangeTransaction>(writes);
+            services.AddSingleton<Retravion.Application.Requirement.IRequirementStore>(requirements);
+            services.AddSingleton<Retravion.Application.Requirement.IRequirementChangeTransaction>(requirements);
+            services.AddSingleton<Retravion.Application.Requirement.IRequirementLinkStore>(requirements);
+        });
+        await host.Login(); await host.Replace(); var token = await host.Authenticate();
+        var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(token);
+        using var scope = host.Factory.Services.CreateScope();
+        await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton<IJSRuntime, CaseJS>().AddSingleton<NavigationManager>(new CaseNavigation())
+            .AddSingleton<AuthenticationStateProvider>(new CaseAuthentication(principal))
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<TestCaseOperations>())
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<Retravion.Web.Features.Requirement.RequirementOperations>())
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<ProductOperations>()).BuildServiceProvider();
+        await using var renderer = new CaseRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            foreach (var operation in CaseOperations.Where(operation => operation is not "create" and not "edit"))
+            foreach (var committed in new[] { false, true })
+            {
+                var scenario = await PrepareCaseOperation(store, requirements, product.InternalId, operation);
+                await renderer.Mount(typeof(TestCaseDetails), new() { [nameof(TestCaseDetails.Id)] = scenario.Row.TestCase.InternalId });
+                var calls = writes.Calls;
+                writes.Store = new PostgresTestCaseStore(database.ConnectionString, async (transaction, cancellationToken) =>
+                { if (committed) await transaction.CommitAsync(cancellationToken); throw new OperationCanceledException("Lost confirmation"); });
+                if (operation == "successor") await renderer.Field("Successor change reason").ValueChanged.InvokeAsync("Preserved reason");
+                if (operation is "InReview" or "Draft" or "Approved") await renderer.Field("Review comment (optional)").ValueChanged.InvokeAsync("Preserved comment");
+                if (operation is "add" or "retarget")
+                    await renderer.Components<MudSelect<Guid>>().Single().ValueChanged.InvokeAsync(operation == "add" ? scenario.Target.RequirementVersionId : scenario.Replacement.RequirementVersionId);
+                if (operation is "remove" or "retarget")
+                {
+                    await renderer.Click(operation == "remove" ? "Remove link" : "Retarget link");
+                    Assert.Equal(calls, writes.Calls);
+                }
+                await renderer.Click(operation switch
+                {
+                    "successor" => "Create successor Draft", "InReview" => "Submit for review", "Draft" => "Return to Draft", "Approved" => "Approve",
+                    "add" => "Add Requirement link", _ => "Confirm link change"
+                });
+                Assert.Equal(calls + 1, writes.Calls);
+                Assert.Contains("could not be confirmed", renderer.Text()); Assert.Contains("Reload", renderer.Text());
+                if (operation == "successor") Assert.Equal("Preserved reason", renderer.Field("Successor change reason").GetState(field => field.Value));
+                if (operation is "InReview" or "Draft" or "Approved") Assert.Equal("Preserved comment", renderer.Field("Review comment (optional)").GetState(field => field.Value));
+                if (operation is "remove" or "retarget") Assert.Contains("Confirm link change", renderer.Text());
+                var persisted = (await store.Find(scenario.Row.TestCase.InternalId)).Value.Value;
+                Assert.Equal(scenario.Row.Revision + (committed ? 1 : 0), persisted.Revision);
+                writes.Store = store;
+            }
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
     private sealed class CaseWriteHook(PostgresTestCaseStore store) : ITestCaseChangeTransaction
     {
         internal PostgresTestCaseStore Store = store;
@@ -151,6 +317,14 @@ public sealed partial class PostgresProductTests
         { Calls++; return Store.Create(productInternalId, content, actor, occurredAt, cancellationToken); }
         public Task<Result<TestCaseSnapshot>> Update(TestCaseSnapshot expected, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; return Store.Update(expected, content, actor, occurredAt, cancellationToken); }
+        public Task<Result<TestCaseSnapshot>> Review(TestCaseSnapshot expected, string decision, string? comment, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        { Calls++; return Store.Review(expected, decision, comment, actor, occurredAt, cancellationToken); }
+        public Task<Result<TestCaseSnapshot>> CreateSuccessor(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        { Calls++; return Store.CreateSuccessor(expected, reason, actor, occurredAt, cancellationToken); }
+        public Task<Result<TestCaseSnapshot>> Reopen(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        { Calls++; return Store.Reopen(expected, reason, actor, occurredAt, cancellationToken); }
+        public Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        { Calls++; return Store.ChangeLink(expected, operation, target, replacement, actor, occurredAt, cancellationToken); }
     }
     private sealed class CaseAuthentication(ClaimsPrincipal principal) : AuthenticationStateProvider
     { public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(new AuthenticationState(principal)); }

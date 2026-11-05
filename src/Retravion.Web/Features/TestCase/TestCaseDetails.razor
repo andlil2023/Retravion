@@ -1,7 +1,11 @@
 @page "/test-cases/details"
+@using Retravion.Application.Requirement
+@using Retravion.Application.AuditTrail
 @inject TestCaseOperations Operations
+@inject Retravion.Web.Features.Requirement.RequirementOperations Requirements
 @inject ProductOperations Products
 @inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
 
 <PageTitle>Test Case details · Retravion</PageTitle>
 <SectionContent SectionName="product-page-header"><PageHeader Title="Test Case details" BackHref="@BackPath" BackText="Test Cases" /></SectionContent>
@@ -11,9 +15,15 @@
     var value = _case.TestCase;
     <p>@_product.Id – @_product.Name</p>
     <h2>@value.Id – @value.Content.Title</h2>
-    <p>@($"v{value.VersionNumber}") · @value.Status</p>
+    <p>@($"v{value.VersionNumber}") · @Status(value.Status)</p>
     @if (!_product.IsActive) { <p>This Test Case is read-only because its Product is retired.</p> }
+    @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
+    <nav aria-label="Test Case versions">
+        @foreach (var version in _versions)
+        { <MudLink Href="@($"/test-cases/details?id={Id}&version={version.TestCase.VersionId}")">@($"v{version.TestCase.VersionNumber}") · @Status(version.TestCase.Status)</MudLink><span> </span> }
+    </nav>
     <MudPaper Class="product-card pa-4" Elevation="0">
+        @if (value.CreationReason is { } reason) { <p style="white-space:pre-wrap">Successor creation reason: @reason</p> }
         <section aria-label="Description"><h3>Description</h3><ProductMarkdownView Markdown="@value.Content.Description" /></section>
         <section aria-label="Preconditions"><h3>Preconditions</h3><ProductMarkdownView Markdown="@value.Content.Preconditions" /></section>
         <section aria-label="Steps">
@@ -29,23 +39,136 @@
                 </section>
             }
         </section>
-        <p>Requirement links, review, and successor versions are not available yet.</p>
+        <section aria-label="Exact Requirement links">
+            <h3>Exact Requirement links</h3>
+            <p>Owned by this Test Case version. New Requirement versions never update these links automatically.</p>
+            @if (value.Links.IsEmpty) { <p>No Requirement links yet.</p> }
+            <ul>
+                @foreach (var endpoint in value.Links)
+                {
+                    <li>
+                        <MudLink Href="@RequirementPath(endpoint)">@EndpointLabel(endpoint)</MudLink>
+                        @if (NewerAvailable(endpoint)) { <span> · A newer Requirement version is available; suitability is not implied.</span> }
+                        @if (Editable)
+                        {
+                            <MudButton Disabled="_busy" OnClick='@(() => ConfirmLink("remove", endpoint))' aria-label="@($"Remove {EndpointLabel(endpoint)}")">Remove link</MudButton>
+                            <MudButton Disabled="@(_busy || _selectedVersion == Guid.Empty)" OnClick='@(() => ConfirmLink("retarget", endpoint))' aria-label="@($"Retarget {EndpointLabel(endpoint)}")">Retarget link</MudButton>
+                        }
+                    </li>
+                }
+            </ul>
+            @if (Editable)
+            {
+                <MudSelect T="Guid" @bind-Value="_selectedVersion" Label="Exact Requirement target version" Disabled="_busy">
+                    @foreach (var target in _targets)
+                    { <MudSelectItem Value="target.Requirement.VersionId">@TargetLabel(target)</MudSelectItem> }
+                </MudSelect>
+            }
+            else { <p>Requirement links can only be changed by an editable Draft owner.</p> }
+        </section>
     </MudPaper>
-    @if (_product.IsActive)
+    @if (Editable)
     {
-        <div class="product-actions"><MudButton Href="@($"/test-cases/edit?id={value.InternalId}&version={value.VersionId}")" Variant="Variant.Filled" Color="Color.Primary">Edit Draft</MudButton></div>
+        <div class="product-actions">
+            <MudButton Href="@($"/test-cases/edit?id={value.InternalId}&version={value.VersionId}")" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy">Edit Draft</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _selectedVersion == Guid.Empty)" OnClick="AddLink">Add Requirement link</MudButton>
+        </div>
     }
+    @if (_pendingOperation is not null && _pendingTarget is not null)
+    {
+        <MudPaper Class="pa-4 mt-4" Elevation="0" role="group" aria-label="Confirm Requirement link change">
+            <p>Confirm @(_pendingOperation == "remove" ? "removal" : "retargeting") of Test Case → Requirement:</p>
+            <p>@value.Id @($"v{value.VersionNumber}") → @EndpointLabel(_pendingTarget)</p>
+            @if (_pendingReplacement is not null) { <p>New endpoint: @EndpointLabel(_pendingReplacement)</p> }
+        </MudPaper>
+        <div class="product-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="ApplyLink">Confirm link change</MudButton>
+            <MudButton Disabled="_busy" OnClick="CancelLink">Cancel link change</MudButton>
+        </div>
+    }
+    @if (_product.IsActive && IsLatest)
+    {
+        <div class="product-actions">
+            @if (value.Status == "Draft")
+            {
+                <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Disabled="_busy" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("InReview"))'>Submit for review</MudButton>
+            }
+            else if (value.Status == "InReview")
+            {
+                <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Disabled="_busy" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Draft"))'>Return to Draft</MudButton>
+            }
+            else
+            {
+                <MudTextField @bind-Value="_reason" Label="Successor change reason" Required="true" Disabled="_busy" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="CreateSuccessor">Create successor Draft</MudButton>
+            }
+        </div>
+    }
+    <p>Reopening is unavailable until Released-revision eligibility checks are implemented. Approved corrections require a successor Draft. Approval is not release.</p>
+    <MudPaper Class="product-card pa-4 mt-4" Elevation="0">
+        <h3>History</h3>
+        @if (_history.Count == 0) { <p>No history recorded.</p> }
+        @foreach (var item in _history)
+        {
+            var change = item.Change;
+            var snapshot = change.After;
+            <details>
+                <summary>@(change.Decision ?? item.Action) · @($"v{change.VersionNumber}") · @item.OccurredAt.ToString("u") · @((item.Actor as AuditActor.Identified)?.Identifier)</summary>
+                <p>@snapshot.Id · @Status(snapshot.Status)</p>
+                <p style="white-space:pre-wrap">Comment: @(change.Comment ?? "None")</p>
+                @if (change.Reason is not null) { <p style="white-space:pre-wrap">Change reason: @change.Reason</p> }
+                @if (change.SourceVersionId is { } source)
+                { <MudLink Href="@($"/test-cases/details?id={change.InternalId}&version={source}")">Exact source Test Case version</MudLink> }
+                <h4>Title at event</h4><p style="white-space:pre-wrap">@snapshot.Title</p>
+                <h4>Description at event</h4><ProductMarkdownView Markdown="@snapshot.Description" />
+                <h4>Preconditions at event</h4><ProductMarkdownView Markdown="@snapshot.Preconditions" />
+                @for (var i = 0; i < snapshot.Steps.Length; i++)
+                {
+                    <h4>Step @(i + 1) at event</h4>
+                    <ProductMarkdownView Markdown="@snapshot.Steps[i].Action" />
+                    <ProductMarkdownView Markdown="@snapshot.Steps[i].ExpectedResult" />
+                }
+                @if (change.Before is { } previous && change.Decision is "LinkAdded" or "LinkRemoved" or "LinkRetargeted")
+                { <h4>Old exact Requirement endpoints</h4>@HistoryLinks(previous.Links) }
+                <h4>Exact Requirement endpoints at event</h4>@HistoryLinks(snapshot.Links)
+            </details>
+        }
+    </MudPaper>
 }
 @code {
     [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
     [SupplyParameterFromQuery(Name = "version")] public Guid? VersionId { get; set; }
     private TestCaseSnapshot? _case;
     private Retravion.Domain.Product.Product? _product;
-    private string? _error;
+    private IReadOnlyList<TestCaseSnapshot> _versions = [];
+    private IReadOnlyList<TestCaseHistory> _history = [];
+    private readonly List<RequirementSnapshot> _targets = [];
+    private string? _error, _comment, _reason, _pendingOperation;
+    private TestCaseRequirementLink? _pendingTarget, _pendingReplacement;
+    private Guid _selectedVersion;
+    private bool _busy;
+    private bool IsLatest => _versions.LastOrDefault()?.TestCase.VersionId == _case?.TestCase.VersionId;
+    private bool Editable => _product?.IsActive == true && IsLatest && _case?.TestCase.Status == "Draft";
     private string BackPath => _product is null ? "/products" : $"/test-cases?product={Uri.EscapeDataString(_product.Id)}";
-    protected override async Task OnParametersSetAsync()
+    private static string Status(string value) => value == "InReview" ? "In Review" : value;
+    private static string RequirementPath(TestCaseRequirementLink endpoint) => $"/requirements/details?id={endpoint.RequirementInternalId}&version={endpoint.RequirementVersionId}";
+    private static string TargetLabel(RequirementSnapshot target) => $"{target.Requirement.Id} v{target.Requirement.VersionNumber} · {target.Requirement.Title} · {target.Requirement.Status}";
+    private string EndpointLabel(TestCaseRequirementLink endpoint) => _targets.FirstOrDefault(target => target.Requirement.InternalId == endpoint.RequirementInternalId && target.Requirement.VersionId == endpoint.RequirementVersionId) is { } row
+        ? TargetLabel(row) : "Exact Requirement version unavailable";
+    private bool NewerAvailable(TestCaseRequirementLink endpoint) => _targets.FirstOrDefault(row => row.Requirement.VersionId == endpoint.RequirementVersionId) is { } target &&
+        _targets.Any(row => row.Requirement.InternalId == endpoint.RequirementInternalId && row.Requirement.VersionNumber > target.Requirement.VersionNumber);
+    private RenderFragment HistoryLinks(IReadOnlyList<TestCaseRequirementLink>? links) => @<ul>
+        @foreach (var endpoint in links ?? [])
+        { <li><MudLink Href="@RequirementPath(endpoint)">@EndpointLabel(endpoint)</MudLink></li> }
+    </ul>;
+
+    protected override async Task OnParametersSetAsync() { _comment = null; _reason = null; await Load(); }
+    private async Task Load()
     {
-        _case = null; _product = null; _error = null;
+        _case = null; _product = null; _error = null; _versions = []; _history = []; _targets.Clear(); _selectedVersion = Guid.Empty; CancelLink();
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         var found = await Operations.Find(actor, Id, VersionId);
         if (found.IsFailure) { _error = found.Error; return; }
@@ -55,5 +178,51 @@
         _product = products.Value.SingleOrDefault(product => product.InternalId == found.Value.Value.TestCase.ProductInternalId);
         if (_product is null) { _error = "Product not found."; return; }
         _case = found.Value.Value;
+        var versions = await Operations.Versions(actor, Id);
+        if (versions.IsFailure) { _error = versions.Error; return; }
+        _versions = versions.Value;
+        var history = await Operations.History(actor, Id);
+        if (history.IsFailure) { _error = history.Error; return; }
+        _history = history.Value;
+        // Explicitly load all exact target versions: selection never substitutes the latest.
+        var requirements = await Requirements.List(actor, _product.InternalId);
+        if (requirements.IsFailure) { _error = requirements.Error; return; }
+        foreach (var requirement in requirements.Value)
+        {
+            var targets = await Requirements.Versions(actor, requirement.Requirement.InternalId);
+            if (targets.IsFailure) { _error = targets.Error; return; }
+            _targets.AddRange(targets.Value);
+        }
+    }
+    private TestCaseRequirementLink? Selected => _targets.FirstOrDefault(row => row.Requirement.VersionId == _selectedVersion) is { } target
+        ? new(target.Requirement.InternalId, target.Requirement.VersionId) : null;
+    private void ConfirmLink(string operation, TestCaseRequirementLink endpoint)
+    {
+        if (_busy || !Editable) return;
+        _pendingOperation = operation; _pendingTarget = endpoint; _pendingReplacement = operation == "retarget" ? Selected : null;
+        if (operation == "retarget" && _pendingReplacement is null) CancelLink();
+    }
+    private void CancelLink() { _pendingOperation = null; _pendingTarget = null; _pendingReplacement = null; }
+    private Task AddLink() => Selected is { } target ? Change((actor, expected) => Operations.ChangeLink(actor, expected, "add", target)) : Task.CompletedTask;
+    private Task ApplyLink() => _pendingOperation is { } operation && _pendingTarget is { } target
+        ? Change((actor, expected) => Operations.ChangeLink(actor, expected, operation, target, _pendingReplacement, confirmed: true)) : Task.CompletedTask;
+    private Task Review(string decision) => Change((actor, expected) => Operations.Review(actor, expected, decision, _comment));
+    private Task CreateSuccessor() => Change((actor, expected) => Operations.CreateSuccessor(actor, expected, _reason));
+    private async Task Change(Func<System.Security.Claims.ClaimsPrincipal, TestCaseSnapshot, Task<CSharpFunctionalExtensions.Result<TestCaseSnapshot>>> operation)
+    {
+        if (_busy || _case is null) return;
+        _busy = true; _error = null;
+        try
+        {
+            var result = await operation((await Authentication.GetAuthenticationStateAsync()).User, _case);
+            if (result.IsFailure) _error = result.Error;
+            else
+            {
+                _comment = null; _reason = null; VersionId = result.Value.TestCase.VersionId;
+                Navigation.NavigateTo($"/test-cases/details?id={Id}&version={VersionId}");
+                await Load();
+            }
+        }
+        finally { _busy = false; }
     }
 }
