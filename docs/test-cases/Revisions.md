@@ -27,7 +27,7 @@ Approved verification intent for [PBI #157](https://github.com/andlil2023/Retrav
 
 Retain [TC-LINK-025–029](Relationships.md): full outgoing closure, permanent protection, incoming-owner freedom, eligible reopening and release/mutation races remain required across User Needs, Requirements and Test Cases. These cases complement rather than replace them.
 
-Requirement derivation provenance is snapshot evidence outside the live-source release closure under REQ-REQ-007; verify that decision using TC-REQ-037. Other provenance types still require an explicit release-protection decision before integration. Detailed identifier comparison/lengths, persistence and synchronization, permission provisioning, navigation layout and any public retrieval contract need implementation planning; runtime verification must cover their approved choices rather than assume them here.
+Requirement and User Need derivation provenance is snapshot evidence outside the live-source release closure under REQ-REQ-007 and REQ-NEED-007; verify those decisions using TC-REQ-037 and TC-NEED-033. Other provenance types still require an explicit release-protection decision before integration. Detailed identifier comparison/lengths, persistence and synchronization, permission provisioning, navigation layout and any public retrieval contract need implementation planning; runtime verification must cover their approved choices rather than assume them here.
 
 ## Documentation Verification
 
