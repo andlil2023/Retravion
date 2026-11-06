@@ -1,0 +1,69 @@
+@page "/requirements/derive"
+@inject RequirementOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Copy Requirement · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Copy Requirement" BackHref="@BackPath" BackText="Source Requirement" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_source is not null && _products is not null)
+{
+    <DescriptionEditor InitialDescription="@_statement" Busy="_busy" OnSave="Save" FormId="derive-requirement-form" SubmitText="Create copy" CancelHref="@BackPath" Label="Statement">
+        <ChildContent>
+            <p>Copying @(_source.Requirement.Id) · v@(_source.Requirement.VersionNumber). Source content is retained as provenance.</p>
+            <MudSelect T="Guid?" @bind-Value="_destination" Label="Destination Product" Required="true" Disabled="_busy">
+                @foreach (var product in _products)
+                { <MudSelectItem T="Guid?" Value="@((Guid?)product.InternalId)">@product.Id – @product.Name</MudSelectItem> }
+            </MudSelect>
+            <MudTextField @bind-Value="_id" Label="Requirement ID" Required="true" Immediate="true" Disabled="_busy" />
+            <MudTextField @bind-Value="_title" Label="Title" Required="true" Immediate="true" Disabled="_busy" />
+            <MudSelect T="RequirementType?" @bind-Value="_type" Label="Type" Required="true" Disabled="_busy">
+                @foreach (var type in Enum.GetValues<RequirementType>()) { <MudSelectItem T="RequirementType?" Value="@((RequirementType?)type)">@type</MudSelectItem> }
+            </MudSelect>
+            <MudTextField @bind-Value="_rationale" Label="Rationale (optional, plain text)" Lines="3" Immediate="true" Disabled="_busy" />
+        </ChildContent>
+    </DescriptionEditor>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "version")] public Guid? VersionId { get; set; }
+    private RequirementSnapshot? _source;
+    private IReadOnlyList<Retravion.Domain.Product.Product>? _products;
+    private Guid? _destination;
+    private string _id = "", _title = "", _statement = "";
+    private string? _rationale, _error;
+    private RequirementType? _type;
+    private bool _busy;
+    private string BackPath => $"/requirements/details?id={Id}&version={VersionId}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _source = null; _products = null; _error = null; _destination = null;
+        if (VersionId is null) { _error = "Select an exact source version."; return; }
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var source = await Operations.Find(actor, Id, versionId: VersionId);
+        if (source.IsFailure) { _error = source.Error; return; }
+        if (source.Value.HasNoValue) { _error = "Requirement not found."; return; }
+        var products = await Products.List(actor);
+        if (products.IsFailure) { _error = products.Error; return; }
+        _source = source.Value.Value;
+        _products = products.Value.Where(p => p.IsActive && p.InternalId != _source.Requirement.ProductInternalId).ToArray();
+        _id = ""; _title = _source.Requirement.Title; _statement = _source.Requirement.Statement;
+        _type = _source.Requirement.Type; _rationale = _source.Requirement.Rationale;
+    }
+
+    private async Task Save(string statement)
+    {
+        if (_busy || _source is null) return;
+        _busy = true; _error = null;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var result = await Operations.Derive(actor, _source, _destination ?? Guid.Empty, _id, _title, statement, _type, _rationale);
+            if (result.IsFailure) _error = result.Error;
+            else Navigation.NavigateTo($"/requirements/details?id={result.Value.Requirement.InternalId}");
+        }
+        finally { _busy = false; }
+    }
+}

@@ -22,6 +22,17 @@
         @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
         <h3>Statement</h3><ProductMarkdownView Markdown="@_requirement.Requirement.Statement" />
         <h3>Rationale</h3><p style="white-space:pre-wrap">@(_requirement.Requirement.Rationale ?? "Not provided")</p>
+        @if (_provenance is { } origin)
+        {
+            <h3>Derived from</h3>
+            <p>Source Product: @origin.SourceProductId</p>
+            <p>Source Requirement: @origin.SourceRequirementId · ID: @origin.SourceManualId</p>
+            <p>Source version: @origin.SourceVersionId · v@origin.SourceVersionNumber · @origin.SourceStatus</p>
+            @if (_sourceAccessible) { <MudLink Href="@($"/requirements/details?id={origin.SourceRequirementId}&version={origin.SourceVersionId}")">Open source version</MudLink> }
+            <p>Title: @origin.SourceTitle · Type: @origin.SourceType</p>
+            <h4>Source statement at copy time</h4><ProductMarkdownView Markdown="@origin.SourceStatement" />
+            <p style="white-space:pre-wrap">Source rationale: @(origin.SourceRationale ?? "Not provided")</p>
+        }
         <h3>Review history</h3>
         @if (_history is null) { <p role="status">Loading review history…</p> }
         else if (_history.Count == 0) { <p>No review decisions yet.</p> }
@@ -41,6 +52,7 @@
     </MudPaper>
     <div class="mt-4">
         <MudButton Href="@($"/products/links?kind=requirement&id={_requirement.Requirement.InternalId}&version={_requirement.Requirement.VersionId}")">Links</MudButton>
+        <MudButton Href="@($"/requirements/derive?id={_requirement.Requirement.InternalId}&version={_requirement.Requirement.VersionId}")">Copy to another Product</MudButton>
     </div>
     @if (_product.IsActive && IsLatest)
     {
@@ -72,6 +84,8 @@
     private IReadOnlyList<RequirementSnapshot>? _versions;
     private bool IsLatest => _versions?.LastOrDefault()?.Requirement.VersionId == _requirement?.Requirement.VersionId;
     private RequirementSnapshot? _requirement;
+    private RequirementProvenance? _provenance;
+    private bool _sourceAccessible;
     private Retravion.Domain.Product.Product? _product;
     private IReadOnlyList<RequirementReview>? _history;
     private string? _error, _comment, _reason;
@@ -80,7 +94,7 @@
     protected override async Task OnParametersSetAsync() { _comment = null; _reason = null; await Load(); }
     private async Task Load()
     {
-        _requirement = null; _product = null; _history = null; _versions = null; _error = null;
+        _requirement = null; _product = null; _history = null; _versions = null; _provenance = null; _sourceAccessible = false; _error = null;
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         var result = await Operations.Find(actor, Id, versionId: VersionId);
         if (result.IsFailure) { _error = result.Error; return; }
@@ -93,6 +107,14 @@
         if (products.IsFailure) { _error = products.Error; return; }
         _product = products.Value.SingleOrDefault(p => p.InternalId == _requirement.Requirement.ProductInternalId);
         if (_product is null) { _error = "Product not found."; return; }
+        var provenance = await Operations.Provenance(actor, Id);
+        if (provenance.IsFailure) { _error = provenance.Error; return; }
+        if (provenance.Value.HasValue)
+        {
+            _provenance = provenance.Value.Value;
+            var source = await Operations.Find(actor, _provenance.SourceRequirementId, versionId: _provenance.SourceVersionId);
+            _sourceAccessible = source.IsSuccess && source.Value.HasValue;
+        }
         var history = await Operations.History(actor, Id);
         if (history.IsFailure) _error = history.Error; else _history = history.Value;
     }

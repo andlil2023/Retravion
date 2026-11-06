@@ -47,6 +47,8 @@ public sealed partial class AccountManagementTests
             audit.Events.Clear(); audit.Fail = failureMode == "failure"; audit.Throw = failureMode == "throw";
             var logsBefore = logger.Messages.Count;
             Assert.True((await operations.Create(principal, r.ProductInternalId, "", "secret-title", "secret-statement", null, "secret-rationale")).IsFailure);
+            Assert.True((await operations.Derive(principal, expected, Guid.NewGuid(), "", "secret-title", "secret-statement", null, "secret-rationale")).IsFailure);
+            Assert.True((await operations.Provenance(principal, r.InternalId)).IsFailure);
             Assert.True((await operations.Edit(principal, expected, "secret", "secret", "secret", RequirementType.Hardware, "secret")).IsFailure);
             foreach (var decision in new[] { "InReview", "Approved", "Draft", "secret-decision" })
                 Assert.True((await operations.Review(principal, expected, decision, "secret-comment")).IsFailure);
@@ -77,7 +79,7 @@ public sealed partial class AccountManagementTests
                 Assert.Equal("Access denied.", (await relationships.Explore(principal, kind, r.InternalId, r.VersionId,
                     new[] { target.UserNeedVersionId, parent.VersionId })).Error);
             }
-            Assert.Equal(failureMode == "throw" ? 0 : 15, audit.Events.Count);
+            Assert.Equal(failureMode == "throw" ? 0 : 16, audit.Events.Count);
             Assert.All(audit.Events, e =>
             {
                 Assert.Equal(AuditActionOutcome.Failure, e.Outcome); Assert.IsType<AuditTarget.Unknown>(e.Target);
@@ -87,7 +89,7 @@ public sealed partial class AccountManagementTests
                 if (principal.Identity?.IsAuthenticated == true) Assert.Equal(new AuditActor.Identified("admin"), e.Actor);
                 else Assert.IsType<AuditActor.Unknown>(e.Actor);
             });
-            Assert.Equal(logsBefore + (failureMode == "success" ? 0 : 15), logger.Messages.Count);
+            Assert.Equal(logsBefore + (failureMode == "success" ? 0 : 16), logger.Messages.Count);
         }
         Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Requirement change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
@@ -159,6 +161,7 @@ public sealed partial class AccountManagementTests
     private sealed class RequirementReadDouble(RequirementSnapshot snapshot) : IRequirementStore
     {
         public RequirementSnapshot Snapshot = snapshot;
+        public Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid id, CancellationToken token = default) => Task.FromResult(Result.Success(Maybe<RequirementProvenance>.None));
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid product, CancellationToken token = default) =>
             Task.FromResult(Result.Success<IReadOnlyList<RequirementSnapshot>>(product == Snapshot.Requirement.ProductInternalId ? [Snapshot] : []));
         public Task<Result<Maybe<RequirementSnapshot>>> Find(Guid id, CancellationToken token = default, Guid? versionId = null) =>
@@ -190,6 +193,8 @@ public sealed partial class AccountManagementTests
     private sealed class RequirementStoreDouble : IRequirementStore, IRequirementChangeTransaction, IRequirementLinkStore
     {
         public int Calls;
+        public Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<RequirementSnapshot>> Derive(RequirementSnapshot source, RequirementState destination, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementVersionReference>>> IncomingUserNeed(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementVersionReference>>> Children(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<Maybe<RequirementParentLink>>> Parent(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }

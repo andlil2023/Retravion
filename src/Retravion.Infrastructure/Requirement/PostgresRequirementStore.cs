@@ -69,6 +69,10 @@ public sealed partial class PostgresRequirementStore(string connectionString,
         INSERT INTO retravion_requirement.requirement_version SELECT internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,
             version_id,version_number,ever_approved,creation_reason,source_version_id FROM retravion_requirement.requirement
             ON CONFLICT (version_id) DO NOTHING;
+        CREATE TABLE IF NOT EXISTS retravion_requirement.provenance (
+            requirement_internal_id uuid PRIMARY KEY REFERENCES retravion_requirement.requirement(internal_id),
+            source_snapshot jsonb NOT NULL
+        );
         ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS version_id uuid;
         ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS version_number integer;
         ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS source_version_id uuid;
@@ -146,6 +150,61 @@ public sealed partial class PostgresRequirementStore(string connectionString,
             }
             return Result.Success<IReadOnlyList<RequirementReview>>(rows);
         }, cancellationToken, Result.Success<IReadOnlyList<RequirementReview>>([]));
+
+    public Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid internalId, CancellationToken cancellationToken = default) =>
+        Execute(async (connection, transaction) =>
+        {
+            await using var command = new NpgsqlCommand("SELECT source_snapshot::text FROM retravion_requirement.provenance WHERE requirement_internal_id=$1", connection, transaction);
+            command.Parameters.AddWithValue(internalId);
+            var json = await command.ExecuteScalarAsync(cancellationToken) as string;
+            if (json is null) return Result.Success(Maybe<RequirementProvenance>.None);
+            var value = JsonSerializer.Deserialize<RequirementProvenance>(json);
+            return value is null || value.SourceProductId == Guid.Empty || value.SourceRequirementId == Guid.Empty ||
+                value.SourceVersionId == Guid.Empty || value.SourceVersionNumber < 1 || !Enum.IsDefined(value.SourceType) ||
+                !Enum.TryParse<RequirementStatus>(value.SourceStatus, out var status) || !Enum.IsDefined(status) ||
+                string.IsNullOrWhiteSpace(value.SourceManualId) || string.IsNullOrWhiteSpace(value.SourceTitle) ||
+                string.IsNullOrWhiteSpace(value.SourceStatement)
+                ? Result.Failure<Maybe<RequirementProvenance>>("The persisted Requirement provenance is invalid.") :
+                Result.Success(Maybe<RequirementProvenance>.From(value));
+        }, cancellationToken, Result.Success(Maybe<RequirementProvenance>.None));
+
+    public Task<Result<RequirementSnapshot>> Derive(RequirementSnapshot expectedSource, RequirementState destination,
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+    {
+        var source = expectedSource.Requirement;
+        if (actor is not AuditActor.Identified || expectedSource.Revision <= 0 || destination.Status != RequirementStatus.Draft ||
+            destination.VersionNumber != 1 || destination.HasBeenApproved || destination.ProductInternalId == source.ProductInternalId)
+            return Task.FromResult(Result.Failure<RequirementSnapshot>("Invalid Requirement derivation."));
+        return Execute(async (connection, transaction) =>
+        {
+            if (!await ProductActive(connection, transaction, destination.ProductInternalId, cancellationToken)) return Inactive();
+            await using (var check = new NpgsqlCommand($"SELECT {Columns} FROM retravion_requirement.requirement_version r WHERE internal_id=$1 AND version_id=$2 FOR UPDATE", connection, transaction))
+            {
+                check.Parameters.AddWithValue(source.InternalId); check.Parameters.AddWithValue(source.VersionId);
+                await using var reader = await check.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken)) return Result.Failure<RequirementSnapshot>("The source changed or is unavailable. Reload and review it.");
+                var current = Read(reader);
+                if (current.IsFailure || current.Value.Revision != expectedSource.Revision || current.Value.Requirement != source)
+                    return Result.Failure<RequirementSnapshot>("The source changed. Reload and review it.");
+            }
+            var provenance = new RequirementProvenance(source.ProductInternalId, source.InternalId, source.VersionId,
+                source.VersionNumber, source.Status.ToString(), source.Id, source.Title, source.Statement, source.Type, source.Rationale);
+            await using var command = new NpgsqlCommand("INSERT INTO retravion_requirement.requirement (internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,version_id) VALUES ($1,$2,$3,$4,$5,$6,$7,0,1,$8) ON CONFLICT DO NOTHING", connection, transaction);
+            command.Parameters.AddWithValue(destination.InternalId); command.Parameters.AddWithValue(destination.ProductInternalId);
+            command.Parameters.AddWithValue(destination.Id); command.Parameters.AddWithValue(destination.Title); command.Parameters.AddWithValue(destination.Statement);
+            command.Parameters.AddWithValue((int)destination.Type); command.Parameters.AddWithValue(NpgsqlDbType.Text, (object?)destination.Rationale ?? DBNull.Value);
+            command.Parameters.AddWithValue(destination.VersionId);
+            if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) return Result.Failure<RequirementSnapshot>("That Requirement ID is already in use for this Product.");
+            if (!await SaveVersion(connection, transaction, destination.InternalId, cancellationToken))
+                return Result.Failure<RequirementSnapshot>("The Requirement version identity is already in use.");
+            await using var evidence = new NpgsqlCommand("INSERT INTO retravion_requirement.provenance(requirement_internal_id,source_snapshot) VALUES ($1,$2)", connection, transaction);
+            evidence.Parameters.AddWithValue(destination.InternalId);
+            evidence.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(provenance));
+            await evidence.ExecuteNonQueryAsync(cancellationToken);
+            await Audit(connection, transaction, actor, occurredAt, "requirement.derive", null, destination, null, null, cancellationToken, provenance);
+            return Result.Success(new RequirementSnapshot(destination, 1));
+        }, cancellationToken);
+    }
 
     public Task<Result<RequirementSnapshot>> Create(RequirementState requirement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
     {
@@ -319,7 +378,8 @@ public sealed partial class PostgresRequirementStore(string connectionString,
     }
 
     private static async Task Audit(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor actor,
-        DateTimeOffset occurredAt, string action, RequirementState? before, RequirementState after, string? decision, string? comment, CancellationToken token)
+        DateTimeOffset occurredAt, string action, RequirementState? before, RequirementState after, string? decision, string? comment, CancellationToken token,
+        RequirementProvenance? provenance = null)
     {
         static RequirementAuditValues Values(RequirementState r) => new(r.ProductInternalId, r.Id, r.Title, r.Statement, r.Type.ToString(), r.Rationale, r.Status.ToString());
         var afterLinks = await LoadLinks(connection, transaction, after.VersionId, token);
@@ -333,7 +393,7 @@ public sealed partial class PostgresRequirementStore(string connectionString,
                     afterLinks.Count == 0 ? null : "Requirement–User Need", beforeLinks is { Count: > 0 } ? beforeLinks : null,
                     afterLinks.Count == 0 ? null : afterLinks,
                     afterParent.HasValue ? ParentRelationship : null, beforeParent.HasValue ? beforeParent.Value : null,
-                    afterParent.HasValue ? afterParent.Value : null)), token);
+                    afterParent.HasValue ? afterParent.Value : null, provenance)), token);
     }
 
     private async Task<Result<T>> Execute<T>(Func<NpgsqlConnection, NpgsqlTransaction, Task<Result<T>>> operation, CancellationToken token,
