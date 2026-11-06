@@ -15,12 +15,18 @@ public sealed record RequirementReview(Guid RequirementInternalId, AuditActor Ac
     IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null,
     string? ParentRelationshipType = null, RequirementParentLink? BeforeParent = null, RequirementParentLink? AfterParent = null);
 
+/// <summary>Immutable source evidence captured when an independent Requirement is created.</summary>
+public sealed record RequirementProvenance(Guid SourceProductId, Guid SourceRequirementId, Guid SourceVersionId,
+    int SourceVersionNumber, string SourceStatus, string SourceManualId, string SourceTitle,
+    string SourceStatement, RequirementType SourceType, string? SourceRationale);
+
 public interface IRequirementStore
 {
     Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid productInternalId, CancellationToken cancellationToken = default);
     Task<Result<Maybe<RequirementSnapshot>>> Find(Guid internalId, CancellationToken cancellationToken = default, Guid? versionId = null);
     Task<Result<IReadOnlyList<RequirementSnapshot>>> Versions(Guid internalId, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyList<RequirementReview>>> History(Guid internalId, CancellationToken cancellationToken = default);
+    Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid internalId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Owns atomic Product eligibility, concurrency, change, history and audit writes.</summary>
@@ -30,6 +36,8 @@ public interface IRequirementChangeTransaction
         DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
     Task<Result<RequirementSnapshot>> Create(RequirementState requirement, AuditActor actor, DateTimeOffset occurredAt,
         CancellationToken cancellationToken = default);
+    Task<Result<RequirementSnapshot>> Derive(RequirementSnapshot expectedSource, RequirementState destination,
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
     Task<Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor,
         DateTimeOffset occurredAt, string? decision = null, string? comment = null, CancellationToken cancellationToken = default);
 }

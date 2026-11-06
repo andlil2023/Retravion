@@ -57,6 +57,18 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
                 : Task.FromResult(Result.Failure<RequirementSnapshot>(requirement.Error));
         }, token);
 
+    public Task<Result<RequirementSnapshot>> Derive(ClaimsPrincipal principal, RequirementSnapshot source, Guid destinationProduct,
+        string? id, string? title, string? statement, RequirementType? type, string? rationale, CancellationToken token = default) =>
+        Change(principal, "requirement.derive", (actor, now) =>
+        {
+            var destination = RequirementState.Create(destinationProduct, id, title, statement, type, rationale);
+            return destination.IsSuccess ? changes.Derive(source, destination.Value, actor, now, token)
+                : Task.FromResult(Result.Failure<RequirementSnapshot>(destination.Error));
+        }, token);
+
+    public async Task<Result<Maybe<RequirementProvenance>>> Provenance(ClaimsPrincipal principal, Guid id, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.Provenance(id, token) : Result.Failure<Maybe<RequirementProvenance>>("Access denied.");
+
     public Task<Result<RequirementSnapshot>> Edit(ClaimsPrincipal principal, RequirementSnapshot expected, string? id,
         string? title, string? statement, RequirementType? type, string? rationale, CancellationToken token = default) =>
         Change(principal, "requirement.edit", (actor, now) =>

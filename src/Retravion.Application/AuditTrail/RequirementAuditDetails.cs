@@ -10,4 +10,5 @@ public sealed record RequirementAuditDetails(Guid InternalId, RequirementAuditVa
     Guid? SourceVersionId = null, string? Reason = null,
     string? RelationshipType = null, IReadOnlyList<RequirementUserNeedLink>? BeforeLinks = null,
     IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null,
-    string? ParentRelationshipType = null, RequirementParentLink? BeforeParent = null, RequirementParentLink? AfterParent = null);
+    string? ParentRelationshipType = null, RequirementParentLink? BeforeParent = null, RequirementParentLink? AfterParent = null,
+    Retravion.Application.Requirement.RequirementProvenance? Provenance = null);
