@@ -50,7 +50,9 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.Find(principal, need.InternalId, versionId: need.VersionId)).IsFailure);
             Assert.True((await operations.CreateSuccessor(principal, expected, "secret-reason")).IsFailure);
             Assert.True((await operations.Reopen(principal, expected, "secret-reason")).IsFailure);
-            Assert.Equal(8, recorder.Events.Count);
+            Assert.True((await operations.Derive(principal, expected, Guid.NewGuid(), "", "secret-title", "secret-statement")).IsFailure);
+            Assert.True((await operations.Provenance(principal, need.InternalId)).IsFailure);
+            Assert.Equal(9, recorder.Events.Count);
             Assert.All(recorder.Events, e =>
             {
                 Assert.Equal(AuditActionOutcome.Failure, e.Outcome);
@@ -67,8 +69,9 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.Create(revoked, need.ProductInternalId, "secret-id", "secret-title", "secret-statement")).IsFailure);
             Assert.True((await operations.CreateSuccessor(revoked, expected, "secret-reason")).IsFailure);
             Assert.True((await operations.Reopen(revoked, expected, "secret-reason")).IsFailure);
+            Assert.True((await operations.Derive(revoked, expected, Guid.NewGuid(), "", "secret-title", "secret-statement")).IsFailure);
         }
-        Assert.Equal(6, logger.Messages.Count);
+        Assert.Equal(8, logger.Messages.Count);
         Assert.All(logger.Messages, message => Assert.Equal("Unauthorized User Need change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
     }
@@ -142,6 +145,8 @@ public sealed partial class AccountManagementTests
             Task.FromResult(Result.Success<IReadOnlyList<UserNeedSnapshot>>(id == need.Need.InternalId ? [need] : []));
         public Task<Result<IReadOnlyList<UserNeedReview>>> History(Guid id, CancellationToken token = default) =>
             Task.FromResult(Result.Success<IReadOnlyList<UserNeedReview>>([new(id, new AuditActor.Identified("author"), DateTimeOffset.UnixEpoch, "Draft", "comment", "Historical title", "Historical statement")]));
+        public Task<Result<Maybe<UserNeedProvenance>>> Provenance(Guid id, CancellationToken token = default) =>
+            Task.FromResult(Result.Success(Maybe<UserNeedProvenance>.None));
     }
 
     private sealed class NeedAuditRecorder : IAuditSubmission
@@ -178,6 +183,8 @@ public sealed partial class AccountManagementTests
         public Task<Result<UserNeedSnapshot>> CreateSuccessor(UserNeedSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<UserNeedReview>>> History(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<UserNeedSnapshot>> Create(Need need, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<Maybe<UserNeedProvenance>>> Provenance(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<UserNeedSnapshot>> Derive(UserNeedSnapshot source, Need destination, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<UserNeedSnapshot>> Update(UserNeedSnapshot expected, Need replacement, AuditActor actor, DateTimeOffset time, string? decision = null, string? comment = null, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
     }
 }
