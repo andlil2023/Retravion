@@ -194,6 +194,7 @@ public sealed partial class PostgresProductTests
         internal Func<Task>? AfterFind;
         public Task<Result<IReadOnlyList<UserNeedSnapshot>>> List(Guid product, CancellationToken token = default) => store.List(product, token);
         public Task<Result<IReadOnlyList<UserNeedReview>>> History(Guid id, CancellationToken token = default) => store.History(id, token);
+        public Task<Result<Maybe<UserNeedProvenance>>> Provenance(Guid id, CancellationToken token = default) => store.Provenance(id, token);
         public Task<Result<IReadOnlyList<UserNeedSnapshot>>> Versions(Guid id, CancellationToken token = default) => store.Versions(id, token);
         public async Task<Result<Maybe<UserNeedSnapshot>>> Find(Guid id, CancellationToken token = default, Guid? versionId = null)
         {
@@ -209,6 +210,8 @@ public sealed partial class PostgresProductTests
         internal Func<Task>? BeforeCreate;
         public Task<Result<UserNeedSnapshot>> CreateSuccessor(UserNeedSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default) =>
             Store.CreateSuccessor(expected, reason, actor, time, token);
+        public Task<Result<UserNeedSnapshot>> Derive(UserNeedSnapshot source, Need destination, AuditActor actor, DateTimeOffset time, CancellationToken token = default) =>
+            Store.Derive(source, destination, actor, time, token);
         public async Task<Result<UserNeedSnapshot>> Create(Need need, AuditActor actor, DateTimeOffset time, CancellationToken token = default)
         {
             var hook = Interlocked.Exchange(ref BeforeCreate, null);

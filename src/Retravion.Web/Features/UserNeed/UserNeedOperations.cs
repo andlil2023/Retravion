@@ -58,6 +58,18 @@ internal sealed class UserNeedOperations(IAuthorizationService authorization, Se
             : Task.FromResult(Result.Failure<UserNeedSnapshot>(need.Error));
     }, cancellationToken);
 
+    public Task<Result<UserNeedSnapshot>> Derive(ClaimsPrincipal principal, UserNeedSnapshot source, Guid destinationProduct,
+        string? id, string? title, string? statement, CancellationToken cancellationToken = default) =>
+        Change(principal, "need.derive", (actor, now) =>
+        {
+            var destination = Need.Create(destinationProduct, id, title, statement);
+            return destination.IsSuccess ? changes.Derive(source, destination.Value, actor, now, cancellationToken)
+                : Task.FromResult(Result.Failure<UserNeedSnapshot>(destination.Error));
+        }, cancellationToken);
+
+    public async Task<Result<Maybe<UserNeedProvenance>>> Provenance(ClaimsPrincipal principal, Guid id, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.Provenance(id, token) : Result.Failure<Maybe<UserNeedProvenance>>("Access denied.");
+
     public Task<Result<UserNeedSnapshot>> Edit(ClaimsPrincipal principal, UserNeedSnapshot expected, string? id, string? title,
         string? statement, CancellationToken cancellationToken = default) => Change(principal, "need.edit", (actor, now) =>
     {
