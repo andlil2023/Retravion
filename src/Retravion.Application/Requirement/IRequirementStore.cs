@@ -27,6 +27,7 @@ public interface IRequirementStore
     Task<Result<IReadOnlyList<RequirementSnapshot>>> Versions(Guid internalId, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyList<RequirementReview>>> History(Guid internalId, CancellationToken cancellationToken = default);
     Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid internalId, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<RequirementSnapshot>>> CopiesOf(Guid sourceVersionId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Owns atomic Product eligibility, concurrency, change, history and audit writes.</summary>

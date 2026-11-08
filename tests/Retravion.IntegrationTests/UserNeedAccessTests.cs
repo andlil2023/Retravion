@@ -137,6 +137,7 @@ public sealed partial class AccountManagementTests
 
     private sealed class NeedReadDouble(UserNeedSnapshot need) : IUserNeedStore
     {
+        public Task<Result<IReadOnlyList<UserNeedSnapshot>>> CopiesOf(Guid version, CancellationToken token = default) => Task.FromResult(Result.Success<IReadOnlyList<UserNeedSnapshot>>([]));
         public Task<Result<IReadOnlyList<UserNeedSnapshot>>> List(Guid product, CancellationToken token = default) =>
             Task.FromResult(Result.Success<IReadOnlyList<UserNeedSnapshot>>(product == need.Need.ProductInternalId ? [need] : []));
         public Task<Result<Maybe<UserNeedSnapshot>>> Find(Guid id, CancellationToken token = default, Guid? versionId = null) =>
@@ -177,6 +178,7 @@ public sealed partial class AccountManagementTests
     private sealed class NeedStoreDouble : IUserNeedStore, IUserNeedChangeTransaction
     {
         public int Calls;
+        public Task<Result<IReadOnlyList<UserNeedSnapshot>>> CopiesOf(Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<UserNeedSnapshot>>> List(Guid productInternalId, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<Maybe<UserNeedSnapshot>>> Find(Guid id, CancellationToken token = default, Guid? versionId = null) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<UserNeedSnapshot>>> Versions(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }

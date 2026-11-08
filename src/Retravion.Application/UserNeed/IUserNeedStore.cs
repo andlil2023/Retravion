@@ -23,6 +23,7 @@ public interface IUserNeedStore
     Task<Result<IReadOnlyList<UserNeedSnapshot>>> Versions(Guid internalId, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyList<UserNeedReview>>> History(Guid internalId, CancellationToken cancellationToken = default);
     Task<Result<Maybe<UserNeedProvenance>>> Provenance(Guid internalId, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyList<UserNeedSnapshot>>> CopiesOf(Guid sourceVersionId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Owns atomic Product eligibility, optimistic concurrency, change, history and audit writes.</summary>

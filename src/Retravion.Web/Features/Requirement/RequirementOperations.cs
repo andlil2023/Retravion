@@ -69,6 +69,9 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
     public async Task<Result<Maybe<RequirementProvenance>>> Provenance(ClaimsPrincipal principal, Guid id, CancellationToken token = default) =>
         await Allowed(principal) ? await store.Provenance(id, token) : Result.Failure<Maybe<RequirementProvenance>>("Access denied.");
 
+    public async Task<Result<IReadOnlyList<RequirementSnapshot>>> CopiesOf(ClaimsPrincipal principal, Guid version, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.CopiesOf(version, token) : Result.Failure<IReadOnlyList<RequirementSnapshot>>("Access denied.");
+
     public Task<Result<RequirementSnapshot>> Edit(ClaimsPrincipal principal, RequirementSnapshot expected, string? id,
         string? title, string? statement, RequirementType? type, string? rationale, CancellationToken token = default) =>
         Change(principal, "requirement.edit", (actor, now) =>

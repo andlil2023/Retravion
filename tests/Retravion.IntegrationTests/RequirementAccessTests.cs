@@ -161,6 +161,7 @@ public sealed partial class AccountManagementTests
     private sealed class RequirementReadDouble(RequirementSnapshot snapshot) : IRequirementStore
     {
         public RequirementSnapshot Snapshot = snapshot;
+        public Task<Result<IReadOnlyList<RequirementSnapshot>>> CopiesOf(Guid version, CancellationToken token = default) => Task.FromResult(Result.Success<IReadOnlyList<RequirementSnapshot>>([]));
         public Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid id, CancellationToken token = default) => Task.FromResult(Result.Success(Maybe<RequirementProvenance>.None));
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid product, CancellationToken token = default) =>
             Task.FromResult(Result.Success<IReadOnlyList<RequirementSnapshot>>(product == Snapshot.Requirement.ProductInternalId ? [Snapshot] : []));
@@ -193,6 +194,7 @@ public sealed partial class AccountManagementTests
     private sealed class RequirementStoreDouble : IRequirementStore, IRequirementChangeTransaction, IRequirementLinkStore
     {
         public int Calls;
+        public Task<Result<IReadOnlyList<RequirementSnapshot>>> CopiesOf(Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> Derive(RequirementSnapshot source, RequirementState destination, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementVersionReference>>> IncomingUserNeed(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
