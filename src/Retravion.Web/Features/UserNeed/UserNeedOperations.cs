@@ -70,6 +70,9 @@ internal sealed class UserNeedOperations(IAuthorizationService authorization, Se
     public async Task<Result<Maybe<UserNeedProvenance>>> Provenance(ClaimsPrincipal principal, Guid id, CancellationToken token = default) =>
         await Allowed(principal) ? await store.Provenance(id, token) : Result.Failure<Maybe<UserNeedProvenance>>("Access denied.");
 
+    public async Task<Result<IReadOnlyList<UserNeedSnapshot>>> CopiesOf(ClaimsPrincipal principal, Guid version, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.CopiesOf(version, token) : Result.Failure<IReadOnlyList<UserNeedSnapshot>>("Access denied.");
+
     public Task<Result<UserNeedSnapshot>> Edit(ClaimsPrincipal principal, UserNeedSnapshot expected, string? id, string? title,
         string? statement, CancellationToken cancellationToken = default) => Change(principal, "need.edit", (actor, now) =>
     {

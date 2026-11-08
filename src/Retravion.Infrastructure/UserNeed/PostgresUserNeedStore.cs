@@ -68,6 +68,7 @@ public sealed class PostgresUserNeedStore(string connectionString,
             need_internal_id uuid PRIMARY KEY REFERENCES retravion_need.need(internal_id),
             source_snapshot jsonb NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS need_provenance_source_version ON retravion_need.provenance ((source_snapshot->>'SourceVersionId'));
         ALTER TABLE retravion_need.review ADD COLUMN IF NOT EXISTS version_id uuid;
         ALTER TABLE retravion_need.review ADD COLUMN IF NOT EXISTS version_number integer;
         ALTER TABLE retravion_need.review ADD COLUMN IF NOT EXISTS manual_id text;
@@ -81,6 +82,9 @@ public sealed class PostgresUserNeedStore(string connectionString,
 
     public Task<Result<IReadOnlyList<UserNeedSnapshot>>> Versions(Guid internalId, CancellationToken cancellationToken = default) =>
         Rows($"SELECT {Columns} FROM retravion_need.need_version n WHERE internal_id=$1 ORDER BY version_number", internalId, cancellationToken);
+
+    public Task<Result<IReadOnlyList<UserNeedSnapshot>>> CopiesOf(Guid sourceVersionId, CancellationToken cancellationToken = default) =>
+        Rows($"SELECT {Columns} FROM retravion_need.need_version n JOIN retravion_need.provenance p ON p.need_internal_id=n.internal_id WHERE n.version_number=1 AND p.source_snapshot->>'SourceVersionId'=$1::text ORDER BY n.id", sourceVersionId, cancellationToken);
 
     private Task<Result<IReadOnlyList<UserNeedSnapshot>>> Rows(string sql, Guid id, CancellationToken token) =>
         Execute(async (connection, transaction) =>

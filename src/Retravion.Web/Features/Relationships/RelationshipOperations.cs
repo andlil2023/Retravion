@@ -24,21 +24,29 @@ internal sealed record RelationshipNode(string Kind, Guid InternalId, Guid Versi
 
 internal sealed record RelationshipEdge(RelationshipNode Owner, RelationshipNode Target, string Relationship)
 {
-    public string Ownership(bool productActive) => !productActive
+    public bool IsProvenance => Relationship == RelationshipOperations.ProvenanceRelationship;
+    public string Ownership(bool productActive) => IsProvenance ? "Read-only provenance; not an ordinary link." : !productActive
         ? $"Owner: {Owner.Label}. Read-only: Product retired."
         : Owner.HasNewerVersion ? $"Owner: {Owner.Label}. Read-only: a newer owner version exists."
         : Owner.Status != "Draft" ? $"Owner: {Owner.Label}. Read-only: owner is {Owner.Status}."
         : $"Owner: {Owner.Label}. Draft owner eligible for editing; target status does not lock this reference.";
 }
 
-internal sealed record RelationshipView(RelationshipNode Center, Retravion.Domain.Product.Product Product,
-    IReadOnlyList<RelationshipEdge> Edges);
+internal sealed record UnavailableOrigin(RelationshipNode Copy, Guid SourceProductId, Guid SourceId, Guid SourceVersionId,
+    int SourceVersionNumber, string SourceStatus, string SourceManualId, string SourceTitle, string SourceStatement,
+    string? SourceType = null, string? SourceRationale = null);
 
-internal sealed record RelationshipExploration(RelationshipView Root, IReadOnlyList<RelationshipView> Neighborhoods)
+internal sealed record RelationshipView(RelationshipNode Center, Retravion.Domain.Product.Product Product,
+    IReadOnlyList<RelationshipEdge> Edges, IReadOnlyList<UnavailableOrigin> UnavailableOrigins);
+
+internal sealed record RelationshipExploration(RelationshipView Root, IReadOnlyList<RelationshipView> Neighborhoods,
+    IReadOnlyList<Retravion.Domain.Product.Product> Products)
 {
     public IReadOnlyList<RelationshipEdge> Edges => Neighborhoods.SelectMany(v => v.Edges)
         .DistinctBy(e => (e.Owner.VersionId, e.Target.VersionId, e.Relationship)).ToArray();
     public IReadOnlyList<Guid> Expanded => Neighborhoods.Skip(1).Select(v => v.Center.VersionId).ToArray();
+    public IReadOnlyList<UnavailableOrigin> UnavailableOrigins => Neighborhoods.SelectMany(v => v.UnavailableOrigins)
+        .DistinctBy(v => (v.Copy.VersionId, v.SourceVersionId)).ToArray();
 }
 
 // Web-only composition of existing authorized feature contracts; no new public or MCP surface.
@@ -48,10 +56,13 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
     internal const string NeedRelationship = "Addresses User Need";
     internal const string ParentRelationship = "Child → parent Requirement";
     internal const string TestCaseRelationship = "Verifies Requirement";
+    internal const string ProvenanceRelationship = "Derived from / Source for";
 
     internal async Task<Result> Change(ClaimsPrincipal actor, RelationshipNode owner, RelationshipNode target,
         string relationship, string operation, RelationshipNode? replacement = null, CancellationToken token = default)
     {
+        if (relationship is not (NeedRelationship or ParentRelationship or TestCaseRelationship))
+            return Result.Failure("Unsupported relationship change.");
         if (owner.Kind == "test-case" && owner.TestCaseSnapshot is { } testCase && relationship == TestCaseRelationship)
         {
             var result = await testCases.ChangeLink(actor, testCase, operation,
@@ -80,8 +91,10 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
         relationship == NeedRelationship
             ? add ? requirements.AddLink(actor, owner, new(target.InternalId, target.VersionId), token)
                   : requirements.RemoveLink(actor, owner, new(target.InternalId, target.VersionId), token)
-            : add ? requirements.AddParent(actor, owner, new(target.InternalId, target.VersionId), token)
-                  : requirements.RemoveParent(actor, owner, token);
+            : relationship == ParentRelationship
+                ? add ? requirements.AddParent(actor, owner, new(target.InternalId, target.VersionId), token)
+                      : requirements.RemoveParent(actor, owner, token)
+                : Task.FromResult(Result.Failure<RequirementSnapshot>("Unsupported relationship change."));
 
     internal async Task<Result<IReadOnlyList<RelationshipNode>>> Candidates(ClaimsPrincipal actor, Guid product,
         string kind, bool ownersOnly, CancellationToken token = default)
@@ -195,13 +208,24 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
                 edges.Add(new(owner.Value, center.Value, kind == "requirement" ? "Child → parent Requirement" : "Addresses User Need"));
             }
         }
-        // Recheck live access before returning a complete view; never publish a partially loaded neighborhood.
+        // Ordinary links remain within the center's Product. Provenance is the explicit exception.
         var availableProducts = await products.List(actor, token);
         if (availableProducts.IsFailure) return Result.Failure<RelationshipView>(availableProducts.Error);
         var product = availableProducts.Value.SingleOrDefault(p => p.InternalId == center.Value.ProductInternalId);
         if (product is null || edges.Any(e => e.Owner.ProductInternalId != product.InternalId || e.Target.ProductInternalId != product.InternalId))
             return Result.Failure<RelationshipView>("Relationship Product not available.");
-        return new RelationshipView(center.Value, product, edges);
+        var unavailable = new List<UnavailableOrigin>();
+        if (kind != "test-case")
+        {
+            var origins = await Origins(actor, center.Value, availableProducts.Value, token);
+            if (origins.IsFailure) return Result.Failure<RelationshipView>(origins.Error);
+            edges.AddRange(origins.Value.Edges);
+            unavailable.AddRange(origins.Value.Unavailable);
+        }
+        // Recheck live access after all reads; never publish a partially loaded neighborhood.
+        var access = await products.List(actor, token);
+        if (access.IsFailure) return Result.Failure<RelationshipView>(access.Error);
+        return new RelationshipView(center.Value, product, edges, unavailable);
     }
 
     internal async Task<Result<RelationshipExploration>> Explore(ClaimsPrincipal actor, string? kind, Guid id,
@@ -226,7 +250,69 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
         // Do not publish previously loaded data if the session was revoked during expansion.
         var access = await products.List(actor, token);
         if (access.IsFailure) return Result.Failure<RelationshipExploration>(access.Error);
-        return new RelationshipExploration(root.Value, neighborhoods);
+        if (neighborhoods.SelectMany(n => n.Edges).SelectMany(e => new[] { e.Owner, e.Target })
+            .Any(n => access.Value.All(p => p.InternalId != n.ProductInternalId)))
+            return Result.Failure<RelationshipExploration>("Relationship Product not available.");
+        return new RelationshipExploration(root.Value, neighborhoods, access.Value);
+    }
+
+    private async Task<Result<(IReadOnlyList<RelationshipEdge> Edges, IReadOnlyList<UnavailableOrigin> Unavailable)>> Origins(
+        ClaimsPrincipal actor, RelationshipNode center, IReadOnlyList<Retravion.Domain.Product.Product> products,
+        CancellationToken token)
+    {
+        var edges = new List<RelationshipEdge>();
+        var unavailable = new List<UnavailableOrigin>();
+        UnavailableOrigin? origin = null;
+        if (center.Kind == "requirement")
+        {
+            var result = await requirements.Provenance(actor, center.InternalId, token);
+            if (result.IsFailure) return Result.Failure<(IReadOnlyList<RelationshipEdge>, IReadOnlyList<UnavailableOrigin>)>(result.Error);
+            if (result.Value.HasValue)
+            {
+                var p = result.Value.Value;
+                origin = new(center, p.SourceProductId, p.SourceRequirementId, p.SourceVersionId, p.SourceVersionNumber,
+                    p.SourceStatus, p.SourceManualId, p.SourceTitle, p.SourceStatement, p.SourceType.ToString(), p.SourceRationale);
+            }
+            var copies = await requirements.CopiesOf(actor, center.VersionId, token);
+            if (copies.IsFailure) return Result.Failure<(IReadOnlyList<RelationshipEdge>, IReadOnlyList<UnavailableOrigin>)>(copies.Error);
+            foreach (var copy in copies.Value.Where(c => products.Any(p => p.InternalId == c.Requirement.ProductInternalId)))
+            {
+                var node = await Node(actor, center.Kind, copy.Requirement.InternalId, copy.Requirement.VersionId, token);
+                if (node.IsFailure) return Result.Failure<(IReadOnlyList<RelationshipEdge>, IReadOnlyList<UnavailableOrigin>)>(node.Error);
+                edges.Add(new(node.Value, center, ProvenanceRelationship));
+            }
+        }
+        else
+        {
+            var result = await needs.Provenance(actor, center.InternalId, token);
+            if (result.IsFailure) return Result.Failure<(IReadOnlyList<RelationshipEdge>, IReadOnlyList<UnavailableOrigin>)>(result.Error);
+            if (result.Value.HasValue)
+            {
+                var p = result.Value.Value;
+                origin = new(center, p.SourceProductId, p.SourceNeedId, p.SourceVersionId, p.SourceVersionNumber,
+                    p.SourceStatus, p.SourceManualId, p.SourceTitle, p.SourceStatement);
+            }
+            var copies = await needs.CopiesOf(actor, center.VersionId, token);
+            if (copies.IsFailure) return Result.Failure<(IReadOnlyList<RelationshipEdge>, IReadOnlyList<UnavailableOrigin>)>(copies.Error);
+            foreach (var copy in copies.Value.Where(c => products.Any(p => p.InternalId == c.Need.ProductInternalId)))
+            {
+                var node = await Node(actor, center.Kind, copy.Need.InternalId, copy.Need.VersionId, token);
+                if (node.IsFailure) return Result.Failure<(IReadOnlyList<RelationshipEdge>, IReadOnlyList<UnavailableOrigin>)>(node.Error);
+                edges.Add(new(node.Value, center, ProvenanceRelationship));
+            }
+        }
+        if (origin is not null)
+        {
+            if (!products.Any(p => p.InternalId == origin.SourceProductId)) unavailable.Add(origin);
+            else
+            {
+                var source = await Node(actor, center.Kind, origin.SourceId, origin.SourceVersionId, token);
+                if (source.IsSuccess) edges.Add(new(center, source.Value, ProvenanceRelationship));
+                else if (source.Error is "Requirement version not found." or "User Need version not found.") unavailable.Add(origin);
+                else return Result.Failure<(IReadOnlyList<RelationshipEdge>, IReadOnlyList<UnavailableOrigin>)>(source.Error);
+            }
+        }
+        return Result.Success<(IReadOnlyList<RelationshipEdge>, IReadOnlyList<UnavailableOrigin>)>((edges, unavailable));
     }
 
     private async Task<Result<RelationshipNode>> Node(ClaimsPrincipal actor, string kind, Guid id, Guid version, CancellationToken token)

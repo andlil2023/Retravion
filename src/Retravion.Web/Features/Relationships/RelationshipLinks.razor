@@ -29,7 +29,7 @@ else
     {
         <MudPaper Class="pa-4 my-4" Elevation="0">
             <h3>Add @(_incoming ? "incoming" : "outgoing") link: @_anchor.Label</h3>
-            <p>Product: @_view.Product.Id – @_view.Product.Name. Select an existing exact version; no entities are created here.</p>
+            <p>Product: @ProductOf(_anchor).Id – @ProductOf(_anchor).Name. Select an existing exact version; no entities are created here.</p>
             @if (_anchor.Kind == "requirement")
             {
                 <MudSelect T="string" Value="_relationship" ValueChanged="SelectRelationship" Label="Relationship" Disabled="_busy">
@@ -98,7 +98,22 @@ else
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="@(() => ChangeView(false))" aria-pressed="@(!_table)">Graph view</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="@(() => ChangeView(true))" aria-pressed="@_table">Table view</MudButton>
     </div>
-    @if (_edges.Count == 0) { <p>No direct relationships for this exact version.</p> }
+    @foreach (var origin in _exploration!.UnavailableOrigins)
+    {
+        <MudPaper Class="pa-4 my-4" Elevation="0">
+            <h3>Derived from — source unavailable</h3>
+            <p>Copy: @origin.Copy.Label</p>
+            <p>Stored source Product identity: @origin.SourceProductId; entity identity: @origin.SourceId; version identity: @origin.SourceVersionId</p>
+            <p>@origin.SourceManualId · v@origin.SourceVersionNumber · @origin.SourceStatus (at copy time)</p>
+            <p>@origin.SourceTitle</p><p>@origin.SourceStatement</p>
+            @if (origin.SourceType is not null) { <p>Type: @origin.SourceType</p> }
+            @if (origin.SourceRationale is not null) { <p>Rationale: @origin.SourceRationale</p> }
+        </MudPaper>
+    }
+    @if (_edges.Count == 0)
+    {
+        @if (_exploration.UnavailableOrigins.Count == 0) { <p>No direct relationships for this exact version.</p> }
+    }
     else
     {
         <p role="status">Page @(_page + 1) of @PageCount. Showing @PageEdges.Count of @_edges.Count explored relationships.
@@ -112,10 +127,10 @@ else
             <MudTable T="RelationshipEdge" Items="PageEdges" Dense="true" Hover="true" Elevation="0" aria-label="Explored relationships">
                 <HeaderContent><MudTh>Direction / relationship</MudTh><MudTh>From (owner)</MudTh><MudTh>To (target)</MudTh><MudTh>Ownership state</MudTh></HeaderContent>
                 <RowTemplate>
-                    <MudTd DataLabel="Direction / relationship">@Direction(context) · @context.Relationship</MudTd>
+                    <MudTd DataLabel="Direction / relationship">@Direction(context) · @RelationshipLabel(context)</MudTd>
                     <MudTd DataLabel="From (owner)">@NodeContent(context.Owner)</MudTd>
                     <MudTd DataLabel="To (target)">@NodeContent(context.Target)</MudTd>
-                    <MudTd DataLabel="Ownership state">@context.Ownership(_view.Product.IsActive)@RemoveControl(context)</MudTd>
+                    <MudTd DataLabel="Ownership state">@context.Ownership(ProductOf(context.Owner).IsActive)@RemoveControl(context)</MudTd>
                 </RowTemplate>
             </MudTable>
         }
@@ -129,8 +144,8 @@ else
                         <div class="branch incoming">
                             <MudPaper Class="pa-4" Elevation="0">
                                 @NodeContent(edge.Owner)
-                                <p>@edge.Relationship → center</p>
-                                <p>@edge.Ownership(_view.Product.IsActive)</p>@RemoveControl(edge)
+                                <p>@RelationshipLabel(edge) → center</p>
+                                <p>@edge.Ownership(ProductOf(edge.Owner).IsActive)</p>@RemoveControl(edge)
                             </MudPaper>
                             <span class="connector" aria-hidden="true">→</span>
                         </div>
@@ -144,9 +159,9 @@ else
                         <div class="branch outgoing">
                             <span class="connector" aria-hidden="true">→</span>
                             <MudPaper Class="pa-4" Elevation="0">
-                                <p>Center → @edge.Relationship</p>
+                                <p>Center → @RelationshipLabel(edge)</p>
                                 @NodeContent(edge.Target)
-                                <p>@edge.Ownership(_view.Product.IsActive)</p>@RemoveControl(edge)
+                                <p>@edge.Ownership(ProductOf(edge.Owner).IsActive)</p>@RemoveControl(edge)
                             </MudPaper>
                         </div>
                     }
@@ -157,9 +172,9 @@ else
             {
                 <MudPaper Class="pa-4 my-4" Elevation="0">
                     @NodeContent(edge.Owner)
-                    <p>→ @edge.Relationship →</p>
+                    <p>→ @RelationshipLabel(edge) →</p>
                     @NodeContent(edge.Target)
-                    <p>@edge.Ownership(_view.Product.IsActive)</p>@RemoveControl(edge)
+                    <p>@edge.Ownership(ProductOf(edge.Owner).IsActive)</p>@RemoveControl(edge)
                 </MudPaper>
             }
         }
@@ -201,7 +216,7 @@ else
     }
     private async Task BeginAdd(RelationshipNode node, bool incoming)
     {
-        if (ActionsDisabled || _view is null || !_view.Product.IsActive || (incoming && node.Kind == "test-case") || (!incoming && !node.Editable)) return;
+        if (ActionsDisabled || _view is null || !ProductOf(node).IsActive || (incoming && node.Kind == "test-case") || (!incoming && !node.Editable)) return;
         CancelAction(); _message = null; _anchor = node; _incoming = incoming;
         _relationship = node.Kind == "test-case" ? RelationshipOperations.TestCaseRelationship
             : incoming && node.Kind == "requirement" ? RelationshipOperations.ParentRelationship : RelationshipOperations.NeedRelationship;
@@ -239,7 +254,7 @@ else
     }
     private void BeginRemoval(RelationshipEdge edge)
     {
-        if (ActionsDisabled || _view is null || !_view.Product.IsActive || !edge.Owner.Editable) return;
+        if (ActionsDisabled || _view is null || edge.IsProvenance || !ProductOf(edge.Owner).IsActive || !edge.Owner.Editable) return;
         CancelAction(); _message = null; _removing = edge;
     }
     private async Task ConfirmRemoval()
@@ -249,7 +264,7 @@ else
     }
     private async Task BeginRetarget(RelationshipEdge edge)
     {
-        if (ActionsDisabled || _view is null || !_view.Product.IsActive || !edge.Owner.Editable) return;
+        if (ActionsDisabled || _view is null || edge.IsProvenance || !ProductOf(edge.Owner).IsActive || !edge.Owner.Editable) return;
         CancelAction(); _message = null; _retargeting = edge; _busy = true;
         var load = _load;
         try
@@ -320,32 +335,39 @@ else
     }
     private string Direction(RelationshipEdge edge) => edge.Owner.VersionId == _view!.Center.VersionId ? "Outgoing"
         : edge.Target.VersionId == _view.Center.VersionId ? "Incoming" : "Indirect";
+    private Retravion.Domain.Product.Product ProductOf(RelationshipNode node) =>
+        _exploration!.Products.Single(p => p.InternalId == node.ProductInternalId);
+    private string RelationshipLabel(RelationshipEdge edge) => !edge.IsProvenance ? edge.Relationship
+        : edge.Target.VersionId == _view!.Center.VersionId ? "Derived from (center is Source for this copy)" : "Derived from";
     private RenderFragment RemoveControl(RelationshipEdge edge) => @<div class="mt-4">
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !_view!.Product.IsActive || !edge.Owner.Editable)"
-            OnClick="@(() => BeginRemoval(edge))" aria-label="@($"Remove {edge.Relationship}: {edge.Owner.Label} → {edge.Target.Label}")">Remove link</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !_view!.Product.IsActive || !edge.Owner.Editable)"
-            OnClick="@(() => BeginRetarget(edge))" aria-label="@($"Retarget {edge.Relationship}: {edge.Owner.Label} → {edge.Target.Label}")">Retarget link</MudButton>
+        @if (!edge.IsProvenance)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !ProductOf(edge.Owner).IsActive || !edge.Owner.Editable)"
+                OnClick="@(() => BeginRemoval(edge))" aria-label="@($"Remove {edge.Relationship}: {edge.Owner.Label} → {edge.Target.Label}")">Remove link</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !ProductOf(edge.Owner).IsActive || !edge.Owner.Editable)"
+                OnClick="@(() => BeginRetarget(edge))" aria-label="@($"Retarget {edge.Relationship}: {edge.Owner.Label} → {edge.Target.Label}")">Retarget link</MudButton>
+        }
     </div>;
     private RenderFragment NodeContent(RelationshipNode node) => @<div class="relationship-node">
         <MudLink Href="@node.LinksPath">@node.Label</MudLink>
         <p>@node.Title</p>
         <p>Status: @node.Status</p>
-        <p>Product: @_view!.Product.Id – @_view.Product.Name @(!_view.Product.IsActive ? "(retired)" : "")</p>
+        <p>Product: @ProductOf(node).Id – @ProductOf(node).Name @(!ProductOf(node).IsActive ? "(retired)" : "")</p>
         @if (node.HasNewerVersion) { <p>Newer version available; showing this exact version.</p> }
         <MudLink Href="@node.DetailsPath">Inspect exact version</MudLink>
         @if (node.Kind is "requirement" or "test-case")
         {
             @if (!node.Editable) { <p>Outgoing links locked: @(node.HasNewerVersion ? "a newer owner version exists" : $"owner is {node.Status}").</p> }
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !_view.Product.IsActive || !node.Editable)"
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !ProductOf(node).IsActive || !node.Editable)"
                 OnClick="@(() => BeginAdd(node, false))" aria-label="@($"Add outgoing link from {node.Label}")">Add outgoing link</MudButton>
         }
-        @if (!_view.Product.IsActive) { <p>Link changes locked: Product retired.</p> }
+        @if (!ProductOf(node).IsActive) { <p>Link changes locked: Product retired.</p> }
         @if (node.Kind != "test-case")
         {
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !_view.Product.IsActive)"
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(ActionsDisabled || !ProductOf(node).IsActive)"
                 OnClick="@(() => BeginAdd(node, true))" aria-label="@($"Add incoming link to {node.Label}")">Add incoming link</MudButton>
         }
-        @if (node.VersionId != _view.Center.VersionId)
+        @if (node.VersionId != _view!.Center.VersionId)
         {
             var expanded = _exploration!.Expanded.Contains(node.VersionId);
             <p>@(expanded ? "Neighborhood expanded." : "Neighborhood not expanded; more relationships may exist.")</p>

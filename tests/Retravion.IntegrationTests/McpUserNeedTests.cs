@@ -192,6 +192,7 @@ public sealed partial class PostgresProductTests
     private sealed class McpReadHook(IUserNeedStore store) : IUserNeedStore
     {
         internal Func<Task>? AfterFind;
+        public Task<Result<IReadOnlyList<UserNeedSnapshot>>> CopiesOf(Guid version, CancellationToken token = default) => store.CopiesOf(version, token);
         public Task<Result<IReadOnlyList<UserNeedSnapshot>>> List(Guid product, CancellationToken token = default) => store.List(product, token);
         public Task<Result<IReadOnlyList<UserNeedReview>>> History(Guid id, CancellationToken token = default) => store.History(id, token);
         public Task<Result<Maybe<UserNeedProvenance>>> Provenance(Guid id, CancellationToken token = default) => store.Provenance(id, token);
