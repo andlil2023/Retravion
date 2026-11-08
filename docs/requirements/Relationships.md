@@ -133,13 +133,15 @@ This direction is deferred to [#141](https://github.com/andlil2023/Retravion/iss
 **Requirement:** The future relationship view shall expose accessible provenance in both directions without permitting origin-link mutation.
 
 **Acceptance criteria:**
-- Show Derived from and Source for, distinguishable from ordinary relationships, with owning Product and exact source/copy version context.
-- Origin references are the explicit cross-Product exception; ordinary links remain same-Product.
-- Display the accessible origin reference, but require explicit expansion before loading the other Product's relationship neighborhood. Clicking an accessible referenced entity may make it the center.
-- Reveal only records the caller may access; expansion or refocusing does not bypass permission checks or disclose inaccessible record details.
-- Graph and table/list provide equivalent provenance navigation. Origin links remain read-only.
+- Show Derived from and Source for for Requirements and User Needs, distinguishable from ordinary relationships, with owning Product and exact source/copy version context. Origin references are read-only, not parent links or link-mutation controls; they do not block approval or alter the release-protection boundary in REQ-LINK-009.
+- Provenance belongs to the copy entity. From a readable copy version, Derived from identifies the exact source version recorded at copy time. From that exact source version, Source for identifies each accessible copy's original v1, even if newer versions exist. Do not silently substitute a newer version; users may navigate versions separately.
+- Origin references are the explicit cross-Product exception; ordinary links remain same-Product. Show an accessible reference without loading the other Product's relationship neighborhood. An explicit expansion loads that neighborhood without changing the center; clicking an accessible referenced version is a separate explicit refocus to that exact version.
+- If the live source is missing or inaccessible, a reader of the copy may see its already-stored copy-time identifiers and snapshot as read-only text marked unavailable, consistent with REQ-REQ-007 and REQ-NEED-007. Do not show a live source graph node, source link, refocus, or expansion for it. The snapshot does not grant access to other source records.
+- Omit inaccessible copies from Source for entirely, including counts, pagination, and overflow indicators. Recheck access on every root, reference, expansion and refocus read; do not expose inaccessible live record details. The copy-reader's stored snapshot above is the explicit exception, not access to the live source.
+- Graph and keyboard-accessible table/list offer equivalent provenance information and navigation, including unavailable text and exact-version context. Expansion/collapse and refocus do not mutate provenance or business records. Reads and navigation require no change event.
+- Current authorization is session-level, not per Product. Enforce the existing live-session checks for every read; Product-specific filtering, access-revocation scenarios and their verification remain deferred until that capability exists. Do not introduce a new authorization system in #143 or claim those deferred scenarios pass.
 
-Deferred to [#143](https://github.com/andlil2023/Retravion/issues/143). Provenance viewing performs no business-record writes and requires no change event.
+Refined by [#180](https://github.com/andlil2023/Retravion/issues/180); implementation remains separately scoped under [#143](https://github.com/andlil2023/Retravion/issues/143). This specification and its verification cases describe approved future behavior, not evidence of implementation. Provenance viewing performs no business-record writes and requires no change event.
 
 ## Approved Future Release Protection — PBI #144
 
