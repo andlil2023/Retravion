@@ -46,7 +46,7 @@
         }
     </MudPaper>
     <div class="mt-4">
-        <MudButton Href="@($"/products/links?kind=user-need&id={_need.Need.InternalId}&version={_need.Need.VersionId}")">Links</MudButton>
+        <MudButton Href="@($"/products/links?kind=user-need&id={_need.Need.InternalId}&version={_need.Need.VersionId}")">Manage links</MudButton>
         <MudButton Href="@($"/user-needs/derive?id={_need.Need.InternalId}&version={_need.Need.VersionId}")">Copy to another Product</MudButton>
     </div>
     @if (_product.IsActive && IsLatest)

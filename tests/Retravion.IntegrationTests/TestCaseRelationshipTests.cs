@@ -126,7 +126,7 @@ public sealed partial class PostgresProductTests
                 if (incoming)
                 {
                     await ManagementClick(renderer, $"Add incoming link to {root.Label}");
-                    await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync(RelationshipOperations.TestCaseRelationship);
+                    await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync("test-case");
                     await SelectExact(renderer, caseNode.VersionId);
                 }
                 else
@@ -205,8 +205,8 @@ public sealed partial class PostgresProductTests
             Assert.True(ManagementButton(renderer, $"Add outgoing link from {root.Label}").Disabled);
             Assert.True(ManagementButton(renderer, $"Remove {RelationshipOperations.TestCaseRelationship}: {root.Label} → Requirement Owner · v1").Disabled);
             await ExplorationClick(renderer, "Expand Requirement Owner · v1");
-            Assert.Contains("User Need N · v1", renderer.Text());
-            Assert.Contains("Test Case TC-001 · v2", renderer.Text());
+            Assert.Contains("Inspect User Need N · v1", VisibleRelationshipNodes(renderer));
+            Assert.Contains("Inspect Test Case TC-001 · v2", VisibleRelationshipNodes(renderer));
             await ExplorationClick(renderer, "Expand Test Case TC-001 · v2");
             await ExplorationClick(renderer, "Expand User Need N · v1");
             var exploration = (await f.Operations.Explore(f.Actor, root.Kind, root.InternalId, root.VersionId,
@@ -215,9 +215,10 @@ public sealed partial class PostgresProductTests
             var graphLinks = renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray();
             await renderer.Click("Table view");
             Assert.Equal(graphLinks, renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray());
-            Assert.Contains("Neighborhood not expanded; more relationships may exist", renderer.Text());
+            Assert.Contains("Unexpanded neighborhoods may contain more relationships", renderer.Text());
+            Assert.Contains(renderer.Components<MudButton>(), b => b.UserAttributes?.TryGetValue("aria-expanded", out var value) == true && Equals(value, false));
             await ExplorationClick(renderer, "Collapse Requirement Owner · v1");
-            Assert.DoesNotContain("User Need N · v1", renderer.Text());
+            Assert.DoesNotContain("Inspect User Need N · v1", VisibleRelationshipNodes(renderer));
             Assert.Contains("Center: Test Case TC-001 · v1", renderer.Text());
             await f.Host.Factory.Services.GetRequiredService<SessionTicketStore>().RemoveAsync(f.Actor.FindFirstValue(SessionTicketStore.SessionClaim)!);
             await renderer.Click("Graph view");

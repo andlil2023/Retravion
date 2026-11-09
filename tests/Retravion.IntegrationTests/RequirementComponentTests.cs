@@ -141,6 +141,16 @@ public sealed partial class PostgresProductTests
         }
         internal IEnumerable<T> Components<T>() => Frames(root).Where(f => f.FrameType == RenderTreeFrameType.Component).Select(f => f.Component).OfType<T>();
         internal MudTextField<string> Field(string label) => Components<MudTextField<string>>().Single(f => f.Label == label);
+        internal IEnumerable<Dictionary<string, object?>> Elements(string tag)
+        {
+            var frames = Frames(root).ToArray();
+            for (var i = 0; i < frames.Length; i++)
+            {
+                if (frames[i].FrameType != RenderTreeFrameType.Element || frames[i].ElementName != tag) continue;
+                yield return frames.Skip(i + 1).TakeWhile(f => f.FrameType == RenderTreeFrameType.Attribute)
+                    .ToDictionary(f => f.AttributeName, f => (object?)f.AttributeValue);
+            }
+        }
         internal Task Event(string name, EventArgs args)
         {
             var frames = Frames(root).ToArray();

@@ -170,12 +170,15 @@ public sealed partial class PostgresProductTests
             Assert.Single(renderer.Components<MudTable<RelationshipEdge>>());
             Assert.Equal(graphLinks, renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray());
             foreach (var edge in view.Edges) Assert.Contains(edge.Ownership(true), renderer.Text());
-            // The router follows the actual connected-node href; seed those query parameters in this renderer.
+            // Selection inspects without refocusing; the explicit Focus here href navigates exactly.
             var connected = view.Edges.Single(e => e.Target.Kind == "user-need").Target;
+            await ExplorationClick(renderer, "Inspect " + connected.Label);
+            Assert.Contains("Center: Requirement Owner · v1", renderer.Text());
             Assert.Contains(renderer.Components<MudLink>(), l => l.Href == connected.LinksPath);
             await renderer.Mount(typeof(RelationshipLinks), Parameters(connected));
             Assert.Contains("Center: User Need N · v1", renderer.Text());
             Assert.DoesNotContain("Requirement Child", renderer.Text()); // direct-only, no accidental indirect loading
+            await ExplorationClick(renderer, "Inspect " + view.Center.Label);
             Assert.Contains(renderer.Components<MudLink>(), l => l.Href == view.Center.LinksPath);
             await renderer.Mount(typeof(RelationshipLinks), Parameters(view.Center));
             await renderer.Click("Table view");
