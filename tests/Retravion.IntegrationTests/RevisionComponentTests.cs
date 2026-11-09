@@ -19,6 +19,7 @@ using Retravion.Infrastructure.Revision;
 using Retravion.Web.Features.Mcp;
 using Retravion.Web.Features.Product;
 using Retravion.Web.Features.Revision;
+using Retravion.Web.Features.Relationships;
 using Xunit;
 
 namespace Retravion.IntegrationTests;
@@ -73,35 +74,38 @@ public sealed partial class PostgresProductTests
             await renderer.Event("onsubmit", EventArgs.Empty);
             Assert.Equal("Renamed UI revision", (await store.Retrieve(product.InternalId, row.Value.InternalId)).Value.Record!.Value.Identifier);
             await renderer.Mount(typeof(RevisionDetails), new() { [nameof(RevisionDetails.ProductId)] = "P", [nameof(RevisionDetails.Id)] = row.Value.InternalId });
-            Assert.Contains("Empty baseline", renderer.Text());
-            Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.OnClick.HasDelegate && b.Href?.Contains("release", StringComparison.OrdinalIgnoreCase) == true);
-            await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync($"{e1.Kind}:{e1.VersionId}");
-            await renderer.Click("Add exact selection");
-            Assert.Contains("Requirement R · v1", renderer.Text()); Assert.Contains("Explicit", renderer.Text());
-            await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync($"{e2.Kind}:{e2.VersionId}");
+            Assert.Contains("Release blocked", renderer.Text());
+            Assert.Contains("kind=revision", renderer.Button("Manage links").Href);
+            Assert.Empty(renderer.Components<MudSelect<string>>());
+            await RevisionTab(renderer, 1); Assert.Contains("Empty baseline", renderer.Text());
+            await MountMembership(renderer, "P", row.Value.InternalId);
+            await AddRevisionMember(renderer, e1);
+            Assert.Contains("Requirement R · v1", renderer.Text()); Assert.Contains("Selected", renderer.Text());
+            await InspectMembership(renderer, "Requirement R · v1");
             var before = (await store.Retrieve(product.InternalId, row.Value.InternalId)).Value.Record!;
-            await renderer.Click("Replace selection"); Assert.Contains("Confirm replacement", renderer.Text());
-            Assert.Contains("New exact selection: Requirement R · v2", renderer.Text());
+            await renderer.Click("Replace selection"); await ChooseRevisionMember(renderer, e2);
+            Assert.Contains("New selection: Requirement R · v2", renderer.Text());
             Assert.Equal(before.Revision, (await store.Retrieve(product.InternalId, row.Value.InternalId)).Value.Record!.Revision);
-            await renderer.Click("Cancel change");
-            await renderer.Click("Replace selection"); await renderer.Click("Confirm change");
+            await renderer.Click("Cancel selection");
+            await renderer.Click("Replace selection"); await ChooseRevisionMember(renderer, e2); await renderer.Click("Confirm selection");
             Assert.Equal(e2, Assert.Single((await store.Retrieve(product.InternalId, row.Value.InternalId)).Value.Record!.Value.Selections));
-            await renderer.Click("Remove selection"); await renderer.Click("Cancel change");
-            await renderer.Click("Remove selection"); await renderer.Click("Confirm change");
+            await InspectMembership(renderer, "Requirement R · v2");
+            await renderer.Click("Remove selection"); await renderer.Click("Cancel selection");
+            await renderer.Click("Remove selection"); await renderer.Click("Confirm selection");
             Assert.Empty((await store.Retrieve(product.InternalId, row.Value.InternalId)).Value.Record!.Value.Selections);
-            await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync($"{e1.Kind}:{e1.VersionId}");
-            await renderer.Click("Add exact selection");
-            await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync($"{e2.Kind}:{e2.VersionId}");
-            await renderer.Click("Add exact selection");
+            await AddRevisionMember(renderer, e1);
+            await AddRevisionMember(renderer, e2);
             Assert.Contains("Requirement R · v1", renderer.Text()); Assert.Contains("Requirement R · v2", renderer.Text());
             Assert.Equal(2, (await store.Baseline(product.InternalId, row.Value.InternalId)).Value.Members.Count);
+            await renderer.Mount(typeof(RevisionDetails), new() { [nameof(RevisionDetails.ProductId)] = "P", [nameof(RevisionDetails.Id)] = row.Value.InternalId });
             await renderer.Click("Delete Draft"); Assert.Contains("Confirm deletion", renderer.Text());
             await renderer.Click("Cancel change"); Assert.False((await store.Retrieve(product.InternalId, row.Value.InternalId)).Value.Record!.Deleted);
-            await renderer.Click("Delete Draft"); await renderer.Click("Confirm change");
+            await renderer.Click("Delete Draft"); await renderer.Click("Confirm deletion");
             Assert.True((await store.Retrieve(product.InternalId, row.Value.InternalId)).Value.Record!.Deleted);
-            Assert.Contains("Deleted Draft — retained evidence", renderer.Text()); Assert.Contains("revision.delete", renderer.Text());
+            Assert.Contains("Deleted Draft — retained evidence", renderer.Text());
+            await RevisionTab(renderer, 2); Assert.Contains("revision.delete", renderer.Text());
             Assert.Equal(2, (await requirements.Versions(r1.Requirement.InternalId)).Value.Count);
-            Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.OnClick.HasDelegate);
+            Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.OnClick.HasDelegate && b.Variant == Variant.Filled);
             await renderer.Mount(typeof(RevisionList), new() { [nameof(RevisionList.ProductId)] = "P" });
             Assert.Contains("No revisions", renderer.Text()); Assert.DoesNotContain("Other Product secret", renderer.Text());
             await RevCreate(store, product.InternalId, "Visible revision");
@@ -163,10 +167,19 @@ public sealed partial class PostgresProductTests
                 }
                 else
                 {
-                    await renderer.Mount(typeof(RevisionDetails), new() { [nameof(RevisionDetails.ProductId)] = "P", [nameof(RevisionDetails.Id)] = row.Value.InternalId });
-                    if (action is "add" or "replace") await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync($"{e2.Kind}:{e2.VersionId}");
-                    if (action is "remove" or "replace" or "delete") await renderer.Click(action == "remove" ? "Remove selection" : action == "replace" ? "Replace selection" : "Delete Draft");
-                    submit = () => renderer.Click(action == "add" ? "Add exact selection" : "Confirm change");
+                    if (action == "delete")
+                    {
+                        await renderer.Mount(typeof(RevisionDetails), new() { [nameof(RevisionDetails.ProductId)] = "P", [nameof(RevisionDetails.Id)] = row.Value.InternalId });
+                        await renderer.Click("Delete Draft"); submit = () => renderer.Click("Confirm deletion");
+                    }
+                    else
+                    {
+                        await MountMembership(renderer, "P", row.Value.InternalId);
+                        if (action != "add") await InspectMembership(renderer, "Requirement R1 · v1");
+                        await renderer.Click(action == "add" ? "Add link" : action == "remove" ? "Remove selection" : "Replace selection");
+                        if (action is "add" or "replace") await ChooseRevisionMember(renderer, e2);
+                        submit = () => renderer.Click("Confirm selection");
+                    }
                 }
                 await submit(); Assert.Equal(calls + 1, writes.Calls); Assert.Contains("could not be confirmed", renderer.Text());
                 Assert.Contains("No automatic retry", renderer.Text());
@@ -177,8 +190,14 @@ public sealed partial class PostgresProductTests
                 }
                 else
                 {
-                    Assert.True(renderer.Button("Add exact selection").Disabled);
-                    await renderer.Click("Add exact selection"); Assert.Equal(calls + 1, writes.Calls);
+                    if (action == "delete")
+                    { Assert.True(renderer.Button("Review release").Disabled); await renderer.Click("Review release"); }
+                    else
+                    {
+                        if (!renderer.HasButton("Add link")) await renderer.Click("Inspect revision");
+                        Assert.True(renderer.Button("Add link").Disabled); await renderer.Click("Add link");
+                    }
+                    Assert.Equal(calls + 1, writes.Calls);
                 }
                 await renderer.Click("Retrieve outcome");
                 Assert.Contains(committed ? "operation committed" : "operation did not commit", renderer.Text());
@@ -276,39 +295,39 @@ public sealed partial class PostgresProductTests
                     { [nameof(RevisionDetails.ProductId)] = graph.Product.Id, [nameof(RevisionDetails.Id)] = graph.Row.Value.InternalId });
                 var empty = await RevCreate(store, graph.Product.InternalId, "Empty");
                 await renderer.Mount(typeof(RevisionDetails), new() { [nameof(RevisionDetails.ProductId)] = graph.Product.Id, [nameof(RevisionDetails.Id)] = empty.Value.InternalId });
-                Assert.True(renderer.Button("Release revision").Disabled); Assert.Contains("Release blocked", renderer.Text());
+                Assert.True(renderer.Button("Review release").Disabled); Assert.Contains("Release blocked", renderer.Text());
                 var needs = new Retravion.Infrastructure.UserNeed.PostgresUserNeedStore(db.ConnectionString);
                 var reopened = (await needs.Update(graph.Need2, graph.Need2.Need.Reopen("Correction").Value, RevActor, RevTime, "Reopened", "Correction")).Value;
-                await Mount(); Assert.True(renderer.Button("Release revision").Disabled);
+                await Mount(); Assert.True(renderer.Button("Review release").Disabled);
                 Assert.Contains("Release blocked", renderer.Text()); Assert.Contains("User Need N · v2", renderer.Text());
                 reopened = (await needs.Update(reopened, reopened.Need.SubmitForReview().Value, RevActor, RevTime, "InReview")).Value;
-                await renderer.Click("Refresh baseline"); Assert.True(renderer.Button("Release revision").Disabled);
+                await renderer.Click("Refresh baseline"); Assert.True(renderer.Button("Review release").Disabled);
                 reopened = (await needs.Update(reopened, reopened.Need.Approve().Value, RevActor, RevTime, "Approved")).Value;
-                await renderer.Click("Refresh baseline"); Assert.False(renderer.Button("Release revision").Disabled);
-                Assert.Contains("Requirement Parent · v1", renderer.Text()); Assert.Contains("Requirement Parent · v2", renderer.Text());
+                await renderer.Click("Refresh baseline"); Assert.False(renderer.Button("Review release").Disabled);
                 var before = writes.Calls;
-                await renderer.Click("Release revision"); Assert.Contains("Confirm release", renderer.Text());
+                await renderer.Click("Review release"); Assert.Contains("Confirm release", renderer.Text());
+                Assert.Contains("Requirement Parent · v1", renderer.Text()); Assert.Contains("Requirement Parent · v2", renderer.Text());
                 await renderer.Click("Cancel change"); Assert.Equal(before, writes.Calls);
                 Assert.IsType<DraftRevision>((await store.Retrieve(graph.Product.InternalId, graph.Row.Value.InternalId)).Value.Record!.Value);
-                await renderer.Click("Release revision");
+                await renderer.Click("Review release");
                 reopened = (await needs.Update(reopened, reopened.Need.Reopen("Later correction").Value, RevActor, RevTime, "Reopened", "Later correction")).Value;
                 reopened = (await needs.Update(reopened, reopened.Need.SubmitForReview().Value, RevActor, RevTime, "InReview")).Value;
                 await needs.Update(reopened, reopened.Need.Approve().Value, RevActor, RevTime, "Approved");
-                await renderer.Click("Confirm change"); Assert.Contains("baseline changed", renderer.Text());
+                await renderer.Click("Confirm release"); Assert.Contains("baseline changed", renderer.Text());
                 Assert.IsType<DraftRevision>((await store.Retrieve(graph.Product.InternalId, graph.Row.Value.InternalId)).Value.Record!.Value);
-                await renderer.Click("Refresh baseline"); await renderer.Click("Release revision");
+                await renderer.Click("Refresh baseline"); await renderer.Click("Review release");
                 writes.Store = new PostgresRevisionStore(db.ConnectionString, async (t, token) =>
                 { if (committed) await t.CommitAsync(token); throw new IOException("private provider details"); });
                 before = writes.Calls;
-                await renderer.Click("Confirm change"); Assert.Equal(before + 1, writes.Calls);
+                await renderer.Click("Confirm release"); Assert.Equal(before + 1, writes.Calls);
                 Assert.Contains("could not be confirmed", renderer.Text()); Assert.Contains("No automatic retry", renderer.Text());
-                Assert.True(renderer.Button("Release revision").Disabled); Assert.True(renderer.Button("Add exact selection").Disabled);
-                await renderer.Click("Release revision"); await renderer.Click("Add exact selection"); Assert.Equal(before + 1, writes.Calls);
+                Assert.True(renderer.Button("Review release").Disabled); Assert.True(renderer.Button("Manage links").Disabled);
+                await renderer.Click("Review release"); Assert.Equal(before + 1, writes.Calls);
                 await renderer.Click("Retrieve outcome"); Assert.Contains(committed ? "operation committed" : "operation did not commit", renderer.Text());
                 Assert.Equal(before + 1, writes.Calls); writes.Store = store;
-                if (!committed) { await renderer.Click("Release revision"); await renderer.Click("Confirm change"); }
+                if (!committed) { await renderer.Click("Review release"); await renderer.Click("Confirm release"); }
                 Assert.Contains("Frozen release evidence", renderer.Text()); Assert.Contains("permanently protected", renderer.Text());
-                Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.OnClick.HasDelegate);
+                Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.OnClick.HasDelegate && b.Variant == Variant.Filled);
                 Assert.IsType<ReleasedRevision>((await store.Retrieve(graph.Product.InternalId, graph.Row.Value.InternalId)).Value.Record!.Value);
                 navigation.Go($"revisions/edit?product={graph.Product.Id}&id={graph.Row.Value.InternalId}");
                 await renderer.Mount(typeof(RevisionEditor), new() { [nameof(RevisionEditor.ProductId)] = graph.Product.Id, [nameof(RevisionEditor.Id)] = graph.Row.Value.InternalId });
@@ -365,8 +384,10 @@ public sealed partial class PostgresProductTests
             Assert.IsType<DraftRevision>(first.Value); Assert.Equal(source.Value.Selections.ToArray(), first.Value.Selections.ToArray());
             Assert.Equal("UI copy description", first.Value.Description);
             await renderer.Mount(typeof(RevisionDetails), new() { [nameof(RevisionDetails.ProductId)] = g.Product.Id, [nameof(RevisionDetails.Id)] = first.Value.InternalId });
+            await RevisionTab(renderer, 2);
             Assert.Contains("Copied from Released revision", renderer.Text()); Assert.Contains(sourceId.ToString(), renderer.Text());
-            Assert.Contains("Full current Draft closure", renderer.Text()); Assert.DoesNotContain("Frozen release evidence", renderer.Text());
+            await RevisionTab(renderer, 1);
+            Assert.Contains("Complete outgoing baseline", renderer.Text()); Assert.DoesNotContain("Frozen release evidence", renderer.Text());
             foreach (var committed in new[] { false, true })
             {
                 await MountCopy(sourceId);

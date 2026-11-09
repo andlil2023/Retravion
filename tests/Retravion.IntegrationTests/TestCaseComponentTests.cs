@@ -391,6 +391,7 @@ public sealed partial class PostgresProductTests
                     (attribute is null || attrs.Any(frame => frame.AttributeName == attribute && Equals(frame.AttributeValue, value))));
             return DispatchEventAsync(attributes.Single(frame => frame.AttributeName == name).AttributeEventHandlerId, null, args);
         }
+        internal bool HasButton(string label) => Components<MudButton>().Any(button => ButtonText(button) == label);
         internal MudButton Button(string label) => Components<MudButton>().Single(button => ButtonText(button) == label);
         internal Task Click(string label) => Button(label).OnClick.InvokeAsync(new MouseEventArgs());
         private string ButtonText(MudButton button) => Text(Frames(root).Single(frame => frame.FrameType == RenderTreeFrameType.Component && ReferenceEquals(frame.Component, button)).ComponentId).Trim();

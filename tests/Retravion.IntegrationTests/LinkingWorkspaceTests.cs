@@ -46,6 +46,20 @@ public sealed partial class PostgresProductTests
             {
                 await renderer.Mount(typeof(RelationshipLinks), Parameters(root));
                 if (table) await renderer.Click("Table view");
+                else
+                {
+                    await renderer.Components<MudIconButton>().Single(b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString() == "Zoom out").OnClick.InvokeAsync(new MouseEventArgs());
+                    await renderer.Components<MudIconButton>().Single(b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString() == "Expand diagram height").OnClick.InvokeAsync(new MouseEventArgs());
+                    void AssertViewState()
+                    {
+                        Assert.Contains("90%", renderer.Text());
+                        Assert.Contains(renderer.Components<MudIconButton>(), b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString() == "Restore diagram height");
+                    }
+                    AssertViewState();
+                    await renderer.Click("Table view"); await renderer.Click("Graph view"); AssertViewState();
+                    await ExplorationClick(renderer, "Expand User Need N · v1"); AssertViewState();
+                    await ExplorationClick(renderer, "Collapse User Need N · v1"); AssertViewState();
+                }
                 Assert.All(renderer.Components<MudButton>().Where(b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString()?.StartsWith("Inspect ") == true), b =>
                 {
                     Assert.Equal(Variant.Text, b.Variant);

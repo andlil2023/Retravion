@@ -1,0 +1,22 @@
+.graph-controls { display:flex; align-items:center; justify-content:flex-end; gap:.25rem; padding:.25rem .5rem; border-top:1px solid var(--mud-palette-divider); }
+.graph-controls > span { font-size:.75rem; min-width:3.5ch; }
+.graph-scroll { height:clamp(390px,65dvh,850px); overflow:auto; background-color:var(--mud-palette-background); background-image:radial-gradient(var(--mud-palette-divider) 1px,transparent 1px); background-size:20px 20px; }
+.graph-scroll.tall { height:85dvh; }
+.graph-extent { position:relative; }
+.graph-canvas { position:absolute; transform-origin:top left; }
+.graph-connectors { position:absolute; inset:0; pointer-events:none; }
+.graph-line { fill:none; stroke:var(--mud-palette-text-secondary); stroke-width:1.2; }
+.derived-line { stroke-dasharray:5 4; }
+.graph-connectors marker path { fill:var(--mud-palette-text-secondary); }
+.edge-label { font-size:10px; fill:var(--mud-palette-text-secondary); paint-order:stroke; stroke:var(--mud-palette-background); stroke-width:5px; stroke-linejoin:round; }
+.entity-node { position:absolute; width:250px; height:168px; border:1px solid var(--mud-palette-text-secondary); border-radius:3px; background:var(--mud-palette-surface); overflow:hidden; }
+.focus-node { border:2px solid var(--mud-palette-primary); }
+.selected-node { outline:2px solid var(--mud-palette-secondary); outline-offset:4px; }
+.entity-node ::deep .node-select { width:100%; height:132px; padding:10px 12px; text-align:left; text-transform:none; letter-spacing:normal; justify-content:flex-start; color:var(--mud-palette-text-primary); border-radius:0; }
+.node-content { display:flex; flex-direction:column; align-items:flex-start; gap:3px; min-width:0; width:100%; }
+.node-content strong { font-size:.85rem; }
+.node-title { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.35; font-size:.76rem; overflow-wrap:anywhere; }
+.node-meta { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.65rem; color:var(--mud-palette-text-secondary); }
+.eyebrow { font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; color:var(--mud-palette-text-secondary); }
+.node-footer { border-top:1px solid var(--mud-palette-divider); display:block; padding:6px; text-align:center; font-size:.65rem; color:var(--mud-palette-text-secondary); }
+.graph-scroll:focus-visible { outline:2px solid var(--mud-palette-primary); outline-offset:-2px; }

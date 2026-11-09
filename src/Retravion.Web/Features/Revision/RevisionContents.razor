@@ -1,0 +1,27 @@
+@if (Searchable)
+{
+    <MudTextField T="string" @bind-Value="_search" Label="Search contents by ID or title" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" />
+}
+<MudTable T="RevisionBaselineMember" Items="Filtered" GroupBy="_groups" Dense="true" Hover="true" Elevation="0" aria-label="Complete revision baseline">
+    <GroupHeaderTemplate><MudTh colspan="4">@context.Key</MudTh></GroupHeaderTemplate>
+    <HeaderContent><MudTh>Exact version</MudTh><MudTh>Title</MudTh><MudTh>State</MudTh><MudTh>Membership</MudTh></HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Exact version">
+            @if (Inspect.HasDelegate)
+            { <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => Inspect.InvokeAsync(context.Endpoint))" aria-label="@($"Inspect {RevisionPresentation.Label(context)}")">@RevisionPresentation.Label(context)</MudButton> }
+            else { <MudLink Href="@RevisionPresentation.EndpointPath(context.Endpoint)">@RevisionPresentation.Label(context)</MudLink> }
+        </MudTd>
+        <MudTd DataLabel="Title">@context.Title</MudTd>
+        <MudTd DataLabel="State">@RevisionPresentation.State(context.Status)</MudTd>
+        <MudTd DataLabel="Membership">@(context.Explicit ? "Selected" : "Included through links")</MudTd>
+    </RowTemplate>
+    <NoRecordsContent><MudText>@(Members.Count == 0 ? "Empty baseline." : "No matching contents.")</MudText></NoRecordsContent>
+</MudTable>
+@code {
+    [Parameter] public IReadOnlyList<RevisionBaselineMember> Members { get; set; } = [];
+    [Parameter] public bool Searchable { get; set; } = true;
+    [Parameter] public EventCallback<RevisionSelection> Inspect { get; set; }
+    private string _search = "";
+    private IEnumerable<RevisionBaselineMember> Filtered => Members.Where(m => m.Identifier.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) || m.Title.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase));
+    private readonly TableGroupDefinition<RevisionBaselineMember> _groups = new() { GroupName = "Record type", Expandable = false, Indentation = false, Selector = m => RevisionPresentation.KindLabel(m.Endpoint.Kind) };
+}

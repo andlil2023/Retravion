@@ -1,0 +1,116 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="graph-controls" role="group" aria-label="Diagram controls">
+    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Remove" OnClick="@(() => Zoom(-10))" Disabled="@(_zoom <= 50)" aria-label="Zoom out" />
+    <span>@(_zoom)%</span>
+    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.Add" OnClick="@(() => Zoom(10))" Disabled="@(_zoom >= 150)" aria-label="Zoom in" />
+    <MudButton Size="Size.Small" OnClick="Reset">Reset view</MudButton>
+    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Outlined.OpenInFull" OnClick="ToggleHeight" aria-label="@(_tall ? "Restore diagram height" : "Expand diagram height")" aria-pressed="@_tall" />
+</div>
+@if (_notice is not null) { <p role="status">@_notice</p> }
+<div class="graph-scroll @(_tall ? "tall" : "")" @ref="_element" role="region" aria-label="Explored relationship graph" tabindex="0">
+    <div class="graph-extent" style="@($"width:{_width * _zoom / 100}px;height:{_height * _zoom / 100}px")">
+        <div class="graph-canvas" style="@($"width:{_width}px;height:{_height}px;transform:scale({(_zoom / 100.0).ToString(System.Globalization.CultureInfo.InvariantCulture)})")">
+            <svg class="graph-connectors" width="@_width" height="@_height" aria-hidden="true">
+                <defs><marker id="link-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>
+                @foreach (var edge in Edges)
+                {
+                    var line = Connector(edge);
+                    <g><path data-owner="@edge.Owner" data-target="@edge.Target" class="graph-line @(edge.Dashed ? "derived-line" : "")" d="@line.Path" marker-end="url(#link-arrow)" /><text data-relationship="@edge.Label" class="edge-label" x="@line.X" y="@line.Y" text-anchor="@line.Anchor">@edge.Label</text></g>
+                }
+            </svg>
+            @foreach (var node in Nodes)
+            {
+                var position = _positions[node.Key];
+                <article data-version="@node.Key" data-focus="@(node.Key == Focus ? "true" : "false")" class="entity-node @(node.Key == Focus ? "focus-node" : "") @(node.Key == Selected ? "selected-node" : "")" style="@($"left:{position.X}px;top:{position.Y}px")">
+                    <MudButton Class="node-select" Variant="Variant.Text" OnClick="@(() => Select.InvokeAsync(node.Key))" Disabled="Busy" aria-label="@($"Inspect {node.Label}")" aria-pressed="@(node.Key == Selected)">
+                        <span class="node-content"><span class="eyebrow">@node.Kind @(node.Key == Focus ? "· In focus" : "")</span><strong>@node.Identifier</strong><span class="node-title">@node.Title</span><span class="node-meta">@node.VersionState</span><span class="node-meta">@node.Product</span></span>
+                    </MudButton>
+                    @if (NodeActions is not null) { @NodeActions(node.Key) }
+                    else { <span class="node-footer">@(node.Key == Focus ? "Starting record" : "Select to inspect")</span> }
+                </article>
+            }
+        </div>
+    </div>
+</div>
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<(Guid Key, string Kind, string Identifier, string Title, string VersionState, string Product, string Label)> Nodes { get; set; } = [];
+    [Parameter, EditorRequired] public IReadOnlyList<(Guid Owner, Guid Target, string Label, bool Dashed)> Edges { get; set; } = [];
+    [Parameter] public Guid Focus { get; set; }
+    [Parameter] public Guid Selected { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<Guid> Select { get; set; }
+    [Parameter] public RenderFragment<Guid>? NodeActions { get; set; }
+    [Parameter] public int ZoomPercent { get; set; } = 100;
+    [Parameter] public EventCallback<int> ZoomPercentChanged { get; set; }
+    [Parameter] public bool Tall { get; set; }
+    [Parameter] public EventCallback<bool> TallChanged { get; set; }
+    private readonly Dictionary<Guid, (int X, int Y)> _positions = [];
+    private int _width, _height, _zoom = 100;
+    private bool _center, _tall, _disposed;
+    private string? _shape, _notice;
+    private ElementReference _element;
+    private IJSObjectReference? _module;
+    private async Task Zoom(int delta) { _zoom = Math.Clamp(_zoom + delta, 50, 150); _center = true; await ZoomPercentChanged.InvokeAsync(_zoom); }
+    private async Task Reset() { _zoom = 100; _center = true; await ZoomPercentChanged.InvokeAsync(_zoom); }
+    private async Task ToggleHeight() { _tall = !_tall; await TallChanged.InvokeAsync(_tall); }
+    protected override void OnParametersSet()
+    {
+        _center |= _zoom != ZoomPercent;
+        _zoom = Math.Clamp(ZoomPercent, 50, 150); _tall = Tall;
+        var shape = $"{Focus}:{string.Join(';', Nodes.Select(n => n.Key))}:{string.Join(';', Edges)}";
+        _center |= shape != _shape; _shape = shape; _positions.Clear();
+        var depths = new Dictionary<Guid, int> { [Focus] = 0 };
+        var queue = new Queue<Guid>([Focus]);
+        while (queue.TryDequeue(out var current))
+            foreach (var edge in Edges.Where(e => e.Owner == current || e.Target == current))
+            {
+                var outgoing = edge.Owner == current; var other = outgoing ? edge.Target : edge.Owner;
+                if (depths.TryAdd(other, depths[current] + (outgoing ? 1 : -1))) queue.Enqueue(other);
+            }
+        var columns = Nodes.GroupBy(n => depths.GetValueOrDefault(n.Key, 1)).OrderBy(g => g.Key).ToArray();
+        _height = Math.Max(480, columns.Select(g => g.Count()).DefaultIfEmpty(0).Max() * 210 + 80);
+        var left = Edges.Any(e => depths.GetValueOrDefault(e.Owner, 1) == depths.GetValueOrDefault(e.Target, 1)) ? 300 : 60;
+        var min = columns.Select(g => g.Key).DefaultIfEmpty(0).Min();
+        _width = Math.Max(960, (columns.Select(g => g.Key).DefaultIfEmpty(0).Max() - min + 1) * 420 + left - 60);
+        foreach (var column in columns)
+        {
+            var y = (_height - column.Count() * 210) / 2;
+            foreach (var node in column.OrderBy(n => n.Identifier).ThenBy(n => n.VersionState))
+            { _positions[node.Key] = (left + (column.Key - min) * 420, y); y += 210; }
+        }
+    }
+    private (string Path, int X, int Y, string Anchor) Connector((Guid Owner, Guid Target, string Label, bool Dashed) edge)
+    {
+        var a = _positions[edge.Owner]; var b = _positions[edge.Target]; var same = a.X == b.X; var right = b.X > a.X;
+        var x1 = a.X + (right ? 250 : 0); var x2 = b.X + (right || same ? 0 : 250);
+        var y1 = a.Y + 76; var y2 = b.Y + 76; var mid = same ? a.X - 30 : (x1 + x2) / 2;
+        return ($"M{x1},{y1} H{mid} V{y2} H{x2}", same ? mid - 8 : mid, (y1 + y2) / 2 - 8, same ? "end" : "middle");
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed || !_center) return;
+        _center = false;
+        try
+        {
+            if (_module is null)
+            {
+                var module = await JS.InvokeAsync<IJSObjectReference>("import", "./Features/Relationships/RelationshipLinks.razor.js");
+                if (_disposed) { await module.DisposeAsync(); return; }
+                _module = module;
+            }
+            await _module.InvokeVoidAsync("centerFocus", _element);
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException)
+        { _notice = "Automatic centering unavailable. Scroll to the focused record or use the table view."; if (!_disposed) await InvokeAsync(StateHasChanged); }
+    }
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        if (_module is null) return;
+        try { await _module.DisposeAsync(); } catch (JSDisconnectedException) { }
+    }
+}
