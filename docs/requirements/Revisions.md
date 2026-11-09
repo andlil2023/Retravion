@@ -91,6 +91,10 @@ This specification completes baseline-selection and release-workflow decisions a
 
 These are revision-specific audit decisions, not automatic adoption of Product REQ-SW-AUDIT-007–009 or an auditing framework. Reuse the common audit submission contract; any required public-contract extension needs separate approval.
 
+## Product Area Evidence — PBI #187
+
+[Product Areas](Product%20Areas.md) REQ-AREA-004 specifies future retention of each classified Requirement/Test Case version's release-time area code and label, or explicit absence, across the complete frozen closure. Later area renames must not rewrite a released view. Area evidence, release and required history/audit are atomic; see TC-AREA-005–010. This documentation does not implement area snapshots or modify the established complete-baseline protection rule.
+
 ## Reopening and Runtime Integration Boundaries
 
 [User Need Management](User%20Needs.md) REQ-NEED-003, [Requirement Management](Requirements.md) REQ-REQ-003 and [Test Case Management](Test%20Cases.md) REQ-TC-003 already specify eligible reopening: only the latest Approved version, no newer version, no direct/indirect Released-revision protection, approval authority and a mandatory reason. Reopening retains identity/history and invalidates current approval. Referencing owners keep their approvals, but release waits until the entire closure is Approved again. Their feature-specific audit rules remain applicable; revision release must not replace them with duplicate entity-edit events.

@@ -130,6 +130,8 @@ Specified by [#174](https://github.com/andlil2023/Retravion/issues/174); impleme
 
 ## Boundaries and Open Details
 
+PBI #187 separately specifies future version-specific Product area classification and filtering in [Product Areas](Product%20Areas.md), including successor inheritance and released evidence. It changes no runtime functionality or existing MCP contract. The following first-increment boundaries remain historical scope, not a claim that later increments were never implemented.
+
 The first increment excludes relationships, automatic ID suggestions, Test Cases, separate verification criteria, and Product revision integration. The test specifications linked above are repository verification plans, not an application Test Case feature. Requirements remain a flat Product-scoped list.
 
 The approved [Relationship Management](Relationships.md) specification defines a separate follow-up for the shared graphical relationship page, Requirement–User Need links, and parent–child Requirement links. This versioning specification does not implement relationship storage or interfaces.

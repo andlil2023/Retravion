@@ -141,7 +141,7 @@ No application functionality is implemented by #144. Execution/results, Test Run
 
 REQ-TC-007 specifies approved future MCP list/read/create/Draft-edit contracts from #158, including web-only lifecycle/link boundaries and per-write audit plans. This documentation introduces no Test Case MCP operations. Public runtime contract implementation requires a separately approved PBI; preserve permissions, validation, retirement, concurrency and release protection.
 
-Product-scoped shared module grouping (for example AUTH/AUDIT), filtering by module, and optional module-qualified IDs such as TC-AUTH-001 are deferred proposals, not approved implementation. Moving items, module renaming, and numbering rules require later decisions; current TC IDs remain simple and immutable.
+PBI #187 specifies future broad Product areas and filtering in [Product Areas](Product%20Areas.md), independently for each exact Test Case and Requirement version. This is classification metadata, not a module or a change to TC IDs. Product-scoped module entities and module-qualified IDs such as TC-AUTH-001 remain deferred proposals, not approved implementation; current TC IDs remain simple and immutable.
 
 RLC-Tracker's `docs/adr/0052-test-case-traceability-is-versioned-at-both-ends.md` and `TestCaseLifecycleHandler.cs` were reference material for exact-version links and copying structured steps/links into successors. Its architecture, permissions, and audit implementation are not adopted automatically; the approved interview governs this specification. Authored procedures and links are not evidence of execution, passing results, or verified coverage.
 
