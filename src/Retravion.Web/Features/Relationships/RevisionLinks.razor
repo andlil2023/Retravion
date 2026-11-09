@@ -1,0 +1,191 @@
+@using Retravion.Application.Revision
+@using Retravion.Domain.Revision
+@using Retravion.Web.Features.Revision
+@using Retravion.Web.Features.Product
+@inject RevisionOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Revision links · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="@(_row?.Value is ReleasedRevision ? "View baseline" : "Manage links")" BackHref="@RevisionPresentation.DetailsPath(ProductId ?? "", Id)" BackText="Revision" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_message is not null) { <MudAlert Severity="Severity.Info" role="status">@_message</MudAlert> }
+@if (_mustRetrieve)
+{ <p>No automatic retry. Retrieve the outcome before making another change.</p><MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Retrieve">@(_uncertain ? "Retrieve outcome" : "Retrieve revision")</MudButton><MudLink Href="@($"{RevisionPresentation.WorkspacePath(ProductId ?? "", Id)}&operation={_operation}")">Outcome retrieval link</MudLink> }
+@if (_row is not null && _product is not null)
+{
+    <div class="focus-heading"><div><span class="eyebrow">Revision in focus · @_row.Value.State</span><h2>@_row.Value.Identifier</h2></div><span class="muted">@_product.Id · @_product.Name</span></div>
+    <p class="scope-note">@(_row.Value is ReleasedRevision ? "Frozen release evidence — read-only. No current relationship traversal." : "Revision membership only. Selecting records does not change their content or ordinary links.") This diagram shows selected and derived membership, not inter-record link topology. The complete baseline contains @Members.Count exact versions.</p>
+    @if (!_product.IsActive) { <MudAlert Severity="Severity.Info">Product retired: read-only.</MudAlert> }
+    @if (_row.Deleted) { <p>Deleted Draft — retained evidence. Open revision history for prior selections.</p> }
+    <div class="revision-workspace" aria-busy="@_busy">
+        <section class="diagram-panel" aria-label="Revision membership workspace">
+            <div class="view-controls" role="group" aria-label="Relationship view">
+                <MudButton Size="Size.Small" Variant="@(!_table ? Variant.Outlined : Variant.Text)" Disabled="_busy" OnClick="@(() => ChangeView(false))" aria-pressed="@(!_table)">Graph view</MudButton>
+                <MudButton Size="Size.Small" Variant="@(_table ? Variant.Outlined : Variant.Text)" Disabled="_busy" OnClick="@(() => ChangeView(true))" aria-pressed="@_table">Table view</MudButton>
+            </div>
+            <div class="membership-search"><MudTextField T="string" Value="@_memberSearch" ValueChanged="SearchMembers" Label="Search baseline ID or title" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" /></div>
+            @if (_table) { <RevisionContents Members="PageMembers" Searchable="false" Inspect="Inspect" /> }
+            else { <WorkspaceGraph @bind-ZoomPercent="_zoom" @bind-Tall="_tall" Nodes="GraphNodes" Edges="GraphEdges" Focus="Id" Selected="@(_inspected?.Endpoint.VersionId ?? Id)" Busy="_busy" Select="InspectKey" /> }
+            <div class="diagram-footer"><span role="status">@FilteredMembers.Count matching of @Members.Count baseline records · Page @(_page + 1) of @PageCount</span>
+                @if (PageCount > 1) { <MudButton Size="Size.Small" Disabled="@(_busy || _page == 0)" OnClick="@(() => ChangePage(-1))">Previous records</MudButton><MudButton Size="Size.Small" Disabled="@(_busy || _page + 1 >= PageCount)" OnClick="@(() => ChangePage(1))">Next records</MudButton> }
+                <p class="muted">Other pages or filtered records remain in the baseline. This view never determines release readiness.</p>
+            </div>
+        </section>
+        <aside class="inspector" aria-label="Selected record inspector">
+            @if (_pending is not null)
+            {
+                <MudPaper Class="pa-4" Elevation="0">
+                    <span class="eyebrow">@(_review ? "Review selection" : "Choose an existing exact version")</span><h3>@(_pending == "add" ? "Add revision selection" : _pending == "remove" ? "Remove revision selection" : "Replace revision selection")</h3>
+                    @if (_target is not null) { <p>Old selection: @RevisionPresentation.Label(_target)</p><p>@_target.Title</p> }
+                    @if (!_review)
+                    {
+                        <MudSelect T="RevisionEntityKind?" @bind-Value="_kind" Label="Record type" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"><MudSelectItem T="RevisionEntityKind?" Value="@((RevisionEntityKind?)null)">All types</MudSelectItem>@foreach (var kind in Enum.GetValues<RevisionEntityKind>()) { <MudSelectItem T="RevisionEntityKind?" Value="@((RevisionEntityKind?)kind)">@RevisionPresentation.KindLabel(kind)</MudSelectItem> }</MudSelect>
+                        <MudTextField T="string" @bind-Value="_search" Label="Search ID or title" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+                        <div class="candidates" role="group" aria-label="Matching exact versions">
+                            @foreach (var candidate in MatchingCandidates)
+                            { <MudButton Variant="@(_candidate?.Endpoint == candidate.Endpoint ? Variant.Outlined : Variant.Text)" Class="candidate" Disabled="_busy" OnClick="@(() => Choose(candidate))" data-version="@candidate.Endpoint.VersionId" aria-label="@($"Select {RevisionPresentation.Label(candidate)}")" aria-pressed="@(_candidate?.Endpoint == candidate.Endpoint)"><span>@RevisionPresentation.Label(candidate)<br />@candidate.Title · @RevisionPresentation.State(candidate.Status)</span></MudButton> }
+                        </div>
+                        <p class="muted">@MatchingCandidates.Count matching exact versions. All matching versions are available by scrolling.</p>
+                        @if (_candidate is not null) { <p>Selected: @RevisionPresentation.Label(_candidate) · @_candidate.Title</p> }
+                    }
+                    else
+                    {
+                        <p>Revision: @_row.Value.Identifier</p>
+                        @if (_candidate is not null) { <p>New selection: @RevisionPresentation.Label(_candidate) · @_candidate.Title · @RevisionPresentation.State(_candidate.Status)</p><MudLink Href="@RevisionPresentation.EndpointPath(_candidate.Endpoint)" Target="_blank" rel="noopener">Inspect selected exact version</MudLink> }
+                        <p>This changes revision membership only. Referenced records are not edited. Replacement is one atomic change.</p>
+                    }
+                </MudPaper>
+                <div class="inspector-actions">
+                    @if (_review) { <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="Locked" OnClick="Confirm">Confirm selection</MudButton> }
+                    else { <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(Locked || _candidate is null)" OnClick="Review">Review selection</MudButton> }
+                    <MudButton Disabled="_busy" OnClick="Cancel">Cancel selection</MudButton>
+                </div>
+            }
+            else if (_inspected is { } member)
+            {
+                <MudPaper Class="pa-4" Elevation="0"><span class="eyebrow">@RevisionPresentation.KindLabel(member.Endpoint.Kind)</span><h3>@RevisionPresentation.Label(member)</h3><p>@member.Title</p><p>@RevisionPresentation.State(member.Status)</p><p>@(member.Explicit ? "Selected" : "Included through links")</p>
+                    <MudLink Href="@RevisionPresentation.EndpointPath(member.Endpoint)">Inspect exact version</MudLink>
+                    @if (_row.Value is DraftRevision) { <p><MudLink Href="@EntityWorkspace(member)">Focus here — record links</MudLink></p> }
+                    else { <p class="muted">Frozen baseline membership. Historical inter-record link topology is not stored in this view.</p> }
+                </MudPaper>
+                @if (CanChange && member.Explicit) { <div class="inspector-actions"><MudButton Size="Size.Small" Disabled="Locked" OnClick="@(() => Begin("remove", member))">Remove selection</MudButton><MudButton Size="Size.Small" Disabled="Locked" OnClick="@(() => Begin("replace", member))">Replace selection</MudButton></div> }
+                @if (!member.Explicit) { <p class="scope-note">Indirect membership follows the selected roots. It cannot be removed here as an explicit selection.</p> }
+                <div class="inspector-actions"><MudButton Size="Size.Small" OnClick="InspectRevision" Disabled="_busy">Inspect revision</MudButton></div>
+            }
+            else
+            {
+                <MudPaper Class="pa-4" Elevation="0"><span class="eyebrow">Revision</span><h3>@_row.Value.Identifier</h3><p>@_row.Value.Description</p><p>@_row.Value.State</p><p>@_row.Value.Selections.Length selected · @Members.Count total baseline records</p><MudLink Href="@RevisionPresentation.DetailsPath(_product.Id, Id)">Revision details</MudLink></MudPaper>
+                @if (CanChange) { <div class="inspector-actions"><MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="Locked" OnClick="@(() => Begin("add"))">Add link</MudButton></div> }
+                else { <p class="scope-note">Read-only membership.</p> }
+            }
+        </aside>
+    </div>
+}
+else if (_error is null) { <p role="status">Loading revision membership…</p> }
+@code {
+    [Parameter] public string? ProductId { get; set; }
+    [Parameter] public Guid Id { get; set; }
+    [Parameter] public Guid? OperationId { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private RevisionSnapshot? _row, _expected;
+    private RevisionBaseline? _baseline;
+    private IReadOnlyList<RevisionBaselineMember> _candidates = [];
+    private RevisionBaselineMember? _inspected, _target, _candidate;
+    private RevisionEntityKind? _kind;
+    private string? _error, _message, _pending;
+    private string _search = "", _memberSearch = "";
+    private bool _busy, _mustRetrieve, _uncertain, _review, _table, _tall;
+    private int _page, _epoch, _read, _zoom = 100;
+    private Guid _operation;
+    private bool CanChange => _product?.IsActive == true && _row is { Deleted: false, Value: DraftRevision };
+    private bool Locked => _busy || _mustRetrieve;
+    private IReadOnlyList<RevisionBaselineMember> Members => _baseline?.Members ?? [];
+    private IReadOnlyList<RevisionBaselineMember> FilteredMembers => Members.Where(m => m.Identifier.Contains(_memberSearch.Trim(), StringComparison.OrdinalIgnoreCase) || m.Title.Contains(_memberSearch.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
+    private IReadOnlyList<RevisionBaselineMember> PageMembers => FilteredMembers.Skip(_page * 20).Take(20).ToArray();
+    private int PageCount => Math.Max(1, (FilteredMembers.Count + 19) / 20);
+    private IReadOnlyList<RevisionBaselineMember> MatchingCandidates => _candidates.Where(m => (_kind is null || m.Endpoint.Kind == _kind) && (m.Identifier.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) || m.Title.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase))).ToArray();
+    private IReadOnlyList<(Guid Key, string Kind, string Identifier, string Title, string VersionState, string Product, string Label)> GraphNodes => new[] { (Id, "Revision", _row!.Value.Identifier, _row.Value.Description, _row.Value.State, $"{_product!.Id} · {_product.Name}", $"Revision {_row.Value.Identifier}") }.Concat(PageMembers.Select(m => (m.Endpoint.VersionId, RevisionPresentation.KindLabel(m.Endpoint.Kind), m.Identifier, m.Title, $"v{m.Endpoint.VersionNumber} · {RevisionPresentation.State(m.Status)} · {(m.Explicit ? "Selected" : "Included through links")}", $"{_product.Id} · {_product.Name}", RevisionPresentation.Label(m)))).ToArray();
+    private IReadOnlyList<(Guid Owner, Guid Target, string Label, bool Dashed)> GraphEdges => PageMembers.Select(m => (Id, m.Endpoint.VersionId, m.Explicit ? "Selected" : "Included through links", !m.Explicit)).ToArray();
+    private static string EntityWorkspace(RevisionBaselineMember m) => $"/products/links?kind={(m.Endpoint.Kind == RevisionEntityKind.UserNeed ? "user-need" : m.Endpoint.Kind == RevisionEntityKind.Requirement ? "requirement" : "test-case")}&id={m.Endpoint.InternalId}&version={m.Endpoint.VersionId}";
+    protected override async Task OnParametersSetAsync()
+    {
+        ++_epoch; _error = _message = null; _row = null; _baseline = null; _inspected = null; _mustRetrieve = _uncertain = false; _operation = OperationId ?? Guid.Empty; _page = 0; _memberSearch = ""; Cancel();
+        var epoch = _epoch; var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, ProductId);
+        if (epoch != _epoch) return;
+        if (product.IsFailure) { _error = product.Error; return; }
+        _product = product.Value; await Load(OperationId);
+    }
+    private async Task Load(Guid? operation = null)
+    {
+        var epoch = _epoch; var read = ++_read; var product = _product!; var id = Id;
+        _row = null; _baseline = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var found = await Operations.Retrieve(actor, product.InternalId, id, operation);
+        if (epoch != _epoch || read != _read) return;
+        if (found.IsFailure) { _error = found.Error; return; }
+        var row = found.Value.Record;
+        if (row is null) { _error = "Revision not found."; return; }
+        RevisionBaseline? baseline = null;
+        if (!row.Deleted)
+        {
+            var result = await Operations.Baseline(actor, product.InternalId, id);
+            if (epoch != _epoch || read != _read) return;
+            if (result.IsFailure) { _error = result.Error; return; }
+            baseline = result.Value; row = baseline.Revision;
+        }
+        _row = row; _baseline = baseline; _page = Math.Clamp(_page, 0, PageCount - 1);
+        _inspected = Members.FirstOrDefault(m => m.Endpoint == _inspected?.Endpoint);
+        if (operation is not null) _message = found.Value.Operation is null ? "The attempted operation did not commit. Current state retrieved." : "The attempted operation committed. Current state retrieved.";
+    }
+    private void InspectKey(Guid key) { if (key == Id) InspectRevision(); else if (PageMembers.FirstOrDefault(m => m.Endpoint.VersionId == key) is { } member) Inspect(member.Endpoint); }
+    private void InspectRevision() { if (!_busy) { Cancel(); _inspected = null; } }
+    private void Inspect(RevisionSelection endpoint) { if (!_busy) { Cancel(); _inspected = Members.FirstOrDefault(m => m.Endpoint == endpoint); } }
+    private void SearchMembers(string value) { if (!_busy) { _memberSearch = value; _page = 0; _inspected = null; } }
+    private async Task ChangeView(bool table) { if (_busy) return; Cancel(); _table = table; await Load(); }
+    private async Task ChangePage(int delta) { if (_busy) return; Cancel(); _page += delta; _inspected = null; await Load(); }
+    private void Choose(RevisionBaselineMember member) { if (!Locked) { _candidate = member; _review = false; } }
+    private void Cancel() { _pending = null; _target = _candidate = null; _expected = null; _candidates = []; _kind = null; _search = ""; _review = false; }
+    private async Task Begin(string action, RevisionBaselineMember? target = null)
+    {
+        if (Locked || !CanChange || action is not ("add" or "remove" or "replace") || (action != "add" && target?.Explicit != true)) return;
+        Cancel(); _error = _message = null; _pending = action; _target = target; _expected = _row;
+        if (action == "remove") { _review = true; return; }
+        _busy = true; var epoch = _epoch;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var result = await Operations.Candidates(actor, _product!.InternalId);
+            if (epoch != _epoch) return;
+            if (result.IsFailure) { _error = result.Error; Cancel(); }
+            else _candidates = result.Value;
+        }
+        finally { _busy = false; }
+    }
+    private void Review() { if (!Locked && _pending is not null && _candidate is not null) _review = true; }
+    private async Task Confirm()
+    {
+        if (Locked || !CanChange || !_review || _expected is null || _pending is null || (_pending != "remove" && _candidate is null) || (_pending != "add" && _target is null)) return;
+        var epoch = _epoch; var expected = _expected; var action = _pending;
+        var target = action == "add" ? _candidate!.Endpoint : _target!.Endpoint; var replacement = action == "replace" ? _candidate!.Endpoint : null;
+        _busy = true; _error = _message = null; _operation = Guid.NewGuid();
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var result = await Operations.Select(actor, _operation, expected, action, target, replacement, true);
+            if (epoch != _epoch) return;
+            Cancel();
+            if (result.IsFailure) { _error = result.Error; _uncertain = result.Error.Contains("could not be confirmed", StringComparison.Ordinal); _mustRetrieve = true; }
+            else { _message = action == "add" ? "Selection added." : action == "remove" ? "Selection removed." : "Selection replaced."; await Load(); }
+        }
+        finally { _busy = false; }
+    }
+    private async Task Retrieve()
+    {
+        if (_busy || !_mustRetrieve) return;
+        _busy = true; _error = null; Cancel();
+        try { await Load(_uncertain ? _operation : null); if (_error is null) _mustRetrieve = _uncertain = false; }
+        finally { _busy = false; }
+    }
+}
