@@ -31,6 +31,10 @@ public sealed partial class PostgresProductTests
             .AddSingleton<AuthenticationStateProvider>(new RequirementAuthentication(actor))
             .AddSingleton(operations).BuildServiceProvider();
 
+    private static string[] VisibleRelationshipNodes(RequirementRenderer renderer) => renderer.Components<MudButton>()
+        .Select(b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString())
+        .Where(label => label?.StartsWith("Inspect ") == true).Select(label => label!).Distinct().Order().ToArray();
+
     // The same exact node may appear at multiple edge endpoints. Either copy controls the shared state.
     private static Task ExplorationClick(RequirementRenderer renderer, string label) => renderer.Components<MudButton>()
         .First(b => b.UserAttributes?.TryGetValue("aria-label", out var value) == true && Equals(value, label))
@@ -90,12 +94,12 @@ public sealed partial class PostgresProductTests
         {
             await renderer.Mount(typeof(RelationshipLinks), Parameters(root));
             Assert.DoesNotContain("Indirect need", renderer.Text());
-            await renderer.Click("Expand Requirement R1 · v1");
+            await ExplorationClick(renderer, "Expand Requirement R1 · v1");
             Assert.Contains("Indirect need", renderer.Text());
             Assert.Contains("Center: User Need N1 · v1", renderer.Text());
             await ExplorationClick(renderer, "Expand User Need N2 · v1");
             await ExplorationClick(renderer, "Expand Requirement R2 · v1");
-            Assert.Contains("4 relationship(s) in the explored view", renderer.Text());
+            Assert.Contains("4 explored relationships", renderer.Text());
             var graphLinks = renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray();
             await renderer.Click("Table view");
             Assert.Equal(4, Assert.Single(renderer.Components<MudTable<RelationshipEdge>>()).Items!.Count());
@@ -186,20 +190,21 @@ public sealed partial class PostgresProductTests
             await renderer.Mount(typeof(RelationshipLinks), Parameters(root));
             Assert.Contains("Showing 20 of 21", renderer.Text());
             Assert.Contains("More relationships are on other pages", renderer.Text());
-            Assert.Contains("Neighborhood not expanded", renderer.Text());
-            var first = renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray();
+            Assert.Contains("Unexpanded neighborhoods", renderer.Text());
+            Assert.Equal(20, renderer.Components<MudButton>().Count(b => b.UserAttributes?.TryGetValue("aria-expanded", out var value) == true && Equals(value, false)));
+            var first = VisibleRelationshipNodes(renderer);
             await renderer.Click("Table view");
             Assert.Equal(20, Assert.Single(renderer.Components<MudTable<RelationshipEdge>>()).Items!.Count());
-            Assert.Equal(first, renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray());
+            Assert.Equal(first, VisibleRelationshipNodes(renderer));
             await renderer.Click("Next relationships");
             Assert.Contains("Page 2 of 2", renderer.Text());
             Assert.Contains("Showing 1 of 21", renderer.Text());
-            var last = renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray();
-            Assert.Equal(21, first.Concat(last).Where(h => h!.StartsWith("/products/links") && h != root.LinksPath).Distinct().Count());
+            var last = VisibleRelationshipNodes(renderer);
+            Assert.Equal(21, first.Concat(last).Where(label => label != "Inspect " + root.Label).Distinct().Count());
             await renderer.Click("Graph view");
-            Assert.Equal(last, renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray());
+            Assert.Equal(last, VisibleRelationshipNodes(renderer));
             await renderer.Click("Previous relationships");
-            Assert.Equal(first, renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray());
+            Assert.Equal(first, VisibleRelationshipNodes(renderer));
         });
         Assert.Empty(renderer.Errors);
     }

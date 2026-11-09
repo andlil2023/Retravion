@@ -176,14 +176,18 @@ public sealed partial class PostgresProductTests
         await renderer.Dispatcher.InvokeAsync(async () =>
         {
             await renderer.Mount(typeof(RelationshipLinks), Parameters(reverse.Value.Root.Center));
-            Assert.Contains("Derived from (center is Source for this copy) → center", renderer.Text());
+            Assert.Contains("Source for", renderer.Text());
+            Assert.Contains(renderer.Elements("text"), e => e.GetValueOrDefault("data-relationship")?.ToString() == "Derived from");
+            Assert.DoesNotContain(renderer.Elements("text"), e => e.GetValueOrDefault("data-relationship")?.ToString() == "Source for");
             Assert.Contains("Copy Product", renderer.Text());
+            await ExplorationClick(renderer, "Inspect " + edge.Owner.Label);
             Assert.Contains(renderer.Components<MudLink>(), l => l.Href == edge.Owner.LinksPath);
-            Assert.Contains(renderer.Components<MudLink>(), l => l.Href == edge.Target.LinksPath);
+            await ExplorationClick(renderer, "Inspect " + edge.Target.Label);
+            Assert.Contains(renderer.Components<MudLink>(), l => l.Href == edge.Target.DetailsPath);
             Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.UserAttributes?.TryGetValue("aria-label", out var label) == true && label?.ToString()?.Contains("Remove Derived from") == true);
             var graphLinks = renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray();
             await renderer.Click("Table view");
-            Assert.Contains("Derived from (center is Source for this copy)", renderer.Text());
+            Assert.Contains("Source for", renderer.Text());
             Assert.Equal(graphLinks, renderer.Components<MudLink>().Select(l => l.Href).Distinct().Order().ToArray());
             var rows = Assert.Single(renderer.Components<MudTable<RelationshipEdge>>()).Items!.ToArray();
             var row = Assert.Single(rows, e => e.IsProvenance);
@@ -198,6 +202,7 @@ public sealed partial class PostgresProductTests
         {
             await chainRenderer.Mount(typeof(RelationshipLinks), Parameters(forward.Value.Root.Center));
             Assert.DoesNotContain("Source need", chainRenderer.Text());
+            await ExplorationClick(chainRenderer, "Inspect " + edge.Target.Label);
             Assert.Contains(chainRenderer.Components<MudLink>(), l => l.Href == edge.Target.LinksPath);
             await ExplorationClick(chainRenderer, "Expand Requirement SRC · v1");
             Assert.Contains("Source need", chainRenderer.Text());

@@ -32,14 +32,50 @@ public sealed partial class PostgresProductTests
             services.AddSingleton<IUserNeedStore>(needs); services.AddSingleton<IUserNeedChangeTransaction>(needs);
         });
 
-    private static Task SelectExact(RequirementRenderer renderer, Guid version) => renderer.Components<MudSelect<Guid?>>()
-        .Single(s => s.Label == "Existing exact version").ValueChanged.InvokeAsync(version);
+    private static IEnumerable<Guid> CandidateVersions(RequirementRenderer renderer) => renderer.Components<MudButton>()
+        .Where(b => b.UserAttributes?.ContainsKey("data-version") == true)
+        .Select(b => Guid.Parse(b.UserAttributes!["data-version"]!.ToString()!));
 
-    private static MudButton ManagementButton(RequirementRenderer renderer, string label) => renderer.Components<MudButton>()
-        .First(b => b.UserAttributes?.TryGetValue("aria-label", out var value) == true && Equals(value, label));
+    private static async Task SelectExact(RequirementRenderer renderer, Guid version)
+    {
+        var candidate = renderer.Components<MudButton>().Single(b =>
+            b.UserAttributes?.TryGetValue("data-version", out var value) == true && value?.ToString() == version.ToString());
+        await candidate.OnClick.InvokeAsync(new MouseEventArgs());
+        await renderer.Click("Review link");
+    }
 
-    private static Task ManagementClick(RequirementRenderer renderer, string label) =>
-        ManagementButton(renderer, label).OnClick.InvokeAsync(new MouseEventArgs());
+    private static MudButton ManagementButton(RequirementRenderer renderer, string label)
+    {
+        // The old direction-based test vocabulary still identifies which endpoint owns the write.
+        // The UI deliberately exposes one Add link action and meaningful relationship choices.
+        if (label.StartsWith("Add outgoing link from ")) label = "Add link for " + label[23..];
+        if (label.StartsWith("Add incoming link to ")) label = "Add link for " + label[21..];
+        return renderer.Components<MudButton>().First(b =>
+            b.UserAttributes?.TryGetValue("aria-label", out var value) == true && Equals(value, label));
+    }
+
+    private static async Task ManagementClick(RequirementRenderer renderer, string label)
+    {
+        if (label.StartsWith("Add outgoing link from ") || label.StartsWith("Add incoming link to "))
+        {
+            var incoming = label.StartsWith("Add incoming link to ");
+            var node = label[(incoming ? 21 : 23)..];
+            if (!renderer.Components<MudButton>().Any(b => b.UserAttributes?.TryGetValue("aria-label", out var value) == true && Equals(value, "Add link for " + node)))
+                await ExplorationClick(renderer, "Inspect " + node);
+            await ManagementButton(renderer, "Add link for " + node).OnClick.InvokeAsync(new MouseEventArgs());
+            if (incoming && node.StartsWith("Requirement "))
+                await renderer.Components<MudSelect<string>>().Single(s => s.Label == "Relationship").ValueChanged.InvokeAsync("child");
+        }
+        else
+        {
+            if (!renderer.Components<MudButton>().Any(b => b.UserAttributes?.TryGetValue("aria-label", out var value) == true && Equals(value, label)))
+            {
+                var owner = label.Split(": ", 2)[1].Split(" → ", 2)[0];
+                await ExplorationClick(renderer, "Inspect " + owner);
+            }
+            await ManagementButton(renderer, label).OnClick.InvokeAsync(new MouseEventArgs());
+        }
+    }
 
     [PostgresFact]
     public async Task LinkManagementAddsAndRemovesIncomingReferencesToExactApprovedTargetsInBothViews()
@@ -72,11 +108,13 @@ public sealed partial class PostgresProductTests
                 if (table) await renderer.Click("Table view");
                 if (parent)
                 {
-                    Assert.True(ManagementButton(renderer, $"Add outgoing link from {root.Label}").Disabled);
                     Assert.Contains("Outgoing links locked", renderer.Text());
+                    await ManagementClick(renderer, $"Add incoming link to {root.Label}");
+                    Assert.All(renderer.Components<MudSelectItem<string>>().Where(i => i.Value is "need" or "parent"), i => Assert.True(i.Disabled));
+                    await renderer.Click("Cancel add");
                 }
                 await ManagementClick(renderer, $"Add incoming link to {root.Label}");
-                var candidates = renderer.Components<MudSelectItem<Guid?>>().Select(i => i.Value).ToArray();
+                var candidates = CandidateVersions(renderer).ToArray();
                 Assert.Contains(owner.Requirement.VersionId, candidates);
                 Assert.DoesNotContain(d.Owner.Requirement.VersionId, candidates); // Historical Approved owner is not editable.
                 await SelectExact(renderer, owner.Requirement.VersionId);
@@ -132,12 +170,12 @@ public sealed partial class PostgresProductTests
             await renderer.Mount(typeof(RelationshipLinks), Parameters(root));
             await ExplorationClick(renderer, "Expand Requirement Expanded · v1");
             await ManagementClick(renderer, "Add outgoing link from Requirement Expanded · v1");
-            await renderer.Components<MudSelect<string>>().Single(s => s.Label == "Relationship").ValueChanged.InvokeAsync(RelationshipOperations.ParentRelationship);
+            await renderer.Components<MudSelect<string>>().Single(s => s.Label == "Relationship").ValueChanged.InvokeAsync("parent");
             await SelectExact(renderer, d.Parent.Requirement.VersionId);
             await renderer.Click("Add link");
             Assert.Contains("Link added.", renderer.Text());
             Assert.Equal(d.Parent.Requirement.VersionId, (await store.Parent(owner.Requirement.InternalId, owner.Requirement.VersionId)).Value.Value.VersionId);
-            Assert.Contains("Neighborhood expanded", renderer.Text());
+            Assert.Contains(renderer.Components<MudButton>(), b => b.UserAttributes?.TryGetValue("aria-label", out var value) == true && Equals(value, "Collapse Requirement Expanded · v1"));
             await renderer.Click("Table view");
             await ManagementClick(renderer, "Add outgoing link from Requirement Expanded · v1");
             await SelectExact(renderer, d.NewNeed.Need.VersionId);
@@ -266,7 +304,7 @@ public sealed partial class PostgresProductTests
                 else
                 {
                     await ManagementClick(renderer, $"Add outgoing link from {root.Label}");
-                    if (parent) await renderer.Components<MudSelect<string>>().Single(s => s.Label == "Relationship").ValueChanged.InvokeAsync(relationship);
+                    if (parent) await renderer.Components<MudSelect<string>>().Single(s => s.Label == "Relationship").ValueChanged.InvokeAsync("parent");
                     await SelectExact(renderer, target.VersionId);
                 }
                 var callback = ManagementButton(renderer, remove ? "Confirm selected removal" : "Add selected link").OnClick;
@@ -423,7 +461,7 @@ public sealed partial class PostgresProductTests
                 else
                 {
                     await ManagementClick(renderer, $"Add outgoing link from {root.Label}");
-                    if (parent) await renderer.Components<MudSelect<string>>().Single(s => s.Label == "Relationship").ValueChanged.InvokeAsync(relationship);
+                    if (parent) await renderer.Components<MudSelect<string>>().Single(s => s.Label == "Relationship").ValueChanged.InvokeAsync("parent");
                     await SelectExact(renderer, target.VersionId);
                     await renderer.Click("Add link");
                 }
