@@ -20,7 +20,7 @@ public sealed class PostgresAuditQuery(string connectionString) : IAuditQuery
             SELECT actor_kind, actor_identifier, occurred_at_utc_ticks, action, target_kind, target_identifier, outcome,
                 to_jsonb(event)->>'product_change', to_jsonb(event)->>'user_need_change',
                 to_jsonb(event)->>'requirement_change', to_jsonb(event)->>'ai_workflow_change',
-                to_jsonb(event)->>'test_case_change', to_jsonb(event)->>'revision_change'
+                to_jsonb(event)->>'test_case_change', to_jsonb(event)->>'revision_change', to_jsonb(event)->>'product_area_change'
             FROM retravion_audit.event
             WHERE ($1::bigint IS NULL OR occurred_at_utc_ticks >= $1)
               AND ($2::bigint IS NULL OR occurred_at_utc_ticks <= $2)
@@ -69,7 +69,8 @@ public sealed class PostgresAuditQuery(string connectionString) : IAuditQuery
                 reader.IsDBNull(9) ? null : JsonSerializer.Deserialize<RequirementAuditDetails>(reader.GetString(9)),
                 reader.IsDBNull(10) ? null : JsonSerializer.Deserialize<AiWorkflowAuditDetails>(reader.GetString(10)),
                 reader.IsDBNull(11) ? null : JsonSerializer.Deserialize<TestCaseAuditDetails>(reader.GetString(11)),
-                reader.IsDBNull(12) ? null : JsonSerializer.Deserialize<RevisionAuditDetails>(reader.GetString(12))));
+                reader.IsDBNull(12) ? null : JsonSerializer.Deserialize<RevisionAuditDetails>(reader.GetString(12)),
+                reader.IsDBNull(13) ? null : JsonSerializer.Deserialize<ProductAreaAuditDetails>(reader.GetString(13))));
         }
         return events;
     }

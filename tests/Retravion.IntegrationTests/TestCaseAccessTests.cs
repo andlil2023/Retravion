@@ -113,6 +113,7 @@ public sealed partial class AccountManagementTests
     private sealed class CaseGateStore : ITestCaseStore, ITestCaseChangeTransaction
     {
         internal int Calls;
+        public Task<Result<Maybe<TestCaseAuditDetails>>> Outcome(Guid product, Guid operation, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<TestCaseSnapshot>>> List(Guid productInternalId, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException(); }
         public Task<Result<Maybe<TestCaseSnapshot>>> Find(Guid internalId, Guid? versionId = null, CancellationToken cancellationToken = default)
@@ -123,15 +124,15 @@ public sealed partial class AccountManagementTests
         { Calls++; throw new InvalidOperationException(); }
         public Task<Result<TestCaseSnapshot>> Review(TestCaseSnapshot expected, string decision, string? comment, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<TestCaseSnapshot>> CreateSuccessor(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        public Task<Result<TestCaseSnapshot>> CreateSuccessor(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null)
         { Calls++; throw new InvalidOperationException(); }
         public Task<Result<TestCaseSnapshot>> Reopen(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException(); }
         public Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<TestCaseSnapshot>> Create(Guid productInternalId, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        public Task<Result<TestCaseSnapshot>> Create(Guid productInternalId, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? areaId = null, Guid? operationId = null, Func<Task<bool>>? authorized = null)
         { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<TestCaseSnapshot>> Update(TestCaseSnapshot expected, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        public Task<Result<TestCaseSnapshot>> Update(TestCaseSnapshot expected, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, bool changeArea = false, Guid? areaId = null, Guid? operationId = null, Func<Task<bool>>? authorized = null)
         { Calls++; throw new InvalidOperationException(); }
     }
 }

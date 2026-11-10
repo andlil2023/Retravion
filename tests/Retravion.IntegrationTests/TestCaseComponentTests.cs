@@ -40,6 +40,7 @@ public sealed partial class PostgresProductTests
         await using var host = new McpTestHost(services =>
         {
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            services.AddSingleton<Retravion.Application.Product.IProductAreaStore>(new PostgresProductAreaStore(database.ConnectionString));
             services.AddSingleton<ITestCaseStore>(store); services.AddSingleton<ITestCaseChangeTransaction>(writes);
             var requirements = new Retravion.Infrastructure.Requirement.PostgresRequirementStore(database.ConnectionString);
             services.AddSingleton<Retravion.Application.Requirement.IRequirementStore>(requirements);
@@ -54,6 +55,7 @@ public sealed partial class PostgresProductTests
             .AddSingleton<IJSRuntime, CaseJS>().AddSingleton<NavigationManager>(navigation)
             .AddSingleton<AuthenticationStateProvider>(new CaseAuthentication(principal))
             .AddSingleton(scope.ServiceProvider.GetRequiredService<TestCaseOperations>())
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<ProductAreaOperations>())
             .AddSingleton(scope.ServiceProvider.GetRequiredService<ProductOperations>()).BuildServiceProvider();
         await using var renderer = new CaseRenderer(services, services.GetRequiredService<ILoggerFactory>());
         await renderer.Dispatcher.InvokeAsync(async () =>
@@ -129,6 +131,11 @@ public sealed partial class PostgresProductTests
                 Assert.Contains("could not be confirmed", renderer.Text()); Assert.Contains("Reload", renderer.Text());
                 Assert.Equal("Unsaved retained title", renderer.Field("Title").GetState(field => field.Value));
                 Assert.Contains("Unsaved retained description", renderer.Text());
+                await renderer.Event("onsubmit", EventArgs.Empty);
+                Assert.Equal(calls + 1, writes.Calls); // Retrieval is required before any user-directed retry.
+                await renderer.Click("Retrieve operation outcome before retrying");
+                if (!committed) Assert.Contains("No change committed", renderer.Text());
+                else Assert.Contains("/test-cases/details?", navigation.Uri);
             }
             writes.Store = store;
             await renderer.Event("onsubmit", EventArgs.Empty);
@@ -163,6 +170,7 @@ public sealed partial class PostgresProductTests
         await using var host = new McpTestHost(services =>
         {
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            services.AddSingleton<Retravion.Application.Product.IProductAreaStore>(new PostgresProductAreaStore(database.ConnectionString));
             services.AddSingleton<ITestCaseStore>(store); services.AddSingleton<ITestCaseChangeTransaction>(store);
             services.AddSingleton<Retravion.Application.Requirement.IRequirementStore>(requirements);
             services.AddSingleton<Retravion.Application.Requirement.IRequirementChangeTransaction>(requirements);
@@ -171,9 +179,11 @@ public sealed partial class PostgresProductTests
         await host.Login(); await host.Replace(); var token = await host.Authenticate();
         var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(token);
         using var scope = host.Factory.Services.CreateScope(); var navigation = new CaseNavigation();
+        var areaOperations = scope.ServiceProvider.GetRequiredService<ProductAreaOperations>();
         await using var services = new ServiceCollection().AddLogging().AddMudServices()
             .AddSingleton<IJSRuntime, CaseJS>().AddSingleton<NavigationManager>(navigation)
             .AddSingleton<AuthenticationStateProvider>(new CaseAuthentication(principal))
+            .AddSingleton(areaOperations)
             .AddSingleton(scope.ServiceProvider.GetRequiredService<TestCaseOperations>())
             .AddSingleton(scope.ServiceProvider.GetRequiredService<Retravion.Web.Features.Requirement.RequirementOperations>())
             .AddSingleton(scope.ServiceProvider.GetRequiredService<ProductOperations>()).BuildServiceProvider();
@@ -263,6 +273,7 @@ public sealed partial class PostgresProductTests
         await using var host = new McpTestHost(services =>
         {
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            services.AddSingleton<Retravion.Application.Product.IProductAreaStore>(new PostgresProductAreaStore(database.ConnectionString));
             services.AddSingleton<ITestCaseStore>(store); services.AddSingleton<ITestCaseChangeTransaction>(writes);
             services.AddSingleton<Retravion.Application.Requirement.IRequirementStore>(requirements);
             services.AddSingleton<Retravion.Application.Requirement.IRequirementChangeTransaction>(requirements);
@@ -272,6 +283,7 @@ public sealed partial class PostgresProductTests
         var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(token);
         using var scope = host.Factory.Services.CreateScope();
         await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<ProductAreaOperations>())
             .AddSingleton<IJSRuntime, CaseJS>().AddSingleton<NavigationManager>(new CaseNavigation())
             .AddSingleton<AuthenticationStateProvider>(new CaseAuthentication(principal))
             .AddSingleton(scope.ServiceProvider.GetRequiredService<TestCaseOperations>())
@@ -328,14 +340,14 @@ public sealed partial class PostgresProductTests
     {
         internal PostgresTestCaseStore Store = store;
         internal int Calls;
-        public Task<Result<TestCaseSnapshot>> Create(Guid productInternalId, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
-        { Calls++; return Store.Create(productInternalId, content, actor, occurredAt, cancellationToken); }
-        public Task<Result<TestCaseSnapshot>> Update(TestCaseSnapshot expected, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
-        { Calls++; return Store.Update(expected, content, actor, occurredAt, cancellationToken); }
+        public Task<Result<TestCaseSnapshot>> Create(Guid productInternalId, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? areaId = null, Guid? operationId = null, Func<Task<bool>>? authorized = null)
+        { Calls++; return Store.Create(productInternalId, content, actor, occurredAt, cancellationToken, areaId, operationId, authorized); }
+        public Task<Result<TestCaseSnapshot>> Update(TestCaseSnapshot expected, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, bool changeArea = false, Guid? areaId = null, Guid? operationId = null, Func<Task<bool>>? authorized = null)
+        { Calls++; return Store.Update(expected, content, actor, occurredAt, cancellationToken, changeArea, areaId, operationId, authorized); }
         public Task<Result<TestCaseSnapshot>> Review(TestCaseSnapshot expected, string decision, string? comment, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; return Store.Review(expected, decision, comment, actor, occurredAt, cancellationToken); }
-        public Task<Result<TestCaseSnapshot>> CreateSuccessor(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
-        { Calls++; return Store.CreateSuccessor(expected, reason, actor, occurredAt, cancellationToken); }
+        public Task<Result<TestCaseSnapshot>> CreateSuccessor(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null)
+        { Calls++; return Store.CreateSuccessor(expected, reason, actor, occurredAt, cancellationToken, operationId, authorized); }
         public Task<Result<TestCaseSnapshot>> Reopen(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; return Store.Reopen(expected, reason, actor, occurredAt, cancellationToken); }
         public Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)

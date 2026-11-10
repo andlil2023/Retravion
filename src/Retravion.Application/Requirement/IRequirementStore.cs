@@ -13,7 +13,8 @@ public sealed record RequirementReview(Guid RequirementInternalId, AuditActor Ac
     Guid? VersionId = null, int? VersionNumber = null, Guid? SourceVersionId = null,
     string? RelationshipType = null, IReadOnlyList<RequirementUserNeedLink>? BeforeLinks = null,
     IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null,
-    string? ParentRelationshipType = null, RequirementParentLink? BeforeParent = null, RequirementParentLink? AfterParent = null);
+    string? ParentRelationshipType = null, RequirementParentLink? BeforeParent = null, RequirementParentLink? AfterParent = null,
+    Retravion.Domain.Product.AreaEvidence? BeforeArea = null, Retravion.Domain.Product.AreaEvidence? AfterArea = null);
 
 /// <summary>Immutable source evidence captured when an independent Requirement is created.</summary>
 public sealed record RequirementProvenance(Guid SourceProductId, Guid SourceRequirementId, Guid SourceVersionId,
@@ -22,6 +23,7 @@ public sealed record RequirementProvenance(Guid SourceProductId, Guid SourceRequ
 
 public interface IRequirementStore
 {
+    Task<Result<Maybe<RequirementAuditDetails>>> Outcome(Guid productInternalId, Guid operationId, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid productInternalId, CancellationToken cancellationToken = default);
     Task<Result<Maybe<RequirementSnapshot>>> Find(Guid internalId, CancellationToken cancellationToken = default, Guid? versionId = null);
     Task<Result<IReadOnlyList<RequirementSnapshot>>> Versions(Guid internalId, CancellationToken cancellationToken = default);
@@ -34,13 +36,14 @@ public interface IRequirementStore
 public interface IRequirementChangeTransaction
 {
     Task<Result<RequirementSnapshot>> CreateSuccessor(RequirementSnapshot expected, string? reason, AuditActor actor,
-        DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null);
     Task<Result<RequirementSnapshot>> Create(RequirementState requirement, AuditActor actor, DateTimeOffset occurredAt,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null);
     Task<Result<RequirementSnapshot>> Derive(RequirementSnapshot expectedSource, RequirementState destination,
         AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
     Task<Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor,
-        DateTimeOffset occurredAt, string? decision = null, string? comment = null, CancellationToken cancellationToken = default);
+        DateTimeOffset occurredAt, string? decision = null, string? comment = null, CancellationToken cancellationToken = default,
+        Guid? operationId = null, Func<Task<bool>>? authorized = null);
 }
 
 public static class RequirementList

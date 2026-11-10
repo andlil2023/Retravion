@@ -248,7 +248,7 @@ public sealed partial class PostgresProductTests
         var product = (await new CreateProduct(products).Execute("P", "Product", ProductKind.System, "")).Value;
         var store = new PostgresRequirementStore(database.ConnectionString);
         var first = await ApprovedRequirement(store, product.InternalId, "ID");
-        await using var host = RequirementMcpHost(products, store, store);
+        await using var host = RequirementMcpHost(products, store, store, database.ConnectionString);
         await host.Login(); await host.Replace(); var token = await host.Authenticate();
         var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(token);
         using var scope = host.Factory.Services.CreateScope();
@@ -257,6 +257,7 @@ public sealed partial class PostgresProductTests
             .AddSingleton<IJSRuntime, RequirementJS>().AddSingleton<NavigationManager>(navigation)
             .AddSingleton<AuthenticationStateProvider>(new RequirementAuthentication(principal))
             .AddSingleton(scope.ServiceProvider.GetRequiredService<RequirementOperations>())
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<ProductAreaOperations>())
             .AddSingleton(scope.ServiceProvider.GetRequiredService<ProductOperations>()).BuildServiceProvider();
         await using var renderer = new RequirementRenderer(services, services.GetRequiredService<ILoggerFactory>());
         await renderer.Dispatcher.InvokeAsync(async () =>

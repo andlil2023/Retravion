@@ -71,9 +71,9 @@ public sealed partial class PostgresProductTests
         Assert.Equal(2, events.Length);
         Assert.All(events, e => { Assert.Equal(new AuditActor.Identified("admin"), e.Actor); Assert.Equal(new AuditTarget.Identified(identity.ToString()), e.Target); Assert.Equal(AuditActionOutcome.Success, e.Outcome); Assert.True(e.OccurredAt > DateTimeOffset.UtcNow.AddMinutes(-5)); });
         var initial = events.Single(e => e.Action == "requirement.create").RequirementChange!;
-        Assert.Null(initial.Before); Assert.Equal(new RequirementAuditValues(product.InternalId, "R-1", "Original", "# Statement", "Software", "Reason", "Draft"), initial.After);
+        Assert.Null(initial.Before); Assert.Equal(new RequirementAuditValues(product.InternalId, "R-1", "Original", "# Statement", "Software", "Reason", "Draft", Retravion.Domain.Product.AreaEvidence.Unclassified), initial.After);
         var editEvent = events.Single(e => e.Action == "requirement.edit").RequirementChange!;
-        Assert.Equal(initial.After, editEvent.Before); Assert.Equal(new RequirementAuditValues(product.InternalId, "R-2", "Changed", "Updated", "Hardware", null, "Draft"), editEvent.After);
+        Assert.Equal(initial.After, editEvent.Before); Assert.Equal(new RequirementAuditValues(product.InternalId, "R-2", "Changed", "Updated", "Hardware", null, "Draft", Retravion.Domain.Product.AreaEvidence.Unclassified), editEvent.After);
         Assert.Null(editEvent.Decision); Assert.Null(editEvent.Comment);
         var snapshot = (await store.Find(identity)).Value.Value;
         var reviewed = (await store.Update(snapshot, snapshot.Requirement.SubmitForReview().Value, RequirementActor, RequirementTime, "InReview", "Ready")).Value;
@@ -140,17 +140,18 @@ public sealed partial class PostgresProductTests
         Assert.Equal(2, events.Length); Assert.Single(events, e => e.Action == "requirement.create"); Assert.Single(events, e => e.Action == "requirement.edit");
     }
 
-    private static McpTestHost RequirementMcpHost(Retravion.Application.Product.IProductStore products, IRequirementStore reads, IRequirementChangeTransaction writes) => new(services =>
-    { services.AddSingleton(products); services.AddSingleton(reads); services.AddSingleton(writes);
+    private static McpTestHost RequirementMcpHost(Retravion.Application.Product.IProductStore products, IRequirementStore reads, IRequirementChangeTransaction writes, string? connectionString = null) => new(services =>
+    { if (connectionString is not null) services.AddSingleton<Retravion.Application.Product.IProductAreaStore>(new PostgresProductAreaStore(connectionString));
+        services.AddSingleton(products); services.AddSingleton(reads); services.AddSingleton(writes);
         services.AddSingleton((IRequirementLinkStore)reads); });
 
     private sealed class RequirementWriteHook(PostgresRequirementStore store) : IRequirementChangeTransaction
     {
         internal PostgresRequirementStore Store = store;
         public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> Derive(RequirementSnapshot source, RequirementState destination, AuditActor actor, DateTimeOffset time, CancellationToken token = default) => Store.Derive(source, destination, actor, time, token);
-        public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> CreateSuccessor(RequirementSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default) => Store.CreateSuccessor(expected, reason, actor, time, token);
-        public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> Create(RequirementState r, AuditActor actor, DateTimeOffset time, CancellationToken token = default) => Store.Create(r, actor, time, token);
-        public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor, DateTimeOffset time, string? decision = null, string? comment = null, CancellationToken token = default) => Store.Update(expected, replacement, actor, time, decision, comment, token);
+        public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> CreateSuccessor(RequirementSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) => Store.CreateSuccessor(expected, reason, actor, time, token, operationId, authorized);
+        public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> Create(RequirementState r, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) => Store.Create(r, actor, time, token, operationId, authorized);
+        public Task<CSharpFunctionalExtensions.Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor, DateTimeOffset time, string? decision = null, string? comment = null, CancellationToken token = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) => Store.Update(expected, replacement, actor, time, decision, comment, token, operationId, authorized);
     }
 }
 

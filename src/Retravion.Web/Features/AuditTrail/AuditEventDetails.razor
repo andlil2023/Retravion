@@ -39,13 +39,21 @@
                             <p>@release.Actor · @release.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)</p>
                             <ul aria-label="Protected release members">
                                 @foreach (var member in release.Members)
-                                { <li>@member.Endpoint.Kind @member.Identifier · v@member.Endpoint.VersionNumber · @member.Endpoint.InternalId / @member.Endpoint.VersionId · @(member.Explicit ? "Explicit" : "Indirect") · Approved and permanently protected</li> }
+                                { <li>@member.Endpoint.Kind @member.Identifier · v@member.Endpoint.VersionNumber · @member.Endpoint.InternalId / @member.Endpoint.VersionId · @(member.Explicit ? "Explicit" : "Indirect") · Approved and permanently protected · Area: @(member.Endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.UserNeed ? "Not applicable" : member.Area?.Display ?? "Not recorded")</li> }
                             </ul>
                         }
                     }
                     else { <p>@(revision.Before is null ? "Not yet created" : "Deleted")</p> }
                 </section>
             }
+        }
+        else if (Event.ProductAreaChange is { } area)
+        {
+            <h3>Product area change</h3>
+            <p>Operation: @area.OperationId · Area: @area.InternalId</p>
+            @if (area.Before is { } before)
+            { <p>Prior values: @before.Code — @before.Label · @(before.IsActive ? "Active" : "Retired")</p> }
+            <p>New values: @area.After.Code — @area.After.Label · @(area.After.IsActive ? "Active" : "Retired")</p>
         }
         else if (Event.ProductChange is { } change)
         {
@@ -188,7 +196,8 @@
             ("Description", before?.Description, after.Description),
             ("Preconditions", before?.Preconditions, after.Preconditions),
             ("Status", before?.Status, after.Status),
-            ("Ordered steps", before is null ? null : Steps(before), Steps(after))
+            ("Ordered steps", before is null ? null : Steps(before), Steps(after)),
+            ("Area", before?.Area?.Display ?? "Not recorded", after.Area?.Display ?? "Not recorded")
         ];
         return fields.Where(field => before is null || field.Old != field.New);
     }
@@ -219,7 +228,8 @@
             ("Statement", before?.Statement, after.Statement),
             ("Type", before?.Type, after.Type),
             ("Rationale", before?.Rationale, after.Rationale),
-            ("Status", before?.Status, after.Status)
+            ("Status", before?.Status, after.Status),
+            ("Area", before?.Area?.Display ?? "Not recorded", after.Area?.Display ?? "Not recorded")
         ];
         return fields.Where(field => before is null || field.Old != field.New);
     }

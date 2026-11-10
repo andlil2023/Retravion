@@ -109,6 +109,7 @@ public sealed partial class AccountManagementTests
         await using var factory = original.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            services.AddSingleton<Retravion.Application.Product.IProductAreaStore>(new EmptyAreaReadDouble());
             services.AddSingleton<IRequirementStore>(store); services.AddSingleton<IRequirementChangeTransaction>(new RequirementStoreDouble());
             services.AddSingleton<IRequirementLinkStore>(new RequirementStoreDouble());
         }));
@@ -158,9 +159,19 @@ public sealed partial class AccountManagementTests
         foreach (var path in paths) { using var denied = await client.GetAsync(path); Assert.Equal(System.Net.HttpStatusCode.Redirect, denied.StatusCode); }
     }
 
+    private sealed class EmptyAreaReadDouble : Retravion.Application.Product.IProductAreaStore
+    {
+        public Task<Result<Retravion.Application.Product.ProductAreaRetrieval>> Retrieve(Guid product, Guid? operation = null, CancellationToken token = default) =>
+            Task.FromResult(Result.Success(new Retravion.Application.Product.ProductAreaRetrieval([], [], null)));
+        public Task<Result<Retravion.Application.Product.ProductAreaSnapshot>> Save(Guid operation, Retravion.Application.Product.ProductAreaSnapshot? expected,
+            Retravion.Domain.Product.ProductArea replacement, AuditActor actor, DateTimeOffset time, Func<Task<bool>> authorized, CancellationToken token = default) =>
+            throw new InvalidOperationException("This fixture supports area reads only.");
+    }
+
     private sealed class RequirementReadDouble(RequirementSnapshot snapshot) : IRequirementStore
     {
         public RequirementSnapshot Snapshot = snapshot;
+        public Task<Result<Maybe<RequirementAuditDetails>>> Outcome(Guid product, Guid operation, CancellationToken token = default) => Task.FromResult(Result.Success(Maybe<RequirementAuditDetails>.None));
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> CopiesOf(Guid version, CancellationToken token = default) => Task.FromResult(Result.Success<IReadOnlyList<RequirementSnapshot>>([]));
         public Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid id, CancellationToken token = default) => Task.FromResult(Result.Success(Maybe<RequirementProvenance>.None));
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid product, CancellationToken token = default) =>
@@ -194,6 +205,7 @@ public sealed partial class AccountManagementTests
     private sealed class RequirementStoreDouble : IRequirementStore, IRequirementChangeTransaction, IRequirementLinkStore
     {
         public int Calls;
+        public Task<Result<Maybe<RequirementAuditDetails>>> Outcome(Guid product, Guid operation, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> CopiesOf(Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> Derive(RequirementSnapshot source, RequirementState destination, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
@@ -209,9 +221,9 @@ public sealed partial class AccountManagementTests
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid product, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<Maybe<RequirementSnapshot>>> Find(Guid id, CancellationToken token = default, Guid? versionId = null) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> Versions(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<RequirementSnapshot>> CreateSuccessor(RequirementSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<RequirementSnapshot>> CreateSuccessor(RequirementSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementReview>>> History(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<RequirementSnapshot>> Create(RequirementState r, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor, DateTimeOffset time, string? decision = null, string? comment = null, CancellationToken cancellationToken = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<RequirementSnapshot>> Create(RequirementState r, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor, DateTimeOffset time, string? decision = null, string? comment = null, CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) { Calls++; throw new InvalidOperationException(); }
     }
 }

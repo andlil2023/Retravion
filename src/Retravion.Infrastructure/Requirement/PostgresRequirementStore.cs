@@ -6,6 +6,8 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.Requirement;
 using Retravion.Domain.Requirement;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Infrastructure.Product;
+using Retravion.Domain.Product;
 using RequirementState = Retravion.Domain.Requirement.Requirement;
 
 namespace Retravion.Infrastructure.Requirement;
@@ -66,7 +68,9 @@ public sealed partial class PostgresRequirementStore(string connectionString,
         );
         ALTER TABLE retravion_requirement.requirement_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
         CREATE UNIQUE INDEX IF NOT EXISTS requirement_one_working_version ON retravion_requirement.requirement_version(internal_id) WHERE status<>2;
-        INSERT INTO retravion_requirement.requirement_version SELECT internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,
+        ALTER TABLE retravion_requirement.requirement ADD COLUMN IF NOT EXISTS area_id uuid REFERENCES retravion_product.area(internal_id);
+        ALTER TABLE retravion_requirement.requirement_version ADD COLUMN IF NOT EXISTS area_id uuid REFERENCES retravion_product.area(internal_id);
+        INSERT INTO retravion_requirement.requirement_version (internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,version_id,version_number,ever_approved,creation_reason,source_version_id) SELECT internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,
             version_id,version_number,ever_approved,creation_reason,source_version_id FROM retravion_requirement.requirement
             ON CONFLICT (version_id) DO NOTHING;
         CREATE TABLE IF NOT EXISTS retravion_requirement.provenance (
@@ -92,9 +96,29 @@ public sealed partial class PostgresRequirementStore(string connectionString,
         ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS parent_relationship_type text;
         ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS before_parent jsonb;
         ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS after_parent jsonb;
+        ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS before_area jsonb;
+        ALTER TABLE retravion_requirement.review ADD COLUMN IF NOT EXISTS after_area jsonb;
+        CREATE TABLE IF NOT EXISTS retravion_requirement.operation_history (
+            sequence bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            product_internal_id uuid NOT NULL, internal_id uuid NOT NULL,
+            operation_id uuid UNIQUE, actor_identifier text NOT NULL, occurred_at_utc_ticks bigint NOT NULL,
+            action text NOT NULL, change jsonb NOT NULL
+        );
         """;
 
-    private const string Columns = "r.internal_id,r.product_internal_id,r.id,r.title,r.statement,r.type,r.rationale,r.status,r.revision,r.version_id,r.version_number,r.ever_approved,r.creation_reason,r.source_version_id,(SELECT max(v.version_number) FROM retravion_requirement.requirement_version v WHERE v.internal_id=r.internal_id AND v.status=2)";
+    private const string Columns = "r.internal_id,r.product_internal_id,r.id,r.title,r.statement,r.type,r.rationale,r.status,r.revision,r.version_id,r.version_number,r.ever_approved,r.creation_reason,r.source_version_id,(SELECT max(v.version_number) FROM retravion_requirement.requirement_version v WHERE v.internal_id=r.internal_id AND v.status=2),r.area_id";
+
+    public Task<Result<Maybe<RequirementAuditDetails>>> Outcome(Guid productInternalId, Guid operationId, CancellationToken cancellationToken = default) =>
+        Execute(async (c, t) =>
+        {
+            await using var command = new NpgsqlCommand("SELECT change FROM retravion_requirement.operation_history WHERE product_internal_id=$1 AND operation_id=$2", c, t);
+            command.Parameters.AddWithValue(productInternalId); command.Parameters.AddWithValue(operationId);
+            var json = await command.ExecuteScalarAsync(cancellationToken) as string;
+            if (json is null) return Result.Success(Maybe<RequirementAuditDetails>.None);
+            var change = JsonSerializer.Deserialize<RequirementAuditDetails>(json);
+            return change is null ? Result.Failure<Maybe<RequirementAuditDetails>>("Invalid persisted Requirement operation history.") :
+                Result.Success(Maybe<RequirementAuditDetails>.From(change));
+        }, cancellationToken, Result.Success(Maybe<RequirementAuditDetails>.None));
 
     public Task<Result<IReadOnlyList<RequirementSnapshot>>> List(Guid productInternalId, CancellationToken cancellationToken = default) =>
         Rows($"SELECT {Columns} FROM retravion_requirement.requirement r WHERE product_internal_id=$1 ORDER BY id", productInternalId, cancellationToken);
@@ -138,7 +162,7 @@ public sealed partial class PostgresRequirementStore(string connectionString,
     public Task<Result<IReadOnlyList<RequirementReview>>> History(Guid internalId, CancellationToken cancellationToken = default) =>
         Execute(async (connection, transaction) =>
         {
-            await using var command = new NpgsqlCommand("SELECT actor_identifier,occurred_at_utc_ticks,decision,comment,manual_id,title,statement,type,rationale,version_id,version_number,source_version_id,before_links,after_links,parent_relationship_type,before_parent,after_parent FROM retravion_requirement.review WHERE requirement_internal_id=$1 ORDER BY id", connection, transaction);
+            await using var command = new NpgsqlCommand("SELECT actor_identifier,occurred_at_utc_ticks,decision,comment,manual_id,title,statement,type,rationale,version_id,version_number,source_version_id,before_links,after_links,parent_relationship_type,before_parent,after_parent,before_area,after_area FROM retravion_requirement.review WHERE requirement_internal_id=$1 ORDER BY id", connection, transaction);
             command.Parameters.AddWithValue(internalId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             var rows = new List<RequirementReview>();
@@ -150,7 +174,9 @@ public sealed partial class PostgresRequirementStore(string connectionString,
                     reader.GetString(2), Text(reader, 3), reader.GetString(4), reader.GetString(5), reader.GetString(6), type, Text(reader, 8),
                     reader.IsDBNull(9) ? null : reader.GetGuid(9), reader.IsDBNull(10) ? null : reader.GetInt32(10), reader.IsDBNull(11) ? null : reader.GetGuid(11),
                     reader.IsDBNull(13) ? null : "Requirement–User Need", ReadLinks(reader, 12), ReadLinks(reader, 13),
-                    Text(reader, 14), ReadParent(reader, 15), ReadParent(reader, 16)));
+                    Text(reader, 14), ReadParent(reader, 15), ReadParent(reader, 16),
+                    reader.IsDBNull(17) ? null : JsonSerializer.Deserialize<AreaEvidence>(reader.GetString(17)),
+                    reader.IsDBNull(18) ? null : JsonSerializer.Deserialize<AreaEvidence>(reader.GetString(18))));
             }
             return Result.Success<IReadOnlyList<RequirementReview>>(rows);
         }, cancellationToken, Result.Success<IReadOnlyList<RequirementReview>>([]));
@@ -177,7 +203,7 @@ public sealed partial class PostgresRequirementStore(string connectionString,
     {
         var source = expectedSource.Requirement;
         if (actor is not AuditActor.Identified || expectedSource.Revision <= 0 || destination.Status != RequirementStatus.Draft ||
-            destination.VersionNumber != 1 || destination.HasBeenApproved || destination.ProductInternalId == source.ProductInternalId)
+            destination.VersionNumber != 1 || destination.HasBeenApproved || destination.AreaId is not null || destination.ProductInternalId == source.ProductInternalId)
             return Task.FromResult(Result.Failure<RequirementSnapshot>("Invalid Requirement derivation."));
         return Execute(async (connection, transaction) =>
         {
@@ -210,58 +236,66 @@ public sealed partial class PostgresRequirementStore(string connectionString,
         }, cancellationToken);
     }
 
-    public Task<Result<RequirementSnapshot>> Create(RequirementState requirement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+    public Task<Result<RequirementSnapshot>> Create(RequirementState requirement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default,
+        Guid? operationId = null, Func<Task<bool>>? authorized = null)
     {
-        if (requirement.Status != RequirementStatus.Draft || requirement.VersionNumber != 1 || requirement.HasBeenApproved || actor is not AuditActor.Identified)
+        if (requirement.Status != RequirementStatus.Draft || requirement.VersionNumber != 1 || requirement.HasBeenApproved || actor is not AuditActor.Identified || operationId == Guid.Empty)
             return Task.FromResult(Result.Failure<RequirementSnapshot>("Invalid Requirement creation."));
         return Execute(async (connection, transaction) =>
         {
             if (!await ProductActive(connection, transaction, requirement.ProductInternalId, cancellationToken)) return Inactive();
-            await using var command = new NpgsqlCommand("INSERT INTO retravion_requirement.requirement (internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,version_id) VALUES ($1,$2,$3,$4,$5,$6,$7,0,1,$8) ON CONFLICT DO NOTHING", connection, transaction);
+            if (!await PostgresProductAreaStore.CanSelect(connection, transaction, requirement.ProductInternalId, null, requirement.AreaId, cancellationToken))
+                return Result.Failure<RequirementSnapshot>("Select an active area from this Product.");
+            await using var command = new NpgsqlCommand("INSERT INTO retravion_requirement.requirement (internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,version_id,area_id) VALUES ($1,$2,$3,$4,$5,$6,$7,0,1,$8,$9) ON CONFLICT DO NOTHING", connection, transaction);
             command.Parameters.AddWithValue(requirement.InternalId); command.Parameters.AddWithValue(requirement.ProductInternalId);
             command.Parameters.AddWithValue(requirement.Id); command.Parameters.AddWithValue(requirement.Title); command.Parameters.AddWithValue(requirement.Statement);
             command.Parameters.AddWithValue((int)requirement.Type); command.Parameters.AddWithValue(NpgsqlDbType.Text, (object?)requirement.Rationale ?? DBNull.Value);
             command.Parameters.AddWithValue(requirement.VersionId);
+            command.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)requirement.AreaId ?? DBNull.Value);
             if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) return Result.Failure<RequirementSnapshot>("That Requirement ID is already in use for this Product.");
             if (!await SaveVersion(connection, transaction, requirement.InternalId, cancellationToken))
                 return Result.Failure<RequirementSnapshot>("The Requirement version identity is already in use.");
-            await Audit(connection, transaction, actor, occurredAt, "requirement.create", null, requirement, null, null, cancellationToken);
+            await Audit(connection, transaction, actor, occurredAt, "requirement.create", null, requirement, null, null, cancellationToken, operationId: operationId);
             return Result.Success(new RequirementSnapshot(requirement, 1));
-        }, cancellationToken);
+        }, cancellationToken, authorized: authorized);
     }
 
     public Task<Result<RequirementSnapshot>> CreateSuccessor(RequirementSnapshot expected, string? reason, AuditActor actor,
-        DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null)
     {
         var successor = expected.Requirement.CreateSuccessor(reason);
         return successor.IsFailure ? Task.FromResult(Result.Failure<RequirementSnapshot>(successor.Error)) :
-            Mutate(expected, successor.Value, actor, occurredAt, "Successor", reason, cancellationToken);
+            Mutate(expected, successor.Value, actor, occurredAt, "Successor", reason, cancellationToken, operationId, authorized);
     }
 
     public Task<Result<RequirementSnapshot>> Update(RequirementSnapshot expected, RequirementState replacement, AuditActor actor,
-        DateTimeOffset occurredAt, string? decision = null, string? comment = null, CancellationToken cancellationToken = default)
+        DateTimeOffset occurredAt, string? decision = null, string? comment = null, CancellationToken cancellationToken = default,
+        Guid? operationId = null, Func<Task<bool>>? authorized = null)
     {
         var before = expected.Requirement;
         var valid = decision switch
         {
             "InReview" => before.SubmitForReview(), "Approved" => before.Approve(), "Draft" => before.ReturnToDraft(),
             "Reopened" => before.Reopen(comment),
-            null when comment is null => before.Edit(replacement.Id, replacement.Title, replacement.Statement, replacement.Type, replacement.Rationale),
+            null when comment is null => before.Edit(replacement.Id, replacement.Title, replacement.Statement, replacement.Type, replacement.Rationale)
+                .Bind(r => r.Classify(replacement.AreaId)),
             _ => Result.Failure<RequirementState>("Invalid review decision.")
         };
         if (valid.IsFailure || valid.Value != replacement) return Task.FromResult(Result.Failure<RequirementSnapshot>(valid.IsFailure ? valid.Error : "Invalid Requirement update."));
-        return Mutate(expected, replacement, actor, occurredAt, decision, comment, cancellationToken);
+        return Mutate(expected, replacement, actor, occurredAt, decision, comment, cancellationToken, operationId, authorized);
     }
 
     private Task<Result<RequirementSnapshot>> Mutate(RequirementSnapshot expected, RequirementState replacement, AuditActor actor,
-        DateTimeOffset occurredAt, string? decision, string? comment, CancellationToken token)
+        DateTimeOffset occurredAt, string? decision, string? comment, CancellationToken token, Guid? operationId = null, Func<Task<bool>>? authorized = null)
     {
         var before = expected.Requirement;
-        if (actor is not AuditActor.Identified identified || expected.Revision <= 0)
+        if (actor is not AuditActor.Identified identified || expected.Revision <= 0 || operationId == Guid.Empty)
             return Task.FromResult(Result.Failure<RequirementSnapshot>("Invalid Requirement update."));
         return Execute(async (connection, transaction) =>
         {
             if (!await ProductActive(connection, transaction, before.ProductInternalId, token)) return Inactive();
+            if (!await PostgresProductAreaStore.CanSelect(connection, transaction, before.ProductInternalId, before.AreaId, replacement.AreaId, token))
+                return Result.Failure<RequirementSnapshot>("Select an active area from this Product.");
             if (replacement.VersionId == before.VersionId && replacement != before &&
                 await Protected(connection, transaction, before.VersionId, token))
                 return Result.Failure<RequirementSnapshot>("This exact version is permanently protected by a Released revision. Create a successor for changes.");
@@ -276,11 +310,11 @@ public sealed partial class PostgresRequirementStore(string connectionString,
             // to block older reopening and races between successor creation, reopening and editing.
             await using var command = new NpgsqlCommand("""
                 UPDATE retravion_requirement.requirement SET id=$1,title=$2,statement=$3,type=$4,rationale=$5,status=$6,
-                    revision=revision+CASE WHEN $7 THEN 1 ELSE 0 END,version_id=$8,version_number=$9,ever_approved=$10,creation_reason=$11,source_version_id=$12
+                    revision=revision+CASE WHEN $7 THEN 1 ELSE 0 END,version_id=$8,version_number=$9,ever_approved=$10,creation_reason=$11,source_version_id=$12,area_id=$27
                 WHERE internal_id=$13 AND product_internal_id=$14 AND revision=$15 AND version_id=$16
                     AND id=$17 AND title=$18 AND statement=$19 AND type=$20 AND rationale IS NOT DISTINCT FROM $21
                     AND status=$22 AND version_number=$23 AND ever_approved=$24
-                    AND creation_reason IS NOT DISTINCT FROM $25 AND source_version_id IS NOT DISTINCT FROM $26
+                    AND creation_reason IS NOT DISTINCT FROM $25 AND source_version_id IS NOT DISTINCT FROM $26 AND area_id IS NOT DISTINCT FROM $28
                 RETURNING revision
                 """, connection, transaction);
             var changed = before != replacement;
@@ -296,6 +330,8 @@ public sealed partial class PostgresRequirementStore(string connectionString,
             command.Parameters.AddWithValue((int)before.Status); command.Parameters.AddWithValue(before.VersionNumber); command.Parameters.AddWithValue(before.HasBeenApproved);
             command.Parameters.AddWithValue(NpgsqlDbType.Text, (object?)before.CreationReason ?? DBNull.Value);
             command.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)before.SourceVersionId ?? DBNull.Value);
+            command.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)replacement.AreaId ?? DBNull.Value);
+            command.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)before.AreaId ?? DBNull.Value);
             var revision = await command.ExecuteScalarAsync(token);
             if (revision is null) return Result.Failure<RequirementSnapshot>("The Requirement changed or a newer version exists. Retrieve it again.");
             if (!await SaveVersion(connection, transaction, before.InternalId, token))
@@ -331,21 +367,21 @@ public sealed partial class PostgresRequirementStore(string connectionString,
             if (changed) await Audit(connection, transaction, actor, occurredAt, decision switch
             {
                 "Successor" => "requirement.version.create", "Reopened" => "requirement.reopen", null => "requirement.edit", _ => "requirement.review." + decision
-            }, before, replacement, decision, comment, token);
+            }, before, replacement, decision, comment, token, operationId: operationId);
             await using var latest = new NpgsqlCommand("SELECT max(version_number) FROM retravion_requirement.requirement_version WHERE internal_id=$1 AND status=2", connection, transaction);
             latest.Parameters.AddWithValue(before.InternalId);
             var approved = await latest.ExecuteScalarAsync(token);
             return Result.Success(new RequirementSnapshot(replacement, (long)revision, approved is int number ? number : null));
-        }, token);
+        }, token, authorized: authorized);
     }
 
     private static async Task<bool> SaveVersion(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid id, CancellationToken token)
     {
         await using var command = new NpgsqlCommand("""
-            INSERT INTO retravion_requirement.requirement_version SELECT internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,
-                version_id,version_number,ever_approved,creation_reason,source_version_id FROM retravion_requirement.requirement WHERE internal_id=$1
+            INSERT INTO retravion_requirement.requirement_version (internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,version_id,version_number,ever_approved,creation_reason,source_version_id,area_id) SELECT internal_id,product_internal_id,id,title,statement,type,rationale,status,revision,
+                version_id,version_number,ever_approved,creation_reason,source_version_id,area_id FROM retravion_requirement.requirement WHERE internal_id=$1
             ON CONFLICT (version_id) DO UPDATE SET id=EXCLUDED.id,title=EXCLUDED.title,statement=EXCLUDED.statement,type=EXCLUDED.type,rationale=EXCLUDED.rationale,
-                status=EXCLUDED.status,revision=EXCLUDED.revision,ever_approved=EXCLUDED.ever_approved
+                status=EXCLUDED.status,revision=EXCLUDED.revision,ever_approved=EXCLUDED.ever_approved,area_id=EXCLUDED.area_id
             WHERE requirement_version.internal_id=EXCLUDED.internal_id
                 AND requirement_version.product_internal_id=EXCLUDED.product_internal_id
                 AND requirement_version.version_number=EXCLUDED.version_number
@@ -368,7 +404,7 @@ public sealed partial class PostgresRequirementStore(string connectionString,
     {
         var requirement = RequirementState.Restore(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
             (RequirementType)reader.GetInt32(5), Text(reader, 6), (RequirementStatus)reader.GetInt32(7), reader.GetGuid(9), reader.GetInt32(10),
-            reader.GetBoolean(11), Text(reader, 12), reader.IsDBNull(13) ? null : reader.GetGuid(13));
+            reader.GetBoolean(11), Text(reader, 12), reader.IsDBNull(13) ? null : reader.GetGuid(13), reader.IsDBNull(15) ? null : reader.GetGuid(15));
         return requirement.IsSuccess && reader.GetInt64(8) > 0 ? Result.Success(new RequirementSnapshot(requirement.Value, reader.GetInt64(8), reader.IsDBNull(14) ? null : reader.GetInt32(14)))
             : Result.Failure<RequirementSnapshot>("The persisted Requirement is invalid.");
     }
@@ -383,25 +419,53 @@ public sealed partial class PostgresRequirementStore(string connectionString,
 
     private static async Task Audit(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor actor,
         DateTimeOffset occurredAt, string action, RequirementState? before, RequirementState after, string? decision, string? comment, CancellationToken token,
-        RequirementProvenance? provenance = null)
+        RequirementProvenance? provenance = null, Guid? operationId = null)
     {
-        static RequirementAuditValues Values(RequirementState r) => new(r.ProductInternalId, r.Id, r.Title, r.Statement, r.Type.ToString(), r.Rationale, r.Status.ToString());
+        var beforeArea = before is null ? null : await PostgresProductAreaStore.Evidence(connection, transaction, before.ProductInternalId, before.AreaId, token);
+        var afterArea = await PostgresProductAreaStore.Evidence(connection, transaction, after.ProductInternalId, after.AreaId, token);
+        RequirementAuditValues Values(RequirementState r, AreaEvidence? area) => new(r.ProductInternalId, r.Id, r.Title, r.Statement, r.Type.ToString(), r.Rationale, r.Status.ToString(), area);
+        if (decision is null && (before?.AreaId != after.AreaId))
+        {
+            await using var history = new NpgsqlCommand("INSERT INTO retravion_requirement.review(requirement_internal_id,actor_identifier,occurred_at_utc_ticks,decision,manual_id,title,statement,type,rationale,version_id,version_number,source_version_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)", connection, transaction);
+            history.Parameters.AddWithValue(after.InternalId); history.Parameters.AddWithValue(((AuditActor.Identified)actor).Identifier);
+            history.Parameters.AddWithValue(occurredAt.UtcTicks); history.Parameters.AddWithValue(action);
+            history.Parameters.AddWithValue(after.Id); history.Parameters.AddWithValue(after.Title); history.Parameters.AddWithValue(after.Statement);
+            history.Parameters.AddWithValue((int)after.Type); history.Parameters.AddWithValue(NpgsqlDbType.Text, (object?)after.Rationale ?? DBNull.Value);
+            history.Parameters.AddWithValue(after.VersionId); history.Parameters.AddWithValue(after.VersionNumber);
+            history.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)after.SourceVersionId ?? DBNull.Value);
+            await history.ExecuteNonQueryAsync(token);
+        }
+        if (decision is not null || before?.AreaId != after.AreaId)
+        {
+            await using var evidence = new NpgsqlCommand("UPDATE retravion_requirement.review SET before_area=$1,after_area=$2 WHERE id=(SELECT max(id) FROM retravion_requirement.review WHERE requirement_internal_id=$3)", connection, transaction);
+            evidence.Parameters.AddWithValue(NpgsqlDbType.Jsonb, beforeArea is null ? DBNull.Value : JsonSerializer.Serialize(beforeArea));
+            evidence.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(afterArea));
+            evidence.Parameters.AddWithValue(after.InternalId);
+            await evidence.ExecuteNonQueryAsync(token);
+        }
         var afterLinks = await LoadLinks(connection, transaction, after.VersionId, token);
         var beforeLinks = before is null || decision == "Successor" ? null : await LoadLinks(connection, transaction, before.VersionId, token);
         var afterParent = await LoadParent(connection, transaction, after.VersionId, token);
         var beforeParent = before is null || decision == "Successor" ? Maybe<RequirementParentLink>.None : await LoadParent(connection, transaction, before.VersionId, token);
-        await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
-            new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(after.InternalId.ToString()), AuditActionOutcome.Success,
-                requirementChange: new RequirementAuditDetails(after.InternalId, before is null ? null : Values(before), Values(after), decision, comment,
+        var change = new RequirementAuditDetails(after.InternalId, before is null ? null : Values(before, beforeArea), Values(after, afterArea), decision, comment,
                     after.VersionId, after.VersionNumber, after.SourceVersionId, decision is "Successor" or "Reopened" ? comment : null,
                     afterLinks.Count == 0 ? null : "Requirement–User Need", beforeLinks is { Count: > 0 } ? beforeLinks : null,
                     afterLinks.Count == 0 ? null : afterLinks,
                     afterParent.HasValue ? ParentRelationship : null, beforeParent.HasValue ? beforeParent.Value : null,
-                    afterParent.HasValue ? afterParent.Value : null, provenance)), token);
+                    afterParent.HasValue ? afterParent.Value : null, provenance, operationId);
+        await using var receipt = new NpgsqlCommand("INSERT INTO retravion_requirement.operation_history(product_internal_id,internal_id,operation_id,actor_identifier,occurred_at_utc_ticks,action,change) VALUES($1,$2,$3,$4,$5,$6,$7)", connection, transaction);
+        receipt.Parameters.AddWithValue(after.ProductInternalId); receipt.Parameters.AddWithValue(after.InternalId);
+        receipt.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)operationId ?? DBNull.Value);
+        receipt.Parameters.AddWithValue(((AuditActor.Identified)actor).Identifier); receipt.Parameters.AddWithValue(occurredAt.UtcTicks);
+        receipt.Parameters.AddWithValue(action); receipt.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(change));
+        await receipt.ExecuteNonQueryAsync(token);
+        await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
+            new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(after.InternalId.ToString()), AuditActionOutcome.Success,
+                requirementChange: change), token);
     }
 
     private async Task<Result<T>> Execute<T>(Func<NpgsqlConnection, NpgsqlTransaction, Task<Result<T>>> operation, CancellationToken token,
-        Result<T>? whenProductStorageMissing = null)
+        Result<T>? whenProductStorageMissing = null, Func<Task<bool>>? authorized = null)
     {
         var commitStarted = false;
         try
@@ -417,10 +481,13 @@ public sealed partial class PostgresRequirementStore(string connectionString,
             // cannot race target edits/reopening. No User Need storage is initialized here.
             await using (var targetLock = new NpgsqlCommand("SELECT pg_advisory_xact_lock(821749620111)", connection, transaction))
                 await targetLock.ExecuteNonQueryAsync(token);
+            await using (var areas = new NpgsqlCommand(PostgresProductAreaStore.Setup, connection, transaction)) await areas.ExecuteNonQueryAsync(token);
             await using (var setup = new NpgsqlCommand(Setup, connection, transaction)) await setup.ExecuteNonQueryAsync(token);
+            if (authorized is not null && !await authorized()) return Result.Failure<T>("Access denied.");
             var result = await operation(connection, transaction);
             if (result.IsSuccess)
             {
+                if (authorized is not null && !await authorized()) return Result.Failure<T>("Access denied.");
                 commitStarted = true;
                 if (commit is null) await transaction.CommitAsync(token); else await commit(transaction, token);
             }

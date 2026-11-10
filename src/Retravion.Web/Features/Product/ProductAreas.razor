@@ -1,0 +1,110 @@
+@page "/products/areas"
+@inject ProductOperations Products
+@inject ProductAreaOperations AreaOperations
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Product areas · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Product areas" BackHref="@BackPath" BackText="Product details" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_message is not null) { <MudAlert Severity="Severity.Info" role="status">@_message</MudAlert> }
+@if (_product is not null)
+{
+    <p>@_product.Id — @_product.Name @(!_product.IsActive ? "(Retired — read-only)" : "")</p>
+    <MudTable Items="_areas" Dense="true" Hover="true" Elevation="0" aria-label="Product areas">
+        <HeaderContent><MudTh>Code</MudTh><MudTh>Label</MudTh><MudTh>Status</MudTh><MudTh>Actions</MudTh></HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Code">@context.Area.Code</MudTd><MudTd DataLabel="Label">@context.Area.Label</MudTd>
+            <MudTd DataLabel="Status">@(context.Area.IsActive ? "Active" : "Retired")</MudTd>
+            <MudTd DataLabel="Actions"><MudButton OnClick="@(() => Select(context))" Disabled="@(_busy || _pending is not null || !_product.IsActive)">Manage</MudButton></MudTd>
+        </RowTemplate>
+        <NoRecordsContent><p>No areas yet.</p></NoRecordsContent>
+    </MudTable>
+    @if (_product.IsActive)
+    {
+        <MudPaper Class="pa-4 mt-4" Elevation="0">
+            <h2>@(_expected is null ? "Create area" : $"Manage {_expected.Area.Code}")</h2>
+            <MudTextField @bind-Value="_code" Label="Area code" HelperText="1–100 ASCII letters, digits or hyphens; displayed uppercase. Immutable and never reusable." Disabled="@(_busy || _pending is not null || _expected is not null)" />
+            <MudTextField @bind-Value="_label" Label="Area label" Disabled="@(_busy || _pending is not null)" />
+        </MudPaper>
+        <div class="product-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => Save(false))" Disabled="@(_busy || _pending is not null)">@(_expected is null ? "Create area" : "Save label")</MudButton>
+            @if (_expected?.Area.IsActive == true)
+            { <MudButton OnClick="@(() => _confirm = true)" Disabled="@(_busy || _pending is not null)">Retire area…</MudButton> }
+            <MudButton OnClick="New" Disabled="@(_busy || _pending is not null)">New area</MudButton>
+        </div>
+        @if (_confirm)
+        {
+            <MudAlert Severity="Severity.Warning">Retire @_expected!.Area.Code? Existing classifications remain, but this area cannot be newly selected. Retirement cannot be undone.</MudAlert>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => Save(true))" Disabled="_busy">Confirm retirement</MudButton>
+            <MudButton OnClick="@(() => _confirm = false)" Disabled="_busy">Cancel retirement</MudButton>
+        }
+    }
+    <MudButton OnClick="Retrieve" Disabled="_busy">@(_pending is null ? "Refresh areas" : "Retrieve operation outcome before retrying")</MudButton>
+    <h2>Area history</h2>
+    @foreach (var entry in _history)
+    { <p>@entry.OccurredAt.ToString("u") · @entry.Actor · @entry.Action · @entry.Change.After.Code — @entry.Change.After.Label · @(entry.Change.After.IsActive ? "Active" : "Retired")</p> }
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private IReadOnlyList<Retravion.Application.Product.ProductAreaSnapshot> _areas = [];
+    private IReadOnlyList<Retravion.Application.Product.ProductAreaHistory> _history = [];
+    private Retravion.Application.Product.ProductAreaSnapshot? _expected;
+    private string _code = "", _label = "";
+    private string? _error, _message;
+    private bool _busy, _confirm;
+    private Guid? _pending;
+    private Guid _pendingProduct;
+    private string BackPath => $"/products/details?id={Uri.EscapeDataString(ProductId ?? "")}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _product = null; New();
+        var product = await Products.Retrieve((await Authentication.GetAuthenticationStateAsync()).User, ProductId);
+        if (product.IsFailure) { _error = product.Error; return; }
+        _product = product.Value;
+        await Retrieve();
+    }
+    private void Select(Retravion.Application.Product.ProductAreaSnapshot area)
+    { _expected = area; _code = area.Area.Code; _label = area.Area.Label; _confirm = false; }
+    private void New() { _expected = null; _code = _label = ""; _confirm = false; }
+    private async Task Retrieve()
+    {
+        if (_busy || _product is null) return;
+        _busy = true;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var result = await AreaOperations.Areas(actor, _pending is null ? _product.InternalId : _pendingProduct, _pending);
+            if (result.IsFailure) { _error = result.Error; return; }
+            if (_pending is not null) _message = result.Value.Operation is null ? "The operation did not commit. Review current state before a user-directed retry." : "The operation committed. Review the recorded change.";
+            if (_pending is not null && _pendingProduct != _product.InternalId)
+            {
+                result = await AreaOperations.Areas(actor, _product.InternalId);
+                if (result.IsFailure) { _error = result.Error; return; }
+            }
+            _areas = result.Value.Areas; _history = result.Value.History;
+            _pending = null; _error = null;
+            if (_expected is not null)
+            {
+                var current = _areas.SingleOrDefault(r => r.Area.InternalId == _expected.Area.InternalId);
+                if (current is not null) Select(current);
+            }
+        }
+        finally { _busy = false; }
+    }
+    private async Task Save(bool retire)
+    {
+        if (_busy || _product is null || _pending is not null || retire && !_confirm) return;
+        _busy = true; _error = _message = null; _pending = Guid.NewGuid(); _pendingProduct = _product.InternalId;
+        try
+        {
+            var result = await AreaOperations.SaveArea((await Authentication.GetAuthenticationStateAsync()).User, _pending.Value,
+                _product.InternalId, _expected, _code, _label, retire);
+            if (result.IsFailure) { _error = result.Error; return; }
+            _pending = null; Select(result.Value);
+        }
+        finally { _busy = false; }
+        await Retrieve();
+    }
+}
