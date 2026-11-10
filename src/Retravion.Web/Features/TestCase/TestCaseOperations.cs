@@ -5,15 +5,54 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.TestCase;
 using Retravion.Domain.TestCase;
 using Retravion.Web.Features.Identity.Logout;
+using Retravion.Web.Features.Mcp;
 
 namespace Retravion.Web.Features.TestCase;
 
 internal sealed class TestCaseOperations(IAuthorizationService authorization, SessionTicketStore sessions,
     ITestCaseStore store, ITestCaseChangeTransaction changes, IAuditSubmission audit, TimeProvider time,
-    ILogger<TestCaseOperations> logger)
+    ILogger<TestCaseOperations> logger, McpCredentials mcpCredentials)
 {
+    internal Task<bool> CanRead(ClaimsPrincipal principal) => Allowed(principal);
+
+    internal Task<Result<TestCaseSnapshot>> DeniedMcpMutation(ClaimsPrincipal principal, string action, CancellationToken token) =>
+        Change(principal, action, (_, _) => Task.FromResult(Result.Failure<TestCaseSnapshot>("Access denied.")), token);
+
+    internal Task<Result<TestCaseSnapshot>> CreateMcp(ClaimsPrincipal principal, Retravion.Application.Product.IProductStore products,
+        string productId, string? title, string? description, string? preconditions, IEnumerable<TestCaseStep>? steps, CancellationToken token) =>
+        Change(principal, "test-case.create", async (actor, now) =>
+        {
+            var product = await products.Find(productId, token);
+            if (product.IsFailure) return Result.Failure<TestCaseSnapshot>(product.Error);
+            if (product.Value.HasNoValue) return Result.Failure<TestCaseSnapshot>("Product not found.");
+            var content = TestCaseContent.Create(title, description, preconditions, steps);
+            return content.IsFailure ? Result.Failure<TestCaseSnapshot>(content.Error) :
+                await changes.Create(product.Value.Value.InternalId, content.Value, actor, now, token, authorized: () => LiveAuthority(principal));
+        }, token);
+
+    internal Task<Result<TestCaseSnapshot>> EditMcp(ClaimsPrincipal principal, Guid internalId, Guid versionId, long expectedRevision,
+        string title, string description, string preconditions, IEnumerable<TestCaseStep> steps, CancellationToken token) =>
+        Change(principal, "test-case.edit", async (actor, now) =>
+        {
+            var found = await store.Find(internalId, versionId, token);
+            if (found.IsFailure) return Result.Failure<TestCaseSnapshot>(found.Error);
+            if (found.Value.HasNoValue) return Result.Failure<TestCaseSnapshot>("Test Case not found.");
+            var content = TestCaseContent.Create(title, description, preconditions, steps);
+            return content.IsFailure ? Result.Failure<TestCaseSnapshot>(content.Error) :
+                await changes.Update(found.Value.Value with { Revision = expectedRevision }, content.Value, actor, now, token,
+                    authorized: () => LiveAuthority(principal));
+        }, token);
+
     private async Task<bool> Allowed(ClaimsPrincipal principal) =>
         sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
+        (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || await mcpCredentials.IsAllowed(principal)) &&
+        (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
+
+    // Settings share database locks with business writes; do not reopen that store inside a transaction.
+    // Allowed checks configuration at the operation boundary; callbacks recheck live credential authority.
+    private async Task<bool> LiveAuthority(ClaimsPrincipal principal) =>
+        sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
+        (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || mcpCredentials.IsActive(principal)) &&
         (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
 
     private async Task<Result<TestCaseSnapshot>> Change(ClaimsPrincipal principal, string action,
@@ -48,7 +87,7 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
         Change(principal, "test-case.create", (actor, now) =>
         {
             var content = TestCaseContent.Create(title, description, preconditions, steps);
-            return content.IsSuccess ? changes.Create(productInternalId, content.Value, actor, now, token, areaId, operationId, () => Allowed(principal))
+            return content.IsSuccess ? changes.Create(productInternalId, content.Value, actor, now, token, areaId, operationId, () => LiveAuthority(principal))
                 : Task.FromResult(Result.Failure<TestCaseSnapshot>(content.Error));
         }, token);
 
@@ -58,7 +97,7 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
         Change(principal, "test-case.edit", (actor, now) =>
         {
             var content = TestCaseContent.Create(title, description, preconditions, steps);
-            return content.IsSuccess ? changes.Update(expected, content.Value, actor, now, token, changeArea, areaId, operationId, () => Allowed(principal))
+            return content.IsSuccess ? changes.Update(expected, content.Value, actor, now, token, changeArea, areaId, operationId, () => LiveAuthority(principal))
                 : Task.FromResult(Result.Failure<TestCaseSnapshot>(content.Error));
         }, token);
 
@@ -71,7 +110,7 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
 
     public Task<Result<TestCaseSnapshot>> CreateSuccessor(ClaimsPrincipal principal, TestCaseSnapshot expected, string? reason,
         CancellationToken token = default, Guid? operationId = null) => Change(principal, "test-case.version.create",
-        (actor, now) => changes.CreateSuccessor(expected, reason, actor, now, token, operationId, () => Allowed(principal)), token);
+        (actor, now) => changes.CreateSuccessor(expected, reason, actor, now, token, operationId, () => LiveAuthority(principal)), token);
 
     public Task<Result<TestCaseSnapshot>> Reopen(ClaimsPrincipal principal, TestCaseSnapshot expected, string? reason,
         CancellationToken token = default) => Change(principal, "test-case.reopen",

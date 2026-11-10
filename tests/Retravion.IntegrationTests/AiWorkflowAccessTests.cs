@@ -87,7 +87,7 @@ public sealed partial class AccountManagementTests
         using var scope = host.Factory.Services.CreateScope();
         Assert.True((await scope.ServiceProvider.GetRequiredService<UserNeedOperations>().EditDraft(principal, Guid.NewGuid(), 1, "ID", "secret", "secret")).IsFailure);
         await host.Authenticate();
-        Assert.Equal(10, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(14, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
         settings.Unavailable = true;
         using (var unavailable = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, unavailable.StatusCode);
         using (var unavailableIssue = await host.Issue()) Assert.Equal(HttpStatusCode.Forbidden, unavailableIssue.StatusCode);
@@ -208,7 +208,7 @@ public sealed partial class AccountManagementTests
         await host.Authenticate();
         using (var denied = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         await host.Authenticate();
-        Assert.Equal(10, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(14, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
     }
 
     [Fact]

@@ -49,7 +49,7 @@ public sealed partial class AccountManagementTests
         var token = await host.Authenticate();
         Assert.Equal(64, token.Length);
         var tools = await host.Rpc("tools/list");
-        Assert.Equal(new[] { "create_draft_requirement", "create_draft_user_need", "edit_draft_requirement", "edit_draft_user_need", "list_products", "list_requirements", "list_user_needs", "read_product", "read_requirement", "read_user_need" },
+        Assert.Equal(new[] { "create_draft_requirement", "create_draft_test_case", "create_draft_user_need", "edit_draft_requirement", "edit_draft_test_case", "edit_draft_user_need", "list_products", "list_requirements", "list_test_cases", "list_user_needs", "read_product", "read_requirement", "read_test_case", "read_user_need" },
             tools.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).Order().ToArray());
         using (var origin = await host.Send("tools/list", origin: "https://evil.invalid")) Assert.Equal(HttpStatusCode.Forbidden, origin.StatusCode);
         host.Mcp.DefaultRequestHeaders.Host = "evil.invalid";

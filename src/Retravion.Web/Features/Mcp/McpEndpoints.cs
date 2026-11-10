@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Retravion.Web.Features.Identity.Logout;
 using Retravion.Web.Features.UserNeed;
 using Retravion.Web.Features.Requirement;
+using Retravion.Web.Features.TestCase;
 
 namespace Retravion.Web.Features.Mcp;
 
@@ -13,6 +14,10 @@ internal static class McpEndpoints
     private const int MaxBodyBytes = 1024 * 1024;
     private static readonly Dictionary<string, string[]> Arguments = new(StringComparer.Ordinal)
     {
+        ["list_test_cases"] = ["productId"],
+        ["read_test_case"] = ["internalId", "versionId"],
+        ["create_draft_test_case"] = ["productId", "title", "description", "preconditions", "steps"],
+        ["edit_draft_test_case"] = ["internalId", "versionId", "expectedRevision", "title", "description", "preconditions", "steps"],
         ["list_products"] = [],
         ["read_product"] = ["productId"],
         ["list_user_needs"] = ["productId"],
@@ -24,6 +29,45 @@ internal static class McpEndpoints
         ["create_draft_requirement"] = ["productId", "id", "title", "statement", "type", "rationale"],
         ["edit_draft_requirement"] = ["internalId", "expectedRevision", "id", "title", "statement", "type", "rationale"]
     };
+
+    private static bool ValidTestCaseArguments(string tool, JsonElement arguments)
+    {
+        if (arguments.ValueKind != JsonValueKind.Object) return false;
+        var fields = arguments.EnumerateObject().ToArray();
+        if (fields.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != fields.Length) return false;
+        var create = tool == "create_draft_test_case";
+        var edit = tool == "edit_draft_test_case";
+        bool Has(string name, JsonValueKind kind) => arguments.TryGetProperty(name, out var value) && value.ValueKind == kind;
+        bool GuidValue(string name, bool optional = false) =>
+            !arguments.TryGetProperty(name, out var value) ? optional :
+            optional && value.ValueKind == JsonValueKind.Null || value.ValueKind == JsonValueKind.String && value.TryGetGuid(out _);
+        if (tool is "list_test_cases" or "create_draft_test_case")
+        {
+            if (!Has("productId", JsonValueKind.String)) return false;
+        }
+        else if (!GuidValue("internalId") || !GuidValue("versionId", !edit)) return false;
+        if (!create && !edit) return true;
+        if (edit && (!arguments.TryGetProperty("expectedRevision", out var revision) ||
+            revision.ValueKind != JsonValueKind.Number || !revision.TryGetInt64(out var number) || number <= 0)) return false;
+        foreach (var name in new[] { "title", "description", "preconditions", "steps" })
+        {
+            if (!arguments.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            {
+                if (edit) return false;
+                continue;
+            }
+            if (name != "steps") { if (value.ValueKind != JsonValueKind.String) return false; continue; }
+            if (value.ValueKind != JsonValueKind.Array) return false;
+            foreach (var step in value.EnumerateArray())
+            {
+                if (step.ValueKind != JsonValueKind.Object) return false;
+                var properties = step.EnumerateObject().ToArray();
+                if (properties.Length != 2 || !step.TryGetProperty("action", out var action) || action.ValueKind != JsonValueKind.String ||
+                    !step.TryGetProperty("expectedResult", out var result) || result.ValueKind != JsonValueKind.String) return false;
+            }
+        }
+        return true;
+    }
 
     internal static void MapMcpCredentials(this WebApplication app)
     {
@@ -101,6 +145,9 @@ internal static class McpEndpoints
                 if (tool is "create_draft_requirement" or "edit_draft_requirement")
                     await context.RequestServices.GetRequiredService<RequirementOperations>().DeniedMcpMutation(context.User,
                         tool == "create_draft_requirement" ? "requirement.create" : "requirement.edit", context.RequestAborted);
+                if (tool is "create_draft_test_case" or "edit_draft_test_case")
+                    await context.RequestServices.GetRequiredService<TestCaseOperations>().DeniedMcpMutation(context.User,
+                        tool == "create_draft_test_case" ? "test-case.create" : "test-case.edit", context.RequestAborted);
                 context.Response.StatusCode = transportAllowed ? 401 : 403;
                 return;
             }
@@ -109,6 +156,12 @@ internal static class McpEndpoints
                 (arguments.ValueKind != JsonValueKind.Object || arguments.EnumerateObject().Any(p => !accepted.Contains(p.Name, StringComparer.Ordinal))))
             {
                 // Reject lifecycle/actor injection rather than silently ignoring extra fields.
+                context.Response.StatusCode = 400;
+                return;
+            }
+            if (tool is "list_test_cases" or "read_test_case" or "create_draft_test_case" or "edit_draft_test_case" &&
+                (!parameters.TryGetProperty("arguments", out var caseArguments) || !ValidTestCaseArguments(tool, caseArguments)))
+            {
                 context.Response.StatusCode = 400;
                 return;
             }
