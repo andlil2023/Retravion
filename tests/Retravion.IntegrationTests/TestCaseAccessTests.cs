@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using CSharpFunctionalExtensions;
 using Microsoft.Extensions.DependencyInjection;
@@ -91,15 +92,32 @@ public sealed partial class AccountManagementTests
         Assert.Equal(0, store.Calls);
     }
 
+    [Fact]
+    public void TestCaseAuditRecorderRetainsEveryConcurrentSubmissionExactlyOnce()
+    {
+        var audit = new CaseAuditRecorder();
+        var expected = Enumerable.Range(0, 4096).Select(index => new AuditInformation(
+            new AuditActor.Identified($"actor-{index}"), DateTimeOffset.UnixEpoch,
+            index % 2 == 0 ? "test-case.create" : "test-case.edit",
+            new AuditTarget.Unknown(), AuditActionOutcome.Failure)).ToArray();
+
+        Parallel.For(0, expected.Length, new ParallelOptions { MaxDegreeOfParallelism = 8 }, index =>
+            Assert.Equal(AuditSubmissionResult.Success, audit.SubmitAsync(expected[index]).GetAwaiter().GetResult()));
+
+        var actual = audit.Events.ToArray();
+        Assert.Equal(expected.Length, actual.Length);
+        Assert.True(expected.ToHashSet().SetEquals(actual), "Every submitted audit event must be retained exactly once.");
+    }
+
     private sealed class CaseAuditRecorder : IAuditSubmission
     {
-        internal List<AuditInformation> Events { get; } = [];
+        internal ConcurrentQueue<AuditInformation> Events { get; } = new();
         internal bool Fail, Throw;
         public Task<AuditSubmissionResult> SubmitAsync(AuditInformation information, CancellationToken cancellationToken = default)
         {
             if (Throw) throw new IOException("secret provider details");
             if (Fail) return Task.FromResult(AuditSubmissionResult.Failure);
-            Events.Add(information); return Task.FromResult(AuditSubmissionResult.Success);
+            Events.Enqueue(information); return Task.FromResult(AuditSubmissionResult.Success);
         }
     }
     private sealed class CaseAuditLogger : ILogger<TestCaseOperations>
