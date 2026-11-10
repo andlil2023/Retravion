@@ -27,8 +27,8 @@ public sealed partial class AccountManagementTests
         var settings = new InMemoryAiWorkflowSettingsStore();
         await using var host = new McpTestHost(services => services.AddSingleton<IAiWorkflowSettingsStore>(settings));
         await host.Login(); await host.Replace();
-        var page = await host.Browser.GetStringAsync("/settings/ai-workflow");
-        Assert.Matches("<h1[^>]*>AI Workflow</h1>", page);
+        var page = await host.Browser.GetStringAsync("/settings/mcp");
+        Assert.Matches("<h1[^>]*>MCP settings</h1>", page);
         Assert.Contains("Settings navigation", page);
         Assert.Contains("Enable MCP", page);
         var action = System.Text.RegularExpressions.Regex.Match(page, "<button(?=[^>]*form=\"ai-workflow-settings-form\")[^>]*>[\\s\\S]*?</button>");
@@ -45,16 +45,81 @@ public sealed partial class AccountManagementTests
         using (var csrf = await host.Browser.PostAsync("/settings/ai-workflow/save", new FormUrlEncodedContent(fields)))
             Assert.Equal(HttpStatusCode.BadRequest, csrf.StatusCode);
         fields.Remove("confirm");
-        using (var confirmation = await host.Browser.PostAsync("/settings/ai-workflow/save", await host.Form("/settings/ai-workflow", fields)))
+        using (var confirmation = await host.Browser.PostAsync("/settings/ai-workflow/save", await host.Form("/settings/mcp", fields)))
             Assert.Equal(HttpStatusCode.BadRequest, confirmation.StatusCode);
         Assert.Equal(0, settings.Saves);
-        using (var enabled = await ConfigureAi(host, settings, true)) Assert.Equal(HttpStatusCode.Redirect, enabled.StatusCode);
+        using (var enabled = await ConfigureAi(host, settings, true))
+        {
+            Assert.Equal(HttpStatusCode.Redirect, enabled.StatusCode);
+            Assert.Equal("/settings/mcp?saved=true", enabled.Headers.Location?.OriginalString);
+        }
         Assert.Equal(new(true, 2), settings.Current);
         await host.Authenticate();
-        using (var stale = await host.Browser.PostAsync("/settings/ai-workflow/save", await host.Form("/settings/ai-workflow", new()
+        using (var stale = await host.Browser.PostAsync("/settings/ai-workflow/save", await host.Form("/settings/mcp", new()
         { ["before"] = "false", ["revision"] = "1", ["enabled"] = "false", ["confirm"] = "true" })))
             Assert.Equal(HttpStatusCode.BadRequest, stale.StatusCode);
         Assert.Equal(new(true, 2), settings.Current);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task AiWorkflowKeepsCredentialsAndCompactIntegrationsTogetherWithoutAdministration(bool enabled, bool unavailable)
+    {
+        var settings = new InMemoryAiWorkflowSettingsStore(enabled) { Unavailable = unavailable };
+        await using var host = new McpTestHost(services => services.AddSingleton<IAiWorkflowSettingsStore>(settings));
+        await host.Login(); await host.Replace();
+        foreach (var route in new[] { "/settings/ai-workflow", "/mcp-access" })
+        {
+            var page = await host.Browser.GetStringAsync(route);
+            Assert.Matches("<h1[^>]*>AI Workflow</h1>", page);
+            Assert.Contains("Your terminal credential", page);
+            Assert.Contains("Terminal integrations", page);
+            Assert.Contains("Download Pi skills", page);
+            Assert.Contains("Download Claude Code skills", page);
+            Assert.DoesNotContain("Application-wide MCP access", page);
+            Assert.DoesNotContain("ai-workflow-settings-form", page);
+            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(page, "href=\"/settings/mcp\"").Count);
+            var issue = System.Text.RegularExpressions.Regex.Match(page, "<button(?=[^>]*form=\"mcp-issue-form\")[^>]*>").Value;
+            Assert.NotEmpty(issue);
+            Assert.Equal(!enabled || unavailable, issue.Contains("disabled"));
+            Assert.Contains("30 minutes", page);
+            Assert.Contains("Never put it in prompts", page);
+            Assert.Contains("Remote access is not supported", page);
+            Assert.Contains("not credentials or permissions", page);
+            Assert.Contains("preserve unrelated client configuration", page);
+            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(page, "<summary[^>]*>Setup and checksum</summary>").Count);
+            Assert.DoesNotContain("<details open", page);
+            foreach (var client in new[] { "pi", "claude" })
+            {
+                var bundle = TerminalPackages.Get(client)!;
+                Assert.Contains(bundle.DownloadPath, page);
+                Assert.Contains(bundle.Sha256, page);
+            }
+            if (!enabled && !unavailable) Assert.Contains("MCP is disabled for all users", page);
+            if (unavailable) Assert.Contains("Credential creation is unavailable", page);
+        }
+        Assert.Equal(0, settings.Saves);
+    }
+
+    [Fact]
+    public async Task McpSettingsRequiresCompletedAdministratorAuthentication()
+    {
+        await using var host = new McpTestHost();
+        using (var anonymous = await host.Browser.GetAsync("/settings/mcp"))
+            Assert.Equal("/", anonymous.Headers.Location?.OriginalString);
+        await host.Login();
+        using (var restricted = await host.Browser.GetAsync("/settings/mcp"))
+            Assert.Equal("/password-replacement", restricted.Headers.Location?.OriginalString);
+        Assert.DoesNotContain("href=\"/settings/mcp\"", await host.Browser.GetStringAsync("/password-replacement"));
+        await host.Replace();
+        var page = await host.Browser.GetStringAsync("/settings/mcp?from=workflow");
+        Assert.Contains("aria-label=\"MCP settings content\"", page);
+        Assert.Matches("href=\"/settings/mcp\"[^>]*aria-current=\"page\"", page);
+        Assert.Contains("href=\"/settings/ai-workflow\"", page);
+        Assert.Contains("ai-workflow-settings-form", page);
+        Assert.DoesNotContain("mcp-issue-form", page);
     }
 
     [Fact]
@@ -123,6 +188,11 @@ public sealed partial class AccountManagementTests
             var page = await user.GetStringAsync("/settings/ai-workflow");
             Assert.Contains("Download Pi skills", page);
             Assert.DoesNotContain("id=\"ai-workflow-settings-form\"", page);
+            Assert.DoesNotContain("href=\"/settings/mcp\"", page);
+            Assert.DoesNotContain("href=\"/settings/mcp\"", await user.GetStringAsync("/home"));
+            using var settingsPage = await user.GetAsync("/settings/mcp");
+            Assert.Equal(HttpStatusCode.Forbidden, settingsPage.StatusCode);
+            Assert.DoesNotContain("ai-workflow-settings-form", await settingsPage.Content.ReadAsStringAsync());
             using var denied = await user.PostAsync("/settings/ai-workflow/save", new StringContent("secret"));
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         }
@@ -278,7 +348,7 @@ public sealed partial class AccountManagementTests
     private static Task<HttpResponseMessage> ConfigureAi(McpTestHost host, InMemoryAiWorkflowSettingsStore settings, bool enabled) =>
         ConfigureAi(host, settings.Current, enabled);
     private static async Task<HttpResponseMessage> ConfigureAi(McpTestHost host, AiWorkflowSettings expected, bool enabled) =>
-        await host.Browser.PostAsync("/settings/ai-workflow/save", await host.Form("/settings/ai-workflow", new()
+        await host.Browser.PostAsync("/settings/ai-workflow/save", await host.Form("/settings/mcp", new()
         { ["before"] = expected.Enabled.ToString(), ["revision"] = expected.Revision.ToString(), ["enabled"] = enabled.ToString(), ["confirm"] = "true" }));
 
     private sealed class SettingsAuditRecorder : IAuditSubmission

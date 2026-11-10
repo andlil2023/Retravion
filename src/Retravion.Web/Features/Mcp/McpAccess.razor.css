@@ -1,0 +1,23 @@
+.ai-workflow {
+    max-width: 64rem;
+}
+
+.ai-workflow p {
+    margin: .5rem 0;
+}
+
+.credential-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+summary {
+    cursor: pointer;
+    padding: .5rem 0;
+}
+
+.package-detail {
+    overflow-wrap: anywhere;
+    font-size: .875rem;
+}

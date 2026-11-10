@@ -1,0 +1,55 @@
+@page "/settings/mcp"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Administrator")]
+@using Microsoft.AspNetCore.Components.Sections
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components.Authorization
+@using Retravion.Application.AiWorkflow
+@using MudBlazor
+@using Retravion.Web.Components
+@inject AiWorkflowOperations Operations
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>MCP settings · Retravion</PageTitle>
+<SectionContent SectionName="mcp-page-header">
+    <PageHeader Title="MCP settings" BackHref="/settings/ai-workflow" BackText="AI Workflow" />
+</SectionContent>
+<MudPaper Class="pa-4" Elevation="0" Style="max-width:40rem">
+    <MudText Typo="Typo.h6" HtmlTag="h2">Application-wide MCP access</MudText>
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+    }
+    else if (_settings is not null)
+    {
+        <p>MCP is <strong>@(_settings.Enabled ? "Enabled" : "Disabled")</strong> for all users.</p>
+        <p>Only administrators can change this setting. It survives restarts and starts disabled. Browser access is unaffected.</p>
+        <MudAlert Severity="Severity.Warning" Class="my-4">Disabling invalidates all MCP credentials. Re-enabling requires fresh credentials.</MudAlert>
+        <p>Requests already executing when disabling begins may complete; requests starting after confirmed disabling are denied.</p>
+        <form id="ai-workflow-settings-form" method="post" action="/settings/ai-workflow/save" data-enhance="false">
+            <AntiforgeryToken />
+            <input type="hidden" name="before" value="@_settings.Enabled.ToString()" />
+            <input type="hidden" name="revision" value="@_settings.Revision" />
+            <input type="hidden" name="enabled" value="@((!_settings.Enabled).ToString())" />
+            <label><input type="checkbox" name="confirm" value="true" required /> Confirm @(_settings.Enabled ? "disabling" : "enabling") MCP for all users</label>
+        </form>
+    }
+</MudPaper>
+@if (_settings is not null)
+{
+    <div class="mt-4">
+        <MudButton ButtonType="ButtonType.Submit" form="ai-workflow-settings-form" Variant="Variant.Filled" Color="Color.Primary">@(_settings.Enabled ? "Disable MCP" : "Enable MCP")</MudButton>
+    </div>
+}
+
+@code {
+    private AiWorkflowSettings? _settings;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Operations.Read((await Authentication.GetAuthenticationStateAsync()).User);
+        if (result.IsFailure) _error = result.Error;
+        else _settings = result.Value;
+    }
+}

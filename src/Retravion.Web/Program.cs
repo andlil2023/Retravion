@@ -257,7 +257,7 @@ app.Use(async (context, next) =>
             return;
         }
         if ((!context.User.IsInRole("Administrator") && !context.User.IsInRole("User")) ||
-            (path.StartsWithSegments("/administration") && !context.User.IsInRole("Administrator")))
+            ((path.StartsWithSegments("/administration") || path.StartsWithSegments("/settings/mcp")) && !context.User.IsInRole("Administrator")))
         {
             await context.RequestServices.GetRequiredService<AccountAudit>().RejectedRequest(context);
             context.Response.StatusCode = StatusCodes.Status403Forbidden;

@@ -30,6 +30,9 @@
                     <p class="navigation-caption">SETTINGS</p>
                     <nav aria-label="Settings navigation">
                         <a class="navigation-node @(IsMcp ? "selected" : "")" href="/settings/ai-workflow" aria-current="@(IsMcp ? "page" : null)"><MudIcon Icon="@Icons.Material.Outlined.Terminal" /><span>AI Workflow</span></a>
+                        <AuthorizeView Policy="Administrator" Context="administrator">
+                            <a class="navigation-node @(IsMcpSettings ? "selected" : "")" href="/settings/mcp" aria-current="@(IsMcpSettings ? "page" : null)"><MudIcon Icon="@Icons.Material.Outlined.Settings" /><span>MCP settings</span></a>
+                        </AuthorizeView>
                     </nav>
                 </section>
             </AuthorizeView>
@@ -87,7 +90,7 @@
                 {
                     <SectionOutlet SectionName="product-page-header" />
                 }
-                else if (IsMcp)
+                else if (IsMcp || IsMcpSettings)
                 {
                     <SectionOutlet SectionName="mcp-page-header" />
                 }
@@ -101,7 +104,7 @@
                            aria-label="@(_darkMode ? "Use light theme" : "Use dark theme")"
                            title="@(_darkMode ? "Use light theme" : "Use dark theme")" />
         </header>
-        <main id="page-content" class="page-content" tabindex="-1" aria-label="@(IsCatalog ? "UI catalog content" : IsAdministration ? "Account management content" : IsProduct ? "Products content" : IsMcp ? "AI Workflow content" : "Overview content")">
+        <main id="page-content" class="page-content" tabindex="-1" aria-label="@(IsCatalog ? "UI catalog content" : IsAdministration ? "Account management content" : IsProduct ? "Products content" : IsMcpSettings ? "MCP settings content" : IsMcp ? "AI Workflow content" : "Overview content")">
             @Body
         </main>
     </div>
@@ -110,6 +113,7 @@
 @code {
     private bool IsMcp => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/') is var path &&
         (path.Equals("settings/ai-workflow", StringComparison.OrdinalIgnoreCase) || path.Equals("mcp-access", StringComparison.OrdinalIgnoreCase));
+    private bool IsMcpSettings => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("settings/mcp", StringComparison.OrdinalIgnoreCase);
     private bool IsCatalog => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("development/ui-catalog", StringComparison.OrdinalIgnoreCase);
     private bool IsAdministration => Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("administration/", StringComparison.OrdinalIgnoreCase);
     private bool IsProduct => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("products", StringComparison.OrdinalIgnoreCase)
