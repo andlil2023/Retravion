@@ -91,7 +91,7 @@ public sealed partial class AccountManagementTests
         Assert.Contains("class=\"navigation-node product-navigation-item selected\"", details);
         Assert.Contains("href=\"/products/details?id=" + Uri.EscapeDataString(id) + "\"", details);
         AssertProductNavigationExpanded(details);
-        var navigation = Regex.Match(details, "<div id=\"product-navigation-list\"[^>]*>[\\s\\S]*?</div>").Value;
+        var navigation = Regex.Match(details, "<nav aria-label=\"Main navigation\"[^>]*>[\\s\\S]*?</nav>").Value;
         var encodedId = Uri.EscapeDataString(id);
         var expectedNodes = new[]
         {
@@ -102,7 +102,7 @@ public sealed partial class AccountManagementTests
             (Href: $"/test-cases?product={encodedId}", Label: "Test Cases", Icon: MudBlazor.Icons.Material.Outlined.FactCheck),
             (Href: $"/revisions?product={encodedId}", Label: "Revisions", Icon: MudBlazor.Icons.Material.Outlined.History)
         };
-        var nodes = Regex.Matches(navigation, "<a\\b[^>]*>[\\s\\S]*?</a>").Cast<Match>().ToArray();
+        var nodes = Regex.Matches(navigation, "<a\\b(?=[^>]*class=\"[^\"]*product-navigation-item)[^>]*>[\\s\\S]*?</a>").Cast<Match>().ToArray();
         Assert.Equal(expectedNodes.Length, nodes.Length);
         foreach (var expected in expectedNodes)
         {
