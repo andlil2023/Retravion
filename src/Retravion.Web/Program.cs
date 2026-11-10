@@ -52,7 +52,8 @@ builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = "Re
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
     .WithTools<UserNeedMcpTools>()
     .WithTools<ProductMcpTools>()
-    .WithTools<RequirementMcpTools>();
+    .WithTools<RequirementMcpTools>()
+    .WithTools<TestCaseMcpTools>();
 builder.Services.AddScoped<AuthenticationStateProvider, SessionAuthenticationStateProvider>();
 builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
     .Configure<SessionTicketStore, TimeProvider>((options, store, time) =>
