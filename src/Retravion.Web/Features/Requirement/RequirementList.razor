@@ -28,6 +28,7 @@ else
             </MudSelect>
         </MudItem>
     </MudGrid>
+    <AreaSelect Product="_product.InternalId" @bind-Value="_area" Filter="true" />
     <MudTable Items="Filtered" Dense="true" Hover="true" Elevation="0" aria-label="Requirements">
         <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Type</MudTh><MudTh>Status</MudTh></HeaderContent>
         <RowTemplate>
@@ -47,14 +48,16 @@ else
     private Retravion.Domain.Product.Product? _product;
     private IReadOnlyList<RequirementSnapshot>? _requirements;
     private string? _error, _search;
+    private Guid? _area;
     private RequirementType? _type;
     private RequirementStatus? _status;
-    private IReadOnlyList<RequirementSnapshot> Filtered => Retravion.Application.Requirement.RequirementList.Filter(_requirements ?? [], _type, _status, _search);
+    private IReadOnlyList<RequirementSnapshot> Filtered => Retravion.Application.Requirement.RequirementList.Filter((_requirements ?? []).Where(row => _area is null ||
+        (_area == Guid.Empty ? row.Requirement.AreaId is null : row.Requirement.AreaId == _area)), _type, _status, _search);
     private string ProductPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
     private string CreatePath => $"/requirements/create?product={Uri.EscapeDataString(ProductId ?? "")}";
     protected override async Task OnParametersSetAsync()
     {
-        _requirements = null; _product = null; _error = null; _search = null; _type = null; _status = null;
+        _requirements = null; _product = null; _error = null; _search = null; _type = null; _status = null; _area = null;
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         var product = await Products.Retrieve(actor, ProductId);
         if (product.IsFailure) { _error = product.Error; return; }

@@ -20,6 +20,8 @@
     var value = _case.TestCase;
     <p>@_product.Id – @_product.Name</p>
     <h2>@value.Id – @value.Content.Title</h2>
+    @if (value.AreaId is null) { <p>Area: Unclassified</p> }
+    else { <AreaDisplay Product="_product.InternalId" AreaId="value.AreaId" /> }
     <p>@($"v{value.VersionNumber}") · @Status(value.Status)</p>
     @if (!_product.IsActive) { <p>This Test Case is read-only because its Product is retired.</p> }
     @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
@@ -200,13 +202,23 @@
             if (targets.IsFailure) { _error = targets.Error; return; }
             _targets.AddRange(targets.Value);
         }
-        _uncertain = false;
+        _uncertain = _successorOperation is not null;
     }
     private async Task RetrieveOutcome()
     {
         if (_busy || !_uncertain) return;
         _busy = true;
-        try { await Load(); }
+        try
+        {
+            if (_successorOperation is { } operation)
+            {
+                var outcome = await Operations.Outcome((await Authentication.GetAuthenticationStateAsync()).User, _pendingProduct, operation);
+                if (outcome.IsFailure) { _error = outcome.Error; return; }
+                if (outcome.Value.HasValue) { Id = outcome.Value.Value.InternalId; VersionId = outcome.Value.Value.VersionId; }
+                _successorOperation = null;
+            }
+            await Load();
+        }
         finally { _busy = false; }
     }
     private TestCaseRequirementLink? Selected => _targets.FirstOrDefault(row => row.Requirement.VersionId == _selectedVersion) is { } target
@@ -222,7 +234,13 @@
     private Task ApplyLink() => _pendingOperation is { } operation && _pendingTarget is { } target
         ? Change((actor, expected) => Operations.ChangeLink(actor, expected, operation, target, _pendingReplacement, confirmed: true)) : Task.CompletedTask;
     private Task Review(string decision) => Change((actor, expected) => Operations.Review(actor, expected, decision, _comment));
-    private Task CreateSuccessor() => Change((actor, expected) => Operations.CreateSuccessor(actor, expected, _reason));
+    private Guid? _successorOperation;
+    private Guid _pendingProduct;
+    private Task CreateSuccessor() => Change((actor, expected) =>
+    {
+        _successorOperation = Guid.NewGuid(); _pendingProduct = expected.TestCase.ProductInternalId;
+        return Operations.CreateSuccessor(actor, expected, _reason, operationId: _successorOperation);
+    });
     private Task Reopen() => Change((actor, expected) => Operations.Reopen(actor, expected, _reason));
     private async Task Change(Func<System.Security.Claims.ClaimsPrincipal, TestCaseSnapshot, Task<CSharpFunctionalExtensions.Result<TestCaseSnapshot>>> operation)
     {
@@ -235,10 +253,11 @@
             {
                 _error = result.Error;
                 _uncertain = result.Error.Contains("could not be confirmed", StringComparison.Ordinal);
+                if (!_uncertain) _successorOperation = null;
             }
             else
             {
-                _comment = null; _reason = null; VersionId = result.Value.TestCase.VersionId;
+                _successorOperation = null; _comment = null; _reason = null; VersionId = result.Value.TestCase.VersionId;
                 Navigation.NavigateTo($"/test-cases/details?id={Id}&version={VersionId}");
                 await Load();
             }

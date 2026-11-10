@@ -23,7 +23,16 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
             principal.FindFirstValue(ClaimTypes.NameIdentifier) is { Length: > 0 } id
             ? new AuditActor.Identified(id) : new AuditActor.Unknown();
         var now = time.GetUtcNow();
-        if (await Allowed(principal) && actor is AuditActor.Identified) return await operation(actor, now);
+        await sessions.MutationGate.WaitAsync(token);
+        try
+        {
+            if (await Allowed(principal) && actor is AuditActor.Identified)
+            {
+                var result = await operation(actor, now);
+                if (result.IsSuccess || result.Error != "Access denied.") return result;
+            }
+        }
+        finally { sessions.MutationGate.Release(); }
         try
         {
             if (await audit.SubmitAsync(new AuditInformation(actor, now, action, new AuditTarget.Unknown(), AuditActionOutcome.Failure), token)
@@ -35,20 +44,21 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
     }
 
     public Task<Result<TestCaseSnapshot>> Create(ClaimsPrincipal principal, Guid productInternalId,
-        string? title, string? description, string? preconditions, IEnumerable<TestCaseStep>? steps, CancellationToken token = default) =>
+        string? title, string? description, string? preconditions, IEnumerable<TestCaseStep>? steps, CancellationToken token = default, Guid? areaId = null, Guid? operationId = null) =>
         Change(principal, "test-case.create", (actor, now) =>
         {
             var content = TestCaseContent.Create(title, description, preconditions, steps);
-            return content.IsSuccess ? changes.Create(productInternalId, content.Value, actor, now, token)
+            return content.IsSuccess ? changes.Create(productInternalId, content.Value, actor, now, token, areaId, operationId, () => Allowed(principal))
                 : Task.FromResult(Result.Failure<TestCaseSnapshot>(content.Error));
         }, token);
 
     public Task<Result<TestCaseSnapshot>> Edit(ClaimsPrincipal principal, TestCaseSnapshot expected,
-        string? title, string? description, string? preconditions, IEnumerable<TestCaseStep>? steps, CancellationToken token = default) =>
+        string? title, string? description, string? preconditions, IEnumerable<TestCaseStep>? steps, CancellationToken token = default,
+        bool changeArea = false, Guid? areaId = null, Guid? operationId = null) =>
         Change(principal, "test-case.edit", (actor, now) =>
         {
             var content = TestCaseContent.Create(title, description, preconditions, steps);
-            return content.IsSuccess ? changes.Update(expected, content.Value, actor, now, token)
+            return content.IsSuccess ? changes.Update(expected, content.Value, actor, now, token, changeArea, areaId, operationId, () => Allowed(principal))
                 : Task.FromResult(Result.Failure<TestCaseSnapshot>(content.Error));
         }, token);
 
@@ -60,22 +70,12 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
         }, (actor, now) => changes.Review(expected, decision, comment, actor, now, token), token);
 
     public Task<Result<TestCaseSnapshot>> CreateSuccessor(ClaimsPrincipal principal, TestCaseSnapshot expected, string? reason,
-        CancellationToken token = default) => Change(principal, "test-case.version.create",
-        (actor, now) => changes.CreateSuccessor(expected, reason, actor, now, token), token);
+        CancellationToken token = default, Guid? operationId = null) => Change(principal, "test-case.version.create",
+        (actor, now) => changes.CreateSuccessor(expected, reason, actor, now, token, operationId, () => Allowed(principal)), token);
 
-    public async Task<Result<TestCaseSnapshot>> Reopen(ClaimsPrincipal principal, TestCaseSnapshot expected, string? reason,
-        CancellationToken token = default)
-    {
-        // Order this newly enabled write with logout/reset revocation, including database-lock waits.
-        // Authorization must be checked inside the gate, which remains held through the outcome.
-        await sessions.MutationGate.WaitAsync(token);
-        try
-        {
-            return await Change(principal, "test-case.reopen",
-                (actor, now) => changes.Reopen(expected, reason, actor, now, token), token);
-        }
-        finally { sessions.MutationGate.Release(); }
-    }
+    public Task<Result<TestCaseSnapshot>> Reopen(ClaimsPrincipal principal, TestCaseSnapshot expected, string? reason,
+        CancellationToken token = default) => Change(principal, "test-case.reopen",
+            (actor, now) => changes.Reopen(expected, reason, actor, now, token), token);
 
     public Task<Result<TestCaseSnapshot>> ChangeLink(ClaimsPrincipal principal, TestCaseSnapshot expected, string operation,
         TestCaseRequirementLink target, TestCaseRequirementLink? replacement = null, bool confirmed = false, CancellationToken token = default) =>
@@ -91,6 +91,9 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
 
     public async Task<Result<IReadOnlyList<TestCaseHistory>>> History(ClaimsPrincipal principal, Guid internalId, CancellationToken token = default) =>
         await Allowed(principal) ? await store.History(internalId, token) : Result.Failure<IReadOnlyList<TestCaseHistory>>("Access denied.");
+
+    public async Task<Result<Maybe<TestCaseAuditDetails>>> Outcome(ClaimsPrincipal principal, Guid product, Guid operationId, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.Outcome(product, operationId, token) : Result.Failure<Maybe<TestCaseAuditDetails>>("Access denied.");
 
     public async Task<Result<IReadOnlyList<TestCaseSnapshot>>> List(ClaimsPrincipal principal, Guid productInternalId, CancellationToken token = default) =>
         await Allowed(principal) ? await store.List(productInternalId, token) : Result.Failure<IReadOnlyList<TestCaseSnapshot>>("Access denied.");

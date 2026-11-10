@@ -3,7 +3,8 @@ using CSharpFunctionalExtensions;
 
 namespace Retravion.Domain.Revision;
 
-public sealed record ReleasedRevisionMember(RevisionSelection Endpoint, string Identifier, string Title, bool Explicit);
+public sealed record ReleasedRevisionMember(RevisionSelection Endpoint, string Identifier, string Title, bool Explicit,
+    Retravion.Domain.Product.AreaEvidence? Area = null);
 
 public sealed record ReleasedRevision : Revision
 {
@@ -29,7 +30,7 @@ public sealed record ReleasedRevision : Revision
         var values = members?.ToImmutableArray() ?? [];
         if (draft is null || draft.Selections.IsEmpty || string.IsNullOrWhiteSpace(actor) || time == default || values.IsEmpty ||
             values.Any(m => m is null || m.Endpoint is null || m.Endpoint.Validate().IsFailure ||
-                string.IsNullOrWhiteSpace(m.Identifier) || m.Title is null || m.Explicit != draft.Selections.Contains(m.Endpoint)) ||
+                string.IsNullOrWhiteSpace(m.Identifier) || m.Title is null || m.Area is { IsValid: false } || m.Explicit != draft.Selections.Contains(m.Endpoint)) ||
             values.DistinctBy(m => (m.Endpoint.Kind, m.Endpoint.VersionId)).Count() != values.Length ||
             draft.Selections.Any(root => !values.Any(m => m.Endpoint == root)))
             return Result.Failure<ReleasedRevision>("Invalid frozen release evidence.");

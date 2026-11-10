@@ -44,24 +44,25 @@ public abstract record TestCase
     public int VersionNumber { get; }
     public string? CreationReason { get; }
     public Guid? SourceVersionId { get; }
+    public Guid? AreaId { get; }
     public abstract string Status { get; }
     public TestCaseContent Content { get; }
     public ImmutableArray<TestCaseRequirementLink> Links { get; }
 
     private protected TestCase(Guid internalId, Guid productInternalId, Guid versionId, long number,
-        TestCaseContent content, ImmutableArray<TestCaseRequirementLink> links, int versionNumber, string? reason, Guid? source) =>
-        (InternalId, ProductInternalId, VersionId, Number, Content, Links, VersionNumber, CreationReason, SourceVersionId) =
-        (internalId, productInternalId, versionId, number, content, links, versionNumber, reason, source);
+        TestCaseContent content, ImmutableArray<TestCaseRequirementLink> links, int versionNumber, string? reason, Guid? source, Guid? areaId) =>
+        (InternalId, ProductInternalId, VersionId, Number, Content, Links, VersionNumber, CreationReason, SourceVersionId, AreaId) =
+        (internalId, productInternalId, versionId, number, content, links, versionNumber, reason, source, areaId);
 
-    public static Result<TestCase> Create(Guid productInternalId, long number, TestCaseContent content) =>
-        Restore(Guid.NewGuid(), productInternalId, Guid.NewGuid(), number, content);
+    public static Result<TestCase> Create(Guid productInternalId, long number, TestCaseContent content, Guid? areaId = null) =>
+        Restore(Guid.NewGuid(), productInternalId, Guid.NewGuid(), number, content, areaId: areaId);
 
     public static Result<TestCase> Restore(Guid internalId, Guid productInternalId, Guid versionId, long number,
         TestCaseContent content, string status = "Draft", int versionNumber = 1, string? creationReason = null,
-        Guid? sourceVersionId = null, IEnumerable<TestCaseRequirementLink>? links = null)
+        Guid? sourceVersionId = null, IEnumerable<TestCaseRequirementLink>? links = null, Guid? areaId = null)
     {
         var endpoints = links?.ToImmutableArray() ?? [];
-        if (internalId == Guid.Empty || productInternalId == Guid.Empty || versionId == Guid.Empty || number <= 0 || content is null ||
+        if (internalId == Guid.Empty || productInternalId == Guid.Empty || versionId == Guid.Empty || areaId == Guid.Empty || number <= 0 || content is null ||
             versionNumber < 1 || (versionNumber == 1 ? creationReason is not null || sourceVersionId is not null :
                 string.IsNullOrWhiteSpace(creationReason) || sourceVersionId is null || sourceVersionId == Guid.Empty || sourceVersionId == versionId) ||
             endpoints.Any(link => link is null || link.RequirementInternalId == Guid.Empty || link.RequirementVersionId == Guid.Empty) ||
@@ -71,15 +72,19 @@ public abstract record TestCase
             return Result.Failure<TestCase>("Review requires complete content and at least one Requirement link.");
         return status switch
         {
-            "Draft" => new Draft(internalId, productInternalId, versionId, number, content, endpoints, versionNumber, creationReason, sourceVersionId),
-            "InReview" => new InReview(internalId, productInternalId, versionId, number, content, endpoints, versionNumber, creationReason, sourceVersionId),
-            "Approved" => new Approved(internalId, productInternalId, versionId, number, content, endpoints, versionNumber, creationReason, sourceVersionId),
+            "Draft" => new Draft(internalId, productInternalId, versionId, number, content, endpoints, versionNumber, creationReason, sourceVersionId, areaId),
+            "InReview" => new InReview(internalId, productInternalId, versionId, number, content, endpoints, versionNumber, creationReason, sourceVersionId, areaId),
+            "Approved" => new Approved(internalId, productInternalId, versionId, number, content, endpoints, versionNumber, creationReason, sourceVersionId, areaId),
             _ => Result.Failure<TestCase>("The Test Case status is invalid.")
         };
     }
 
     private Result<TestCase> Change(string status, TestCaseContent content, IEnumerable<TestCaseRequirementLink> links) =>
-        Restore(InternalId, ProductInternalId, VersionId, Number, content, status, VersionNumber, CreationReason, SourceVersionId, links);
+        Restore(InternalId, ProductInternalId, VersionId, Number, content, status, VersionNumber, CreationReason, SourceVersionId, links, AreaId);
+
+    public Result<TestCase> Classify(Guid? areaId) => Status != "Draft"
+        ? Result.Failure<TestCase>("Only Draft Test Cases can be classified.")
+        : Restore(InternalId, ProductInternalId, VersionId, Number, Content, Status, VersionNumber, CreationReason, SourceVersionId, Links, areaId);
 
     public virtual Result<TestCase> Edit(TestCaseContent content) => Result.Failure<TestCase>("Only Draft Test Cases can be edited.");
     public virtual Result<TestCase> ChangeLinks(IEnumerable<TestCaseRequirementLink> links) => Result.Failure<TestCase>("Only Draft Test Cases can change links.");
@@ -91,12 +96,12 @@ public abstract record TestCase
 
     public bool SameState(TestCase other) => InternalId == other.InternalId && ProductInternalId == other.ProductInternalId &&
         VersionId == other.VersionId && Number == other.Number && VersionNumber == other.VersionNumber && Status == other.Status &&
-        CreationReason == other.CreationReason && SourceVersionId == other.SourceVersionId && Content.SameContent(other.Content) && Links.SequenceEqual(other.Links);
+        CreationReason == other.CreationReason && SourceVersionId == other.SourceVersionId && AreaId == other.AreaId && Content.SameContent(other.Content) && Links.SequenceEqual(other.Links);
 
     private sealed record Draft : TestCase
     {
         public Draft(Guid id, Guid product, Guid version, long number, TestCaseContent content, ImmutableArray<TestCaseRequirementLink> links,
-            int versionNumber, string? reason, Guid? source) : base(id, product, version, number, content, links, versionNumber, reason, source) { }
+            int versionNumber, string? reason, Guid? source, Guid? areaId) : base(id, product, version, number, content, links, versionNumber, reason, source, areaId) { }
         public override string Status => "Draft";
         public override Result<TestCase> Edit(TestCaseContent content) => Change("Draft", content, Links);
         public override Result<TestCase> ChangeLinks(IEnumerable<TestCaseRequirementLink> links) => Change("Draft", Content, links);
@@ -106,7 +111,7 @@ public abstract record TestCase
     private sealed record InReview : TestCase
     {
         public InReview(Guid id, Guid product, Guid version, long number, TestCaseContent content, ImmutableArray<TestCaseRequirementLink> links,
-            int versionNumber, string? reason, Guid? source) : base(id, product, version, number, content, links, versionNumber, reason, source) { }
+            int versionNumber, string? reason, Guid? source, Guid? areaId) : base(id, product, version, number, content, links, versionNumber, reason, source, areaId) { }
         public override string Status => "InReview";
         public override Result<TestCase> Approve(bool allTargetsApproved) => allTargetsApproved ? Change("Approved", Content, Links)
             : Result.Failure<TestCase>("Every linked Requirement version must be Approved.");
@@ -116,13 +121,13 @@ public abstract record TestCase
     private sealed record Approved : TestCase
     {
         public Approved(Guid id, Guid product, Guid version, long number, TestCaseContent content, ImmutableArray<TestCaseRequirementLink> links,
-            int versionNumber, string? reason, Guid? source) : base(id, product, version, number, content, links, versionNumber, reason, source) { }
+            int versionNumber, string? reason, Guid? source, Guid? areaId) : base(id, product, version, number, content, links, versionNumber, reason, source, areaId) { }
         public override string Status => "Approved";
         public override Result<TestCase> Reopen(string? reason) => string.IsNullOrWhiteSpace(reason)
             ? Result.Failure<TestCase>("A reopening reason is required.") : Change("Draft", Content, Links);
         public override Result<TestCase> CreateSuccessor(string? reason) => string.IsNullOrWhiteSpace(reason)
             ? Result.Failure<TestCase>("A change reason is required.") : VersionNumber == int.MaxValue
                 ? Result.Failure<TestCase>("The version number limit has been reached.")
-                : Restore(InternalId, ProductInternalId, Guid.NewGuid(), Number, Content, "Draft", VersionNumber + 1, reason, VersionId, Links);
+                : Restore(InternalId, ProductInternalId, Guid.NewGuid(), Number, Content, "Draft", VersionNumber + 1, reason, VersionId, Links, AreaId);
     }
 }

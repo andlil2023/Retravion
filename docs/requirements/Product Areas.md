@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-Approved direction from the operator interview for [PBI #187](https://github.com/andlil2023/Retravion/issues/187). This specification is documentation only: it does not implement functionality, change existing public contracts or provide evidence of runtime verification. Planned cases are in [Product Areas — Test Specifications](../test-cases/Product%20Areas.md).
+Approved direction from the operator interview for [PBI #187](https://github.com/andlil2023/Retravion/issues/187), with bounded implementation decisions approved in [PBI #189](https://github.com/andlil2023/Retravion/issues/189). This specification is not runtime verification evidence; actual results belong in the implementation PR. Cases are in [Product Areas — Test Specifications](../test-cases/Product%20Areas.md).
 
 **Parent need:** [UN-AREA-001 — Organize Product Information by Area](../user-needs/UN-AREA-001%20-%20Organize%20Product%20Information%20by%20Area.md). Existing lifecycle and release rules include REQ-REQ-003/006, REQ-TC-003/005, REQ-LINK-009 and REQ-REV-004. Audit traceability includes REQ-SYS-AUDIT-003; Product-specific audit rules are not automatically generalized.
 
@@ -15,7 +15,7 @@ Approved direction from the operator interview for [PBI #187](https://github.com
 - An area has a stable code, a changeable label and active or retired status. Codes are unique within a Product; separate Products may use the same code. A code cannot change or be reused for a different meaning, including after retirement.
 - Users with existing Product-management authorization may create areas, rename labels and retire areas. Enforce authorization and Product access server-side and recheck eligibility at mutation time. Authorized readers can inspect existing areas; Product retirement blocks changes, not authorized reads.
 - Retired areas remain readable and filterable but cannot be newly selected for classification. Existing classifications remain intact; unrelated edits do not require reclassification.
-- Prevent stale writes and concurrent duplicate creation or unsafe mutation/retirement races from overwriting state or violating these rules. No new role, area deletion, reactivation, code format, case-comparison policy or length limit is defined here; resolve these before relevant implementation without weakening the stated rules.
+- Prevent stale writes and concurrent duplicate creation or unsafe mutation/retirement races from overwriting state or violating these rules. Use existing Product-management authorization; there is no area deletion or reactivation. Codes contain 1–100 ASCII letters, digits or hyphens, are trimmed and displayed uppercase, and are compared case-insensitively within the Product. Labels are required and trimmed, with no application-level length limit. These implementation bounds were explicitly approved for PBI #189.
 
 ### REQ-AREA-002 — Classify Exact Versions
 
@@ -47,11 +47,11 @@ Approved direction from the operator interview for [PBI #187](https://github.com
 
 **Parent requirement:** REQ-SYS-AUDIT-003.
 
-**Requirement:** Future area-management and classification mutations shall retain attributable history and required audit atomically with business changes.
+**Requirement:** Area-management and classification mutations shall retain attributable history and required audit atomically with business changes.
 
 All successful operations below retain actor, occurrence time, distinct action, immutable Product and target identity, success outcome, and the stated initial or old/new values. Retain event-time values despite later changes. Authorized reads, navigation, filtering, previews, cancellation, current no-op saves, ordinary validation and uniqueness failures, invalid/cross-Product/retired selections, lifecycle/retirement conflicts and stale/concurrency rejections create no change event or successful history. Unauthorized mutation attempts still require denied-attempt events, even when input is invalid.
 
-| Future write path | Required successful event/history values | Planned verification |
+| Write path | Required successful event/history values | Planned verification |
 |---|---|---|
 | Create Product area | Product and immutable area identity; initial code, label and active status. | TC-AREA-001, 007–010 |
 | Rename Product area | Product and immutable area identity, stable code, old/new label and unchanged status. | TC-AREA-001, 007–010 |
@@ -65,8 +65,14 @@ Commit each business change, applicable history and required audit together. Bus
 
 Unauthorized attempts produce a failure event with attempted action, time, actor if known otherwise unknown, failure outcome and unknown target, without submitted identifiers, labels, codes or other submitted values. Denial remains effective if audit submission fails or throws; operational logs omit submitted values, credentials and provider exception details, and are not evidence of a persisted event. Reads and ordinary validation failures do not require change events; unauthorized attempts remain auditable regardless of invalid input.
 
-## Boundaries requiring future decisions
+## Approved implementation boundaries — PBI #189
 
-Existing records must not be falsely represented as having historical classifications or release-time labels that were never recorded. The migration and display of unavailable pre-existing evidence need explicit approval before implementation. Cross-Product Requirement copies need a decision on destination classification: Product-local area identities must not be silently transferred or matched by code. Existing MCP creation, editing and response contracts must not silently acquire unsupported area arguments or erase a classification; any new public contract or its behavior requires separate approval. Test Case and Requirement identifier formats remain unchanged by this specification. Feature/Module entities, Test Execution, integrations and automated impact analysis are outside scope.
+Existing current versions migrate as unclassified, without invented area-change history. Pre-existing released evidence without an area snapshot displays **Not recorded**, not Unclassified and not a current-label lookup. New releases store explicit absence or area identity/code/label for every Requirement and Test Case exact version in the complete closure.
 
-The rules are planned behavior, not a claim of implementation or regulatory compliance. Implementation PBIs require separate approval, explicit migration and API decisions, focused security/audit tests and disposable PostgreSQL verification.
+Cross-Product Requirement copies start unclassified: no Product-local area identity or code match transfers to the destination. Existing MCP creation, editing and response contracts remain unchanged; MCP edits preserve the owning version's classification, and area management is web-only. No new external APIs or packages are introduced. Internal web outcome retrieval uses immutable operation identities and atomic owning-feature history to distinguish committed and uncommitted writes before user-directed retry; it is authorization checked and Product scoped.
+
+The bounded persistence change uses the existing PostgreSQL transaction and lazy-schema conventions: Product area/current history, version-local nullable area identities, owning-feature write history/operation receipts, and frozen release JSON. It does not introduce a new persistence strategy. All participating writes and release resolution share the existing entity advisory-lock order; area changes join that lock boundary. A changed release-time label invalidates the baseline confirmation token.
+
+Any new public contract or its behavior requires separate approval. Test Case and Requirement identifier formats remain unchanged by this specification. Feature/Module entities, Test Execution, integrations and automated impact analysis are outside scope.
+
+These rules are not a claim of regulatory compliance. Runtime verification requires focused security/audit tests, disposable PostgreSQL execution and independent review against the current implementation diff.

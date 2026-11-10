@@ -6,6 +6,8 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.TestCase;
 using Retravion.Domain.TestCase;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Infrastructure.Product;
+using Retravion.Domain.Product;
 using Case = Retravion.Domain.TestCase.TestCase;
 
 namespace Retravion.Infrastructure.TestCase;
@@ -65,7 +67,9 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
         );
         ALTER TABLE retravion_test_case.test_case_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
         CREATE UNIQUE INDEX IF NOT EXISTS test_case_one_working_version ON retravion_test_case.test_case_version(internal_id) WHERE status<>'Approved';
-        INSERT INTO retravion_test_case.test_case_version SELECT internal_id,product_internal_id,number,version_id,version_number,status,
+        ALTER TABLE retravion_test_case.test_case ADD COLUMN IF NOT EXISTS area_id uuid REFERENCES retravion_product.area(internal_id);
+        ALTER TABLE retravion_test_case.test_case_version ADD COLUMN IF NOT EXISTS area_id uuid REFERENCES retravion_product.area(internal_id);
+        INSERT INTO retravion_test_case.test_case_version (internal_id,product_internal_id,number,version_id,version_number,status,title,description,preconditions,steps,revision,creation_reason,source_version_id,links) SELECT internal_id,product_internal_id,number,version_id,version_number,status,
             title,description,preconditions,steps,revision,creation_reason,source_version_id,links FROM retravion_test_case.test_case t
             WHERE NOT EXISTS (SELECT 1 FROM retravion_test_case.test_case_version v WHERE v.version_id=t.version_id)
             ON CONFLICT(version_id) DO NOTHING;
@@ -75,9 +79,22 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
             actor_identifier text NOT NULL, occurred_at_utc_ticks bigint NOT NULL,
             action text NOT NULL, change jsonb NOT NULL
         );
+        ALTER TABLE retravion_test_case.history ADD COLUMN IF NOT EXISTS operation_id uuid UNIQUE;
         """;
-    private const string StoredColumns = "internal_id,product_internal_id,number,version_id,version_number,status,title,description,preconditions,steps,revision,creation_reason,source_version_id,links";
-    private const string Columns = "r.internal_id,r.product_internal_id,r.number,r.version_id,r.version_number,r.status,r.title,r.description,r.preconditions,r.steps,r.revision,r.creation_reason,r.source_version_id,r.links,(SELECT max(v.version_number) FROM retravion_test_case.test_case_version v WHERE v.internal_id=r.internal_id AND v.status='Approved')";
+    private const string StoredColumns = "internal_id,product_internal_id,number,version_id,version_number,status,title,description,preconditions,steps,revision,creation_reason,source_version_id,links,area_id";
+    private const string Columns = "r.internal_id,r.product_internal_id,r.number,r.version_id,r.version_number,r.status,r.title,r.description,r.preconditions,r.steps,r.revision,r.creation_reason,r.source_version_id,r.links,(SELECT max(v.version_number) FROM retravion_test_case.test_case_version v WHERE v.internal_id=r.internal_id AND v.status='Approved'),r.area_id";
+
+    public Task<Result<Maybe<TestCaseAuditDetails>>> Outcome(Guid productInternalId, Guid operationId, CancellationToken cancellationToken = default) =>
+        Execute(async (c, t) =>
+        {
+            await using var command = new NpgsqlCommand("SELECT h.change FROM retravion_test_case.history h JOIN retravion_test_case.test_case r ON r.internal_id=h.internal_id WHERE r.product_internal_id=$1 AND h.operation_id=$2", c, t);
+            command.Parameters.AddWithValue(productInternalId); command.Parameters.AddWithValue(operationId);
+            var json = await command.ExecuteScalarAsync(cancellationToken) as string;
+            if (json is null) return Result.Success(Maybe<TestCaseAuditDetails>.None);
+            var change = JsonSerializer.Deserialize<TestCaseAuditDetails>(json);
+            return change is null ? Result.Failure<Maybe<TestCaseAuditDetails>>("Invalid persisted Test Case operation history.") :
+                Result.Success(Maybe<TestCaseAuditDetails>.From(change));
+        }, cancellationToken);
 
     public Task<Result<IReadOnlyList<TestCaseSnapshot>>> List(Guid productInternalId, CancellationToken cancellationToken = default) =>
         Rows($"SELECT {Columns} FROM retravion_test_case.test_case r WHERE product_internal_id=$1 ORDER BY number", productInternalId, cancellationToken);
@@ -131,41 +148,47 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
         }, cancellationToken);
 
     public Task<Result<TestCaseSnapshot>> Create(Guid productInternalId, TestCaseContent content, AuditActor actor,
-        DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? areaId = null,
+        Guid? operationId = null, Func<Task<bool>>? authorized = null)
     {
-        if (productInternalId == Guid.Empty || content is null || actor is not AuditActor.Identified)
+        if (productInternalId == Guid.Empty || content is null || actor is not AuditActor.Identified || operationId == Guid.Empty)
             return Task.FromResult(Result.Failure<TestCaseSnapshot>("Invalid Test Case creation."));
         return Execute(async (connection, transaction) =>
         {
             if (!await ProductActive(connection, transaction, productInternalId, cancellationToken)) return Inactive();
+            if (!await PostgresProductAreaStore.CanSelect(connection, transaction, productInternalId, null, areaId, cancellationToken))
+                return Result.Failure<TestCaseSnapshot>("Select an active area from this Product.");
             await using var allocate = new NpgsqlCommand("""
                 INSERT INTO retravion_test_case.counter AS counter(product_internal_id,last_number) VALUES($1,1)
                 ON CONFLICT(product_internal_id) DO UPDATE SET last_number=counter.last_number+1 RETURNING last_number
                 """, connection, transaction);
             allocate.Parameters.AddWithValue(productInternalId);
             var number = (long)(await allocate.ExecuteScalarAsync(cancellationToken))!;
-            var value = Case.Create(productInternalId, number, content);
+            var value = Case.Create(productInternalId, number, content, areaId);
             if (value.IsFailure) return Result.Failure<TestCaseSnapshot>(value.Error);
             var testCase = value.Value;
             await using var command = new NpgsqlCommand("""
-                INSERT INTO retravion_test_case.test_case(internal_id,product_internal_id,number,version_id,version_number,status,title,description,preconditions,steps,revision,links)
-                VALUES($1,$2,$3,$4,1,'Draft',$5,$6,$7,$8,1,'[]')
+                INSERT INTO retravion_test_case.test_case(internal_id,product_internal_id,number,version_id,version_number,status,title,description,preconditions,steps,revision,links,area_id)
+                VALUES($1,$2,$3,$4,1,'Draft',$5,$6,$7,$8,1,'[]',$9)
                 """, connection, transaction);
             command.Parameters.AddWithValue(testCase.InternalId);
             command.Parameters.AddWithValue(productInternalId);
             command.Parameters.AddWithValue(number);
             command.Parameters.AddWithValue(testCase.VersionId);
             ContentParameters(command, content);
+            command.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)areaId ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(cancellationToken);
             await SaveVersion(connection, transaction, testCase.InternalId, cancellationToken);
-            await Evidence(connection, transaction, actor, occurredAt, "test-case.create", null, testCase, null, null, cancellationToken);
+            await Evidence(connection, transaction, actor, occurredAt, "test-case.create", null, testCase, null, null, cancellationToken, operationId);
             return new TestCaseSnapshot(testCase, 1);
-        }, cancellationToken);
+        }, cancellationToken, authorized);
     }
 
     public Task<Result<TestCaseSnapshot>> Update(TestCaseSnapshot expected, TestCaseContent content, AuditActor actor,
-        DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
-        Mutate(expected, (current, _, _) => Task.FromResult(current.Edit(content)), actor, occurredAt, "test-case.edit", null, null, cancellationToken);
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default, bool changeArea = false, Guid? areaId = null,
+        Guid? operationId = null, Func<Task<bool>>? authorized = null) =>
+        Mutate(expected, (current, _, _) => Task.FromResult(current.Edit(content)
+            .Bind(value => changeArea ? value.Classify(areaId) : Result.Success(value))), actor, occurredAt, "test-case.edit", null, null, cancellationToken, operationId, authorized);
 
     public Task<Result<TestCaseSnapshot>> Review(TestCaseSnapshot expected, string decision, string? comment, AuditActor actor,
         DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
@@ -182,9 +205,9 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
         }, decision, comment, cancellationToken);
 
     public Task<Result<TestCaseSnapshot>> CreateSuccessor(TestCaseSnapshot expected, string? reason, AuditActor actor,
-        DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) =>
         Mutate(expected, (current, _, _) => Task.FromResult(current.CreateSuccessor(reason)), actor, occurredAt,
-            "test-case.version.create", "Successor", reason, cancellationToken);
+            "test-case.version.create", "Successor", reason, cancellationToken, operationId, authorized);
 
     public Task<Result<TestCaseSnapshot>> Reopen(TestCaseSnapshot expected, string? reason, AuditActor actor,
         DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
@@ -193,9 +216,9 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
 
     private Task<Result<TestCaseSnapshot>> Mutate(TestCaseSnapshot expected,
         Func<Case, NpgsqlConnection, NpgsqlTransaction, Task<Result<Case>>> operation, AuditActor actor, DateTimeOffset occurredAt,
-        string action, string? decision, string? comment, CancellationToken token)
+        string action, string? decision, string? comment, CancellationToken token, Guid? operationId = null, Func<Task<bool>>? authorized = null)
     {
-        if (expected is null || expected.TestCase is null || expected.Revision <= 0 || actor is not AuditActor.Identified)
+        if (expected is null || expected.TestCase is null || expected.Revision <= 0 || actor is not AuditActor.Identified || operationId == Guid.Empty)
             return Task.FromResult(Result.Failure<TestCaseSnapshot>("Invalid Test Case change."));
         return Execute(async (connection, transaction) =>
         {
@@ -229,6 +252,8 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
             var replacement = await operation(current.TestCase, connection, transaction);
             if (replacement.IsFailure) return Result.Failure<TestCaseSnapshot>(replacement.Error);
             var after = replacement.Value;
+            if (!await PostgresProductAreaStore.CanSelect(connection, transaction, before.ProductInternalId, before.AreaId, after.AreaId, token))
+                return Result.Failure<TestCaseSnapshot>("Select an active area from this Product.");
             if (before.SameState(after)) return current;
             if (after.VersionId == before.VersionId)
             {
@@ -239,7 +264,7 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
             }
             await using var update = new NpgsqlCommand("""
                 UPDATE retravion_test_case.test_case SET title=$1,description=$2,preconditions=$3,steps=$4,
-                    status=$5,version_id=$6,version_number=$7,creation_reason=$8,source_version_id=$9,links=$10,revision=revision+1
+                    status=$5,version_id=$6,version_number=$7,creation_reason=$8,source_version_id=$9,links=$10,area_id=$12,revision=revision+1
                 WHERE internal_id=$11 RETURNING revision
                 """, connection, transaction);
             ContentParameters(update, after.Content);
@@ -248,22 +273,23 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
             update.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)after.SourceVersionId ?? DBNull.Value);
             update.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(after.Links));
             update.Parameters.AddWithValue(before.InternalId);
+            update.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)after.AreaId ?? DBNull.Value);
             var revision = (long)(await update.ExecuteScalarAsync(token))!;
             await SaveVersion(connection, transaction, before.InternalId, token);
-            await Evidence(connection, transaction, actor, occurredAt, action, before, after, decision, comment, token);
+            await Evidence(connection, transaction, actor, occurredAt, action, before, after, decision, comment, token, operationId);
             await using var latest = new NpgsqlCommand("SELECT max(version_number) FROM retravion_test_case.test_case_version WHERE internal_id=$1 AND status='Approved'", connection, transaction);
             latest.Parameters.AddWithValue(before.InternalId);
             var approved = await latest.ExecuteScalarAsync(token);
             return new TestCaseSnapshot(after, revision, approved is int number ? number : null);
-        }, token);
+        }, token, authorized);
     }
 
     private static async Task SaveVersion(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid id, CancellationToken token)
     {
         await using var command = new NpgsqlCommand($"""
-            INSERT INTO retravion_test_case.test_case_version SELECT {StoredColumns} FROM retravion_test_case.test_case WHERE internal_id=$1
+            INSERT INTO retravion_test_case.test_case_version ({StoredColumns}) SELECT {StoredColumns} FROM retravion_test_case.test_case WHERE internal_id=$1
             ON CONFLICT(version_id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,preconditions=EXCLUDED.preconditions,
-                steps=EXCLUDED.steps,status=EXCLUDED.status,revision=EXCLUDED.revision,links=EXCLUDED.links
+                steps=EXCLUDED.steps,status=EXCLUDED.status,revision=EXCLUDED.revision,links=EXCLUDED.links,area_id=EXCLUDED.area_id
             """, connection, transaction);
         command.Parameters.AddWithValue(id); await command.ExecuteNonQueryAsync(token);
     }
@@ -286,7 +312,7 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
             if (steps is null || links is null) return Result.Failure<TestCaseSnapshot>("The persisted Test Case steps or links are invalid.");
             var content = TestCaseContent.Create(reader.GetString(6), reader.GetString(7), reader.GetString(8), steps);
             return content.Bind(value => Case.Restore(reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(3), reader.GetInt64(2), value,
-                    reader.GetString(5), reader.GetInt32(4), reader.IsDBNull(11) ? null : reader.GetString(11), reader.IsDBNull(12) ? null : reader.GetGuid(12), links))
+                    reader.GetString(5), reader.GetInt32(4), reader.IsDBNull(11) ? null : reader.GetString(11), reader.IsDBNull(12) ? null : reader.GetGuid(12), links, reader.IsDBNull(15) ? null : reader.GetGuid(15)))
                 .Map(value => new TestCaseSnapshot(value, reader.GetInt64(10), reader.IsDBNull(14) ? null : reader.GetInt32(14)));
         }
         catch (JsonException)
@@ -306,24 +332,28 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
     }
 
     private static async Task Evidence(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor actor, DateTimeOffset occurredAt,
-        string action, Case? before, Case after, string? decision, string? comment, CancellationToken token)
+        string action, Case? before, Case after, string? decision, string? comment, CancellationToken token, Guid? operationId = null)
     {
-        static TestCaseAuditValues Values(Case value) => new(value.ProductInternalId, value.Id, value.Content.Title,
-            value.Content.Description, value.Content.Preconditions, value.Status, value.Content.Steps, value.Links.ToArray());
+        var beforeArea = before is null ? null : await PostgresProductAreaStore.Evidence(connection, transaction, before.ProductInternalId, before.AreaId, token);
+        var afterArea = await PostgresProductAreaStore.Evidence(connection, transaction, after.ProductInternalId, after.AreaId, token);
+        TestCaseAuditValues Values(Case value, AreaEvidence? area) => new(value.ProductInternalId, value.Id, value.Content.Title,
+            value.Content.Description, value.Content.Preconditions, value.Status, value.Content.Steps, value.Links.ToArray(), area);
         var change = new TestCaseAuditDetails(after.InternalId, after.VersionId, after.VersionNumber,
-            before is null || decision == "Successor" ? null : Values(before), Values(after), decision,
-            decision == "Successor" ? null : comment, after.SourceVersionId, decision == "Reopened" ? comment : after.CreationReason);
-        await using var history = new NpgsqlCommand("INSERT INTO retravion_test_case.history(internal_id,actor_identifier,occurred_at_utc_ticks,action,change) VALUES($1,$2,$3,$4,$5)", connection, transaction);
+            before is null || decision == "Successor" ? null : Values(before, beforeArea), Values(after, afterArea), decision,
+            decision == "Successor" ? null : comment, after.SourceVersionId, decision == "Reopened" ? comment : after.CreationReason, operationId);
+        await using var history = new NpgsqlCommand("INSERT INTO retravion_test_case.history(internal_id,actor_identifier,occurred_at_utc_ticks,action,change,operation_id) VALUES($1,$2,$3,$4,$5,$6)", connection, transaction);
         history.Parameters.AddWithValue(after.InternalId); history.Parameters.AddWithValue(((AuditActor.Identified)actor).Identifier);
         history.Parameters.AddWithValue(occurredAt.UtcTicks); history.Parameters.AddWithValue(action);
         history.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(change));
+        history.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)operationId ?? DBNull.Value);
         await history.ExecuteNonQueryAsync(token);
         await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
             new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(after.InternalId.ToString()), AuditActionOutcome.Success,
                 testCaseChange: change), token);
     }
 
-    private async Task<Result<T>> Execute<T>(Func<NpgsqlConnection, NpgsqlTransaction, Task<Result<T>>> operation, CancellationToken token)
+    private async Task<Result<T>> Execute<T>(Func<NpgsqlConnection, NpgsqlTransaction, Task<Result<T>>> operation, CancellationToken token,
+        Func<Task<bool>>? authorized = null)
     {
         var commitStarted = false;
         try
@@ -334,10 +364,13 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
             // Same lock order as Requirement -> User Need operations. Exact target checks cannot race their mutations.
             await using (var targets = new NpgsqlCommand("SELECT pg_advisory_xact_lock(821749620111); SELECT pg_advisory_xact_lock(821749620112)", connection, transaction))
                 await targets.ExecuteNonQueryAsync(token);
+            await using (var areas = new NpgsqlCommand(PostgresProductAreaStore.Setup, connection, transaction)) await areas.ExecuteNonQueryAsync(token);
             await using (var setup = new NpgsqlCommand(Setup, connection, transaction)) await setup.ExecuteNonQueryAsync(token);
+            if (authorized is not null && !await authorized()) return Result.Failure<T>("Access denied.");
             var result = await operation(connection, transaction);
             if (result.IsSuccess)
             {
+                if (authorized is not null && !await authorized()) return Result.Failure<T>("Access denied.");
                 commitStarted = true;
                 if (commit is null) await transaction.CommitAsync(token); else await commit(transaction, token);
             }

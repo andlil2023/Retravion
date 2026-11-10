@@ -22,6 +22,7 @@ else
         <MudSelectItem Value="@("InReview")">In Review</MudSelectItem>
         <MudSelectItem Value="@("Approved")">Approved</MudSelectItem>
     </MudSelect>
+    <AreaSelect Product="_product.InternalId" @bind-Value="_area" Filter="true" />
     <MudTable Items="Filtered" Dense="true" Hover="true" Elevation="0" aria-label="Test Cases">
         <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Version</MudTh><MudTh>Status</MudTh></HeaderContent>
         <RowTemplate>
@@ -41,15 +42,17 @@ else
     private Retravion.Domain.Product.Product? _product;
     private IReadOnlyList<TestCaseSnapshot>? _cases;
     private string? _error;
+    private Guid? _area;
     private string _search = "", _status = "All";
     private IEnumerable<TestCaseSnapshot> Filtered => (_cases ?? []).Where(row =>
+        (_area is null || (_area == Guid.Empty ? row.TestCase.AreaId is null : row.TestCase.AreaId == _area)) &&
         (_status == "All" || row.TestCase.Status == _status) &&
         (row.TestCase.Id.Contains(_search, StringComparison.OrdinalIgnoreCase) || row.TestCase.Content.Title.Contains(_search, StringComparison.OrdinalIgnoreCase)));
     private string ProductPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
     private string CreatePath => $"/test-cases/create?product={Uri.EscapeDataString(ProductId ?? "")}";
     protected override async Task OnParametersSetAsync()
     {
-        _cases = null; _product = null; _error = null;
+        _cases = null; _product = null; _error = null; _area = null;
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         var product = await Products.Retrieve(actor, ProductId);
         if (product.IsFailure) { _error = product.Error; return; }

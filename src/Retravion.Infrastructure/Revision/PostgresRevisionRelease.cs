@@ -27,7 +27,7 @@ public sealed partial class PostgresRevisionStore
             if (baseline.Value.Members.Count == 0 || baseline.Value.Members.Any(m => m.Status != "Approved"))
                 return Result.Failure<RevisionSnapshot>("Release requires nonempty selections and an entirely Approved outgoing baseline.");
             var released = ReleasedRevision.Restore(current, ((AuditActor.Identified)actor).Identifier, time,
-                baseline.Value.Members.Select(m => new ReleasedRevisionMember(m.Endpoint, m.Identifier, m.Title, m.Explicit)));
+                baseline.Value.Members.Select(m => new ReleasedRevisionMember(m.Endpoint, m.Identifier, m.Title, m.Explicit, m.Area)));
             if (released.IsFailure) return Result.Failure<RevisionSnapshot>(released.Error);
             // Each member is protected in the same transaction as frozen evidence/history/audit. All
             // participating entity mutations take their existing locks before checking protection.

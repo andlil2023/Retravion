@@ -3,7 +3,7 @@ using Retravion.Domain.Requirement;
 namespace Retravion.Application.AuditTrail;
 
 public sealed record RequirementAuditValues(Guid ProductInternalId, string Id, string Title, string Statement,
-    string Type, string? Rationale, string Status);
+    string Type, string? Rationale, string Status, Retravion.Domain.Product.AreaEvidence? Area = null);
 
 public sealed record RequirementAuditDetails(Guid InternalId, RequirementAuditValues? Before, RequirementAuditValues After,
     string? Decision, string? Comment, Guid? VersionId = null, int? VersionNumber = null,
@@ -11,4 +11,4 @@ public sealed record RequirementAuditDetails(Guid InternalId, RequirementAuditVa
     string? RelationshipType = null, IReadOnlyList<RequirementUserNeedLink>? BeforeLinks = null,
     IReadOnlyList<RequirementUserNeedLink>? AfterLinks = null,
     string? ParentRelationshipType = null, RequirementParentLink? BeforeParent = null, RequirementParentLink? AfterParent = null,
-    Retravion.Application.Requirement.RequirementProvenance? Provenance = null);
+    Retravion.Application.Requirement.RequirementProvenance? Provenance = null, Guid? OperationId = null);

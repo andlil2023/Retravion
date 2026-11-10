@@ -1,0 +1,32 @@
+@inject ProductAreaOperations Products
+@inject AuthenticationStateProvider Authentication
+
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+<MudSelect T="Guid?" Value="Value" ValueChanged="ValueChanged" Label="@(Filter ? "Area filter" : "Area (optional)")" Disabled="@(Disabled || _error is not null)">
+    @if (Filter) { <MudSelectItem T="Guid?" Value="@((Guid?)null)">All areas</MudSelectItem> }
+    <MudSelectItem T="Guid?" Value="@(Filter ? Guid.Empty : (Guid?)null)">Unclassified</MudSelectItem>
+    @foreach (var row in _areas.Where(r => Filter || r.Area.IsActive || r.Area.InternalId == RetainedArea))
+    {
+        <MudSelectItem T="Guid?" Value="@((Guid?)row.Area.InternalId)">@row.Area.Code — @row.Area.Label @(!row.Area.IsActive ? "(Retired)" : "")</MudSelectItem>
+    }
+</MudSelect>
+
+@code {
+    [Parameter] public Guid Product { get; set; }
+    [Parameter] public Guid? Value { get; set; }
+    [Parameter] public EventCallback<Guid?> ValueChanged { get; set; }
+    [Parameter] public Guid? RetainedArea { get; set; }
+    [Parameter] public bool Filter { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    private IReadOnlyList<Retravion.Application.Product.ProductAreaSnapshot> _areas = [];
+    private string? _error;
+    private Guid _loaded;
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Product == _loaded || Product == Guid.Empty) return;
+        _error = null;
+        var result = await Products.Areas((await Authentication.GetAuthenticationStateAsync()).User, Product);
+        if (result.IsFailure) { _error = result.Error; _areas = []; return; }
+        _areas = result.Value.Areas; _loaded = Product;
+    }
+}

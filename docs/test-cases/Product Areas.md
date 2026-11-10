@@ -2,7 +2,7 @@
 
 **Requirements:** [Product Areas](../requirements/Product%20Areas.md), REQ-LINK-009, REQ-REV-004/006, REQ-REQ-003/006, REQ-TC-003/005 and REQ-SYS-AUDIT-003.
 
-These cases are planned verification for [PBI #187](https://github.com/andlil2023/Retravion/issues/187), not implemented tests or executed runtime evidence. Runtime PostgreSQL tests require a disposable Podman container configured with `RETRAVION_TEST_POSTGRES`.
+These cases originated in [PBI #187](https://github.com/andlil2023/Retravion/issues/187); [PBI #189](https://github.com/andlil2023/Retravion/issues/189) supplies implementation and executable coverage. The cases and coverage map are not execution evidence; actual commands, results and independent review belong in the implementation PR. Runtime PostgreSQL tests require a disposable Podman container configured with `RETRAVION_TEST_POSTGRES`.
 
 | Test ID | Verifies | Level | Stimulus | Expected result | Automation candidate |
 |---|---|---|---|---|---|
@@ -17,6 +17,17 @@ These cases are planned verification for [PBI #187](https://github.com/andlil202
 | TC-AREA-009 | REQ-AREA-001, REQ-AREA-005 | Security/integration | Deny every mutation for known/unknown actors including invalid input; inject denied-audit failures/exceptions. Exercise reads, filters, previews, cancellations, no-ops and authorized validation, retirement, lifecycle and stale rejections. | Denial events contain action/time/actor or unknown/failure and unknown target, with no submitted values. Safe logs omit submitted data, credentials and provider details. Authorized excluded paths produce no change event/history; reads need no mutation event. | Yes |
 | TC-AREA-010 | REQ-AREA-005 | Failure injection/integration | For each applicable write lose confirmation after commit attempt, including cancellation, in both actually committed and uncommitted outcomes; use authorized outcome retrieval before user-directed retry. | Uncertainty is reported, never automatic retry or false success/rollback. Retrieval identifies outcome without unauthorized disclosure; business/history/evidence/audit remain atomic. | Yes |
 
+## Executable coverage — PBI #189
+
+Paths are relative to `tests/`.
+
+- `Retravion.UnitTests/ProductAreaTests.cs`: code normalization/ASCII/length bounds, immutable identity/code, required labels without an application limit, Draft-only classification, independent lifecycle/link preservation and successor inheritance.
+- `Retravion.IntegrationTests/ProductAreaTests.cs`: TC-AREA-001–003 and 005–010 through Product-scoped uniqueness, stale writes, retirement, cross-Product rejection/copying, exact-version history, complete multi-version release closure, label freezing, races, rollback and operation-specific retrieval in both uncertain outcomes (including cancellation).
+- `Retravion.IntegrationTests/ProductAreaWebTests.cs`: TC-AREA-001–004 and 007–009 through real component callbacks, active/retired/unclassified filters using displayed versions, exact-version details, Product area authorization and sanitized denied-audit failures, MCP preservation/unchanged schemas, and existing-version migration.
+- Existing `RequirementAccessTests.cs`, `TestCaseAccessTests.cs`, `RequirementTransactionTests.cs`, `TestCaseTransactionTests.cs`, and `RevisionReleaseTests.cs` retain the owning features' security/lifecycle/no-op/validation/protection and failure-injection checks. `TestCaseComponentTests.cs` verifies the editor's no-retry-before-retrieval behavior for both uncertain outcomes.
+
+Area administration has one current-state store and attributable area history. Requirement writes retain complete owning-feature operation history in addition to applicable review/classification history; Test Case writes use their existing history. Release-time area evidence is part of the existing frozen release JSON, not a separate store or per-member mutation. Existing release failure injection therefore covers frozen area evidence, release history, protection and audit in the same atomic transaction; area tests add explicit classified evidence and uncertainty checks.
+
 ## Documentation verification
 
-Check approved interview decisions, unique declaration IDs, local Markdown links, coverage of every REQ-AREA requirement and write path, lifecycle and frozen-baseline consistency, and future-versus-implemented status. Review the final diff independently using `.pi/prompts/review.md`. Runtime builds, tests and database checks are not evidence for this documentation-only PBI; future implementation must run them separately.
+Check approved decisions, declaration IDs, local links, coverage of each requirement/write path, lifecycle and frozen-baseline consistency. Review the final diff independently using `.pi/prompts/review.md` and report build, architecture and disposable PostgreSQL results in the PR.

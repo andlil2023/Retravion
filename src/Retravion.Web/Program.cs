@@ -108,7 +108,11 @@ builder.Services.AddSingleton<EditProduct>();
 builder.Services.AddSingleton<RetrieveProduct>();
 builder.Services.AddSingleton<ChangeProductStatus>();
 builder.Services.AddSingleton<UpdateProductDescription>();
+builder.Services.AddSingleton<IProductAreaStore>(_ => new PostgresProductAreaStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddScoped<ProductOperations>();
+builder.Services.AddScoped<ProductAreaOperations>();
 builder.Services.AddSingleton<IUserNeedStore>(_ => new PostgresUserNeedStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));

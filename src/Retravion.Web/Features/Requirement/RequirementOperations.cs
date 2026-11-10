@@ -19,6 +19,14 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
         (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || await mcpCredentials.IsAllowed(principal)) &&
         (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
 
+    // Transaction callbacks must not open the settings store: it shares the Requirement lock.
+    // MCP configuration remains checked by Allowed at its existing request boundary; live session,
+    // credential and role authority can be rechecked without taking a second database connection.
+    private async Task<bool> LiveAuthority(ClaimsPrincipal principal) =>
+        sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
+        (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || mcpCredentials.IsActive(principal)) &&
+        (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
+
     private static AuditActor Actor(ClaimsPrincipal principal) =>
         principal.Identity?.IsAuthenticated == true && principal.FindFirstValue(ClaimTypes.NameIdentifier) is { Length: > 0 } id
             ? new AuditActor.Identified(id) : new AuditActor.Unknown();
@@ -28,8 +36,17 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
     {
         var actor = Actor(principal);
         var now = time.GetUtcNow();
-        if (await Allowed(principal) && actor is AuditActor.Identified) return await operation(actor, now);
-        return await Deny(actor, now, action, token);
+        await sessions.MutationGate.WaitAsync(token);
+        try
+        {
+            if (await Allowed(principal) && actor is AuditActor.Identified)
+            {
+                var result = await operation(actor, now);
+                return result.IsFailure && result.Error == "Access denied." ? await Deny(actor, now, action, token) : result;
+            }
+            return await Deny(actor, now, action, token);
+        }
+        finally { sessions.MutationGate.Release(); }
     }
 
     private async Task<Result<RequirementSnapshot>> Deny(AuditActor actor, DateTimeOffset now, string action, CancellationToken token)
@@ -49,11 +66,11 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
         Deny(Actor(principal), time.GetUtcNow(), action, token);
 
     public Task<Result<RequirementSnapshot>> Create(ClaimsPrincipal principal, Guid product, string? id, string? title,
-        string? statement, RequirementType? type, string? rationale, CancellationToken token = default) =>
+        string? statement, RequirementType? type, string? rationale, CancellationToken token = default, Guid? areaId = null, Guid? operationId = null) =>
         Change(principal, "requirement.create", (actor, now) =>
         {
-            var requirement = RequirementState.Create(product, id, title, statement, type, rationale);
-            return requirement.IsSuccess ? changes.Create(requirement.Value, actor, now, token)
+            var requirement = RequirementState.Create(product, id, title, statement, type, rationale, areaId);
+            return requirement.IsSuccess ? changes.Create(requirement.Value, actor, now, token, operationId, () => LiveAuthority(principal))
                 : Task.FromResult(Result.Failure<RequirementSnapshot>(requirement.Error));
         }, token);
 
@@ -73,11 +90,14 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
         await Allowed(principal) ? await store.CopiesOf(version, token) : Result.Failure<IReadOnlyList<RequirementSnapshot>>("Access denied.");
 
     public Task<Result<RequirementSnapshot>> Edit(ClaimsPrincipal principal, RequirementSnapshot expected, string? id,
-        string? title, string? statement, RequirementType? type, string? rationale, CancellationToken token = default) =>
+        string? title, string? statement, RequirementType? type, string? rationale, CancellationToken token = default,
+        bool changeArea = false, Guid? areaId = null, Guid? operationId = null) =>
         Change(principal, "requirement.edit", (actor, now) =>
         {
-            var requirement = expected.Requirement.Edit(id, title, statement, type, rationale);
-            return requirement.IsSuccess ? changes.Update(expected, requirement.Value, actor, now, cancellationToken: token)
+            var requirement = expected.Requirement.Edit(id, title, statement, type, rationale)
+                .Bind(value => changeArea ? value.Classify(areaId) : Result.Success(value));
+            return requirement.IsSuccess ? changes.Update(expected, requirement.Value, actor, now, cancellationToken: token,
+                    operationId: operationId, authorized: () => LiveAuthority(principal))
                 : Task.FromResult(Result.Failure<RequirementSnapshot>(requirement.Error));
         }, token);
 
@@ -151,8 +171,8 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
         ? await links.Links(id, versionId, token) : Result.Failure<IReadOnlyList<RequirementUserNeedLink>>("Access denied.");
 
     public Task<Result<RequirementSnapshot>> CreateSuccessor(ClaimsPrincipal principal, RequirementSnapshot expected, string? reason,
-        CancellationToken token = default) => Change(principal, "requirement.version.create", (actor, now) =>
-            changes.CreateSuccessor(expected, reason, actor, now, token), token);
+        CancellationToken token = default, Guid? operationId = null) => Change(principal, "requirement.version.create", (actor, now) =>
+            changes.CreateSuccessor(expected, reason, actor, now, token, operationId, () => LiveAuthority(principal)), token);
 
     public Task<Result<RequirementSnapshot>> Reopen(ClaimsPrincipal principal, RequirementSnapshot expected, string? reason,
         CancellationToken token = default) => Change(principal, "requirement.reopen", (actor, now) =>
@@ -179,6 +199,9 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
             return requirement.IsSuccess ? changes.Update(expected, requirement.Value, actor, now, decision, comment, token)
                 : Task.FromResult(Result.Failure<RequirementSnapshot>(requirement.Error));
         }, token);
+
+    public async Task<Result<Maybe<RequirementAuditDetails>>> Outcome(ClaimsPrincipal principal, Guid product, Guid operationId, CancellationToken token = default) =>
+        await Allowed(principal) ? await store.Outcome(product, operationId, token) : Result.Failure<Maybe<RequirementAuditDetails>>("Access denied.");
 
     public async Task<Result<IReadOnlyList<RequirementSnapshot>>> List(ClaimsPrincipal principal, Guid product, CancellationToken token = default) =>
         await Allowed(principal) ? await store.List(product, token) : Result.Failure<IReadOnlyList<RequirementSnapshot>>("Access denied.");

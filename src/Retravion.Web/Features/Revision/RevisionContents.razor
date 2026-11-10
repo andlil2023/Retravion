@@ -3,8 +3,8 @@
     <MudTextField T="string" @bind-Value="_search" Label="Search contents by ID or title" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" />
 }
 <MudTable T="RevisionBaselineMember" Items="Filtered" GroupBy="_groups" Dense="true" Hover="true" Elevation="0" aria-label="Complete revision baseline">
-    <GroupHeaderTemplate><MudTh colspan="4">@context.Key</MudTh></GroupHeaderTemplate>
-    <HeaderContent><MudTh>Exact version</MudTh><MudTh>Title</MudTh><MudTh>State</MudTh><MudTh>Membership</MudTh></HeaderContent>
+    <GroupHeaderTemplate><MudTh colspan="5">@context.Key</MudTh></GroupHeaderTemplate>
+    <HeaderContent><MudTh>Exact version</MudTh><MudTh>Title</MudTh><MudTh>State</MudTh><MudTh>Area</MudTh><MudTh>Membership</MudTh></HeaderContent>
     <RowTemplate>
         <MudTd DataLabel="Exact version">
             @if (Inspect.HasDelegate)
@@ -13,6 +13,7 @@
         </MudTd>
         <MudTd DataLabel="Title">@context.Title</MudTd>
         <MudTd DataLabel="State">@RevisionPresentation.State(context.Status)</MudTd>
+        <MudTd DataLabel="Area">@(context.Endpoint.Kind == RevisionEntityKind.UserNeed ? "Not applicable" : context.Area?.Display ?? "Not recorded")</MudTd>
         <MudTd DataLabel="Membership">@(context.Explicit ? "Selected" : "Included through links")</MudTd>
     </RowTemplate>
     <NoRecordsContent><MudText>@(Members.Count == 0 ? "Empty baseline." : "No matching contents.")</MudText></NoRecordsContent>

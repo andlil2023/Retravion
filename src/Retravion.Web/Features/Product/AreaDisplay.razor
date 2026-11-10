@@ -1,0 +1,17 @@
+@inject ProductAreaOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<p>Area: @_text</p>
+
+@code {
+    [Parameter] public Guid Product { get; set; }
+    [Parameter] public Guid? AreaId { get; set; }
+    private string _text = "Unclassified";
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AreaId is null) { _text = "Unclassified"; return; }
+        var result = await Products.Areas((await Authentication.GetAuthenticationStateAsync()).User, Product);
+        var area = result.IsSuccess ? result.Value.Areas.SingleOrDefault(r => r.Area.InternalId == AreaId)?.Area : null;
+        _text = area is null ? "Unavailable" : $"{area.Code} — {area.Label}{(!area.IsActive ? " (Retired)" : "")}";
+    }
+}

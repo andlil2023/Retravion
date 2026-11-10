@@ -70,14 +70,15 @@ public sealed class PostgresAuditSubmission(string connectionString) : IAuditSub
                 ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS ai_workflow_change jsonb;
                 ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS test_case_change jsonb;
                 ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS revision_change jsonb;
+                ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS product_area_change jsonb;
                 """, connection, transaction))
                 await setup.ExecuteNonQueryAsync(cancellationToken);
 
             await using var command = new NpgsqlCommand("""
                 INSERT INTO retravion_audit.event
                     (actor_kind, actor_identifier, occurred_at_utc_ticks, action,
-                        target_kind, target_identifier, outcome, product_change, user_need_change, requirement_change, ai_workflow_change, test_case_change, revision_change)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                        target_kind, target_identifier, outcome, product_change, user_need_change, requirement_change, ai_workflow_change, test_case_change, revision_change, product_area_change)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 """, connection, transaction);
             command.Parameters.AddWithValue(information.Actor is AuditActor.Identified ? "identified" : "unknown");
             command.Parameters.AddWithValue(NpgsqlDbType.Text,
@@ -107,6 +108,8 @@ public sealed class PostgresAuditSubmission(string connectionString) : IAuditSub
                 information.TestCaseChange is null ? DBNull.Value : JsonSerializer.Serialize(information.TestCaseChange));
             command.Parameters.AddWithValue(NpgsqlDbType.Jsonb,
                 information.RevisionChange is null ? DBNull.Value : JsonSerializer.Serialize(information.RevisionChange));
+            command.Parameters.AddWithValue(NpgsqlDbType.Jsonb,
+                information.ProductAreaChange is null ? DBNull.Value : JsonSerializer.Serialize(information.ProductAreaChange));
             await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

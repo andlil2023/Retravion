@@ -8,15 +8,19 @@
 <PageTitle>@(_editing ? "Edit" : "Create") Requirement · Retravion</PageTitle>
 <SectionContent SectionName="product-page-header"><PageHeader Title="@(_editing ? "Edit Requirement" : "Create Requirement")" BackHref="@BackPath" BackText="Requirements" /></SectionContent>
 @if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_pending is not null)
+{ <MudButton OnClick="RetrieveOutcome" Disabled="_busy">Retrieve operation outcome before retrying</MudButton> }
+@if (_message is not null) { <p role="status">@_message</p> }
 @if (_ready)
 {
-    <DescriptionEditor InitialDescription="@_statement" Busy="_busy" OnSave="Save" FormId="requirement-form" SubmitText="Save" CancelHref="@BackPath" Label="Statement">
+    <DescriptionEditor InitialDescription="@_statement" Busy="@(_busy || _pending is not null)" OnSave="Save" FormId="requirement-form" SubmitText="Save" CancelHref="@BackPath" Label="Statement">
         <ChildContent>
             <MudTextField @bind-Value="_id" Label="Requirement ID" HelperText="Product-unique ID, at most 100 Unicode characters. Fixed after first approval." Required="true" Immediate="true" Disabled="@(_busy || _existing?.Requirement.HasBeenApproved == true)" />
             <MudTextField @bind-Value="_title" Label="Title" Required="true" Immediate="true" Disabled="_busy" />
             <MudSelect T="RequirementType?" @bind-Value="_type" Label="Type" Required="true" Disabled="_busy">
                 @foreach (var type in Enum.GetValues<RequirementType>()) { <MudSelectItem T="RequirementType?" Value="@((RequirementType?)type)">@type</MudSelectItem> }
             </MudSelect>
+            <AreaSelect Product="_productInternalId" @bind-Value="_area" RetainedArea="_existing?.Requirement.AreaId" Disabled="_busy" />
             <MudTextField @bind-Value="_rationale" Label="Rationale (optional, plain text)" Lines="3" Immediate="true" Disabled="_busy" />
         </ChildContent>
     </DescriptionEditor>
@@ -24,7 +28,9 @@
 @code {
     [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
     [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
-    private Guid _productInternalId;
+    private Guid _productInternalId, _pendingProduct;
+    private Guid? _area, _pending;
+    private string? _message;
     private RequirementSnapshot? _existing;
     private string _id = "", _title = "", _statement = "";
     private RequirementType? _type;
@@ -34,7 +40,7 @@
     protected override async Task OnParametersSetAsync()
     {
         _ready = false; _error = null; _existing = null;
-        _id = ""; _title = ""; _statement = ""; _type = null; _rationale = null;
+        _id = ""; _title = ""; _statement = ""; _type = null; _rationale = null; _area = null;
         _editing = Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.EndsWith("/edit", StringComparison.OrdinalIgnoreCase);
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         if (_editing)
@@ -46,7 +52,7 @@
             _productInternalId = _existing.Requirement.ProductInternalId;
             if (_existing.Requirement.Status != RequirementStatus.Draft) { _error = "Only Draft Requirements can be edited."; return; }
             _id = _existing.Requirement.Id; _title = _existing.Requirement.Title; _statement = _existing.Requirement.Statement;
-            _type = _existing.Requirement.Type; _rationale = _existing.Requirement.Rationale;
+            _type = _existing.Requirement.Type; _rationale = _existing.Requirement.Rationale; _area = _existing.Requirement.AreaId;
         }
         Retravion.Domain.Product.Product? product;
         if (_editing)
@@ -65,17 +71,52 @@
         _productInternalId = product.InternalId;
         _ready = true;
     }
+    private async Task RetrieveOutcome()
+    {
+        if (_busy || _pending is null) return;
+        _busy = true;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var outcome = await Operations.Outcome(actor, _pendingProduct, _pending.Value);
+            if (outcome.IsFailure) { _error = outcome.Error; return; }
+            if (outcome.Value.HasValue)
+            {
+                var change = outcome.Value.Value;
+                _pending = null;
+                Navigation.NavigateTo($"/requirements/details?id={change.InternalId}&version={change.VersionId}");
+            }
+            else
+            {
+                _pending = null; _error = null;
+                _message = "No change committed for this operation. Review the current record before a user-directed retry.";
+                if (_existing is not null)
+                {
+                    var current = await Operations.Find(actor, _existing.Requirement.InternalId);
+                    if (current.IsFailure || current.Value.HasNoValue) { _ready = false; _error = "Current Requirement could not be retrieved."; return; }
+                    if (current.Value.Value.Revision != _existing.Revision)
+                    { _ready = false; _error = "The Requirement changed. Reload the editor and review current values before retrying."; }
+                }
+            }
+        }
+        finally { _busy = false; }
+    }
     private async Task Save(string statement)
     {
-        if (_busy || !_ready) return;
+        if (_busy || !_ready || _pending is not null) return;
         _busy = true; _error = null;
         try
         {
             var actor = (await Authentication.GetAuthenticationStateAsync()).User;
-            var result = _existing is null ? await Operations.Create(actor, _productInternalId, _id, _title, statement, _type, _rationale)
-                : await Operations.Edit(actor, _existing, _id, _title, statement, _type, _rationale);
-            if (result.IsFailure) _error = result.Error;
-            else Navigation.NavigateTo($"/requirements/details?id={result.Value.Requirement.InternalId}");
+            _pending = Guid.NewGuid(); _pendingProduct = _productInternalId;
+            var result = _existing is null ? await Operations.Create(actor, _productInternalId, _id, _title, statement, _type, _rationale, areaId: _area, operationId: _pending)
+                : await Operations.Edit(actor, _existing, _id, _title, statement, _type, _rationale, changeArea: true, areaId: _area, operationId: _pending);
+            if (result.IsFailure)
+            {
+                _error = result.Error;
+                if (!result.Error.Contains("outcome could not be confirmed", StringComparison.Ordinal)) _pending = null;
+            }
+            else { _pending = null; Navigation.NavigateTo($"/requirements/details?id={result.Value.Requirement.InternalId}"); }
         }
         finally { _busy = false; }
     }

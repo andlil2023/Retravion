@@ -5,6 +5,7 @@ using Npgsql;
 using Retravion.Application.Revision;
 using Retravion.Domain.Revision;
 using Retravion.Domain.TestCase;
+using Retravion.Infrastructure.Product;
 
 namespace Retravion.Infrastructure.Revision;
 
@@ -34,7 +35,8 @@ public sealed partial class PostgresRevisionStore
         if (!await Exists(c, t, table, token)) return Result.Failure<RevisionBaselineMember>("Exact version not available in this Product.");
         var identifier = kind == RevisionEntityKind.TestCase ? "'TC-' || lpad(number::text,greatest(3,length(number::text)),'0')" : "id";
         var status = kind == RevisionEntityKind.TestCase ? "status" : "CASE status WHEN 0 THEN 'Draft' WHEN 1 THEN 'InReview' WHEN 2 THEN 'Approved' ELSE 'Invalid' END";
-        await using var command = new NpgsqlCommand($"SELECT {identifier},title,{status},version_number FROM {table} WHERE product_internal_id=$1 AND internal_id=$2 AND version_id=$3", c, t);
+        var areaColumn = kind == RevisionEntityKind.UserNeed ? "NULL::uuid" : "area_id";
+        await using var command = new NpgsqlCommand($"SELECT {identifier},title,{status},version_number,{areaColumn} FROM {table} WHERE product_internal_id=$1 AND internal_id=$2 AND version_id=$3", c, t);
         command.Parameters.AddWithValue(product); command.Parameters.AddWithValue(id); command.Parameters.AddWithValue(version);
         await using var reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token)) return Result.Failure<RevisionBaselineMember>("Exact version not available in this Product.");
@@ -42,7 +44,12 @@ public sealed partial class PostgresRevisionStore
         var state = reader.GetString(2);
         if (endpoint.Validate().IsFailure || state is not ("Draft" or "InReview" or "Approved"))
             return Result.Failure<RevisionBaselineMember>("Invalid persisted exact version.");
-        return new RevisionBaselineMember(endpoint, reader.GetString(0), reader.GetString(1), state, false);
+        var manualId = reader.GetString(0);
+        var title = reader.GetString(1);
+        var areaId = reader.IsDBNull(4) ? (Guid?)null : reader.GetGuid(4);
+        await reader.DisposeAsync();
+        var area = kind == RevisionEntityKind.UserNeed ? null : await PostgresProductAreaStore.Evidence(c, t, product, areaId, token);
+        return new RevisionBaselineMember(endpoint, manualId, title, state, false, area);
     }
 
     public Task<Result<IReadOnlyList<RevisionBaselineMember>>> Candidates(Guid product, CancellationToken token = default) =>
@@ -82,7 +89,7 @@ public sealed partial class PostgresRevisionStore
     private static async Task<Result<RevisionBaseline>> Resolve(NpgsqlConnection c, NpgsqlTransaction t, RevisionSnapshot row, CancellationToken token)
     {
         if (row.Value is ReleasedRevision released)
-            return new RevisionBaseline(row, released.Members.Select(m => new RevisionBaselineMember(m.Endpoint, m.Identifier, m.Title, "Approved", m.Explicit)).ToArray());
+            return new RevisionBaseline(row, released.Members.Select(m => new RevisionBaselineMember(m.Endpoint, m.Identifier, m.Title, "Approved", m.Explicit, m.Area)).ToArray());
         var product = row.Value.ProductInternalId;
         var roots = row.Value.Selections.ToHashSet();
         var visited = new Dictionary<(RevisionEntityKind, Guid), RevisionBaselineMember>();

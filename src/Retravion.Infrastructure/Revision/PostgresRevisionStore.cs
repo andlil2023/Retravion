@@ -6,6 +6,7 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.Revision;
 using Retravion.Domain.Revision;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Infrastructure.Product;
 
 namespace Retravion.Infrastructure.Revision;
 
@@ -16,7 +17,9 @@ public sealed partial class PostgresRevisionStore(string connectionString,
         SELECT pg_advisory_xact_lock(821749620115);
         ALTER TABLE IF EXISTS retravion_need.need_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
         ALTER TABLE IF EXISTS retravion_requirement.requirement_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
+        ALTER TABLE IF EXISTS retravion_requirement.requirement_version ADD COLUMN IF NOT EXISTS area_id uuid REFERENCES retravion_product.area(internal_id);
         ALTER TABLE IF EXISTS retravion_test_case.test_case_version ADD COLUMN IF NOT EXISTS release_protected boolean NOT NULL DEFAULT false;
+        ALTER TABLE IF EXISTS retravion_test_case.test_case_version ADD COLUMN IF NOT EXISTS area_id uuid REFERENCES retravion_product.area(internal_id);
         CREATE SCHEMA IF NOT EXISTS retravion_revision;
         CREATE COLLATION IF NOT EXISTS retravion_revision.identifier_fold (provider=icu, locale='und-u-ks-level2', deterministic=false);
         CREATE TABLE IF NOT EXISTS retravion_revision.revision (
@@ -278,6 +281,7 @@ public sealed partial class PostgresRevisionStore(string connectionString,
             // Match User Need -> Requirement -> Test Case order, before the revision lock and audit lock.
             await using (var locks = new NpgsqlCommand("SELECT pg_advisory_xact_lock(821749620111); SELECT pg_advisory_xact_lock(821749620112); SELECT pg_advisory_xact_lock(821749620114)", c, t))
                 await locks.ExecuteNonQueryAsync(token);
+            await using (var areas = new NpgsqlCommand(PostgresProductAreaStore.Setup, c, t)) await areas.ExecuteNonQueryAsync(token);
             await using (var setup = new NpgsqlCommand(Setup, c, t)) await setup.ExecuteNonQueryAsync(token);
             var result = await operation(c, t);
             if (result.IsSuccess)

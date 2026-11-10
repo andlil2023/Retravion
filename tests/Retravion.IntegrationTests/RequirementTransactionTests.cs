@@ -17,7 +17,7 @@ public sealed partial class PostgresProductTests
     private static readonly AuditActor RequirementActor = new AuditActor.Identified("author");
     private static readonly DateTimeOffset RequirementTime = DateTimeOffset.Parse("2026-01-02T03:04:05Z").AddTicks(1234);
     private static RequirementAuditValues RequirementValues(RequirementState r) =>
-        new(r.ProductInternalId, r.Id, r.Title, r.Statement, r.Type.ToString(), r.Rationale, r.Status.ToString());
+        new(r.ProductInternalId, r.Id, r.Title, r.Statement, r.Type.ToString(), r.Rationale, r.Status.ToString(), AreaEvidence.Unclassified);
 
     [PostgresFact]
     public async Task RequirementReadsBeforeProductInitializationReturnAbsenceAndWritesFailSafely()

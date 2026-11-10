@@ -20,32 +20,33 @@ public abstract record Requirement
     public bool HasBeenApproved { get; }
     public string? CreationReason { get; }
     public Guid? SourceVersionId { get; }
+    public Guid? AreaId { get; }
     public abstract RequirementStatus Status { get; }
 
     private protected Requirement(Guid internalId, Guid productInternalId, string id, string title,
         string statement, RequirementType type, string? rationale, VersionIdentity version) =>
-        (InternalId, ProductInternalId, Id, Title, Statement, Type, Rationale, VersionId, VersionNumber, HasBeenApproved, CreationReason, SourceVersionId) =
-        (internalId, productInternalId, id, title, statement, type, rationale, version.Id, version.Number, version.Approved, version.Reason, version.Source);
+        (InternalId, ProductInternalId, Id, Title, Statement, Type, Rationale, VersionId, VersionNumber, HasBeenApproved, CreationReason, SourceVersionId, AreaId) =
+        (internalId, productInternalId, id, title, statement, type, rationale, version.Id, version.Number, version.Approved, version.Reason, version.Source, version.AreaId);
 
-    private protected sealed record VersionIdentity(Guid Id, int Number, bool Approved, string? Reason, Guid? Source);
-    private VersionIdentity Version => new(VersionId, VersionNumber, HasBeenApproved, CreationReason, SourceVersionId);
+    private protected sealed record VersionIdentity(Guid Id, int Number, bool Approved, string? Reason, Guid? Source, Guid? AreaId = null);
+    private VersionIdentity Version => new(VersionId, VersionNumber, HasBeenApproved, CreationReason, SourceVersionId, AreaId);
 
     public static Result<Requirement> Create(Guid productInternalId, string? id, string? title, string? statement,
-        RequirementType? type, string? rationale = null) =>
+        RequirementType? type, string? rationale = null, Guid? areaId = null) =>
         Construct(Guid.NewGuid(), productInternalId, id, title, statement, type, rationale, RequirementStatus.Draft,
-            new(Guid.NewGuid(), 1, false, null, null));
+            new(Guid.NewGuid(), 1, false, null, null, areaId));
 
     public static Result<Requirement> Restore(Guid internalId, Guid productInternalId, string? id, string? title,
         string? statement, RequirementType? type, string? rationale, RequirementStatus status,
         Guid? versionId = null, int versionNumber = 1, bool hasBeenApproved = false,
-        string? creationReason = null, Guid? sourceVersionId = null) =>
+        string? creationReason = null, Guid? sourceVersionId = null, Guid? areaId = null) =>
         Construct(internalId, productInternalId, id, title, statement, type, rationale, status,
-            new(versionId ?? internalId, versionNumber, hasBeenApproved || status == RequirementStatus.Approved, creationReason, sourceVersionId));
+            new(versionId ?? internalId, versionNumber, hasBeenApproved || status == RequirementStatus.Approved, creationReason, sourceVersionId, areaId));
 
     private static Result<Requirement> Construct(Guid internalId, Guid productInternalId, string? id, string? title,
         string? statement, RequirementType? type, string? rationale, RequirementStatus status, VersionIdentity version)
     {
-        if (internalId == Guid.Empty || productInternalId == Guid.Empty || version.Id == Guid.Empty || version.Number < 1 ||
+        if (internalId == Guid.Empty || productInternalId == Guid.Empty || version.Id == Guid.Empty || version.AreaId == Guid.Empty || version.Number < 1 ||
             (version.Number == 1 ? version.Reason is not null || version.Source is not null :
                 !version.Approved || string.IsNullOrWhiteSpace(version.Reason) || version.Source is null || version.Source == Guid.Empty || version.Source == version.Id))
             return Result.Failure<Requirement>("The Requirement identity or version is invalid.");
@@ -67,6 +68,10 @@ public abstract record Requirement
 
     public virtual Result<Requirement> Edit(string? id, string? title, string? statement, RequirementType? type, string? rationale) =>
         Result.Failure<Requirement>("Only Draft Requirements can be edited.");
+    public Result<Requirement> Classify(Guid? areaId) => Status != RequirementStatus.Draft
+        ? Result.Failure<Requirement>("Only Draft Requirements can be classified.")
+        : Construct(InternalId, ProductInternalId, Id, Title, Statement, Type, Rationale, Status, Version with { AreaId = areaId });
+
     public virtual Result<Requirement> SubmitForReview() => Result.Failure<Requirement>("Only Draft Requirements can be submitted for review.");
     public virtual Result<Requirement> Approve() => Result.Failure<Requirement>("Only Requirements in review can be approved.");
     public virtual Result<Requirement> ReturnToDraft() => Result.Failure<Requirement>("Only Requirements in review can be returned to Draft.");
@@ -108,6 +113,6 @@ public abstract record Requirement
             ? Result.Failure<Requirement>("A change reason is required.") : VersionNumber == int.MaxValue
                 ? Result.Failure<Requirement>("The version number limit has been reached.")
                 : Construct(InternalId, ProductInternalId, Id, Title, Statement, Type, Rationale, RequirementStatus.Draft,
-                    new(Guid.NewGuid(), VersionNumber + 1, true, reason, VersionId));
+                    new(Guid.NewGuid(), VersionNumber + 1, true, reason, VersionId, AreaId));
     }
 }

@@ -30,6 +30,7 @@
         {
             var selected = IsSelected(product.Id);
             <a class="navigation-node product-navigation-item @(selected ? "selected" : "")" href="@($"/products/details?id={Uri.EscapeDataString(product.Id)}")" aria-current="@(selected ? "page" : null)"><span>@product.Id – @product.Name</span></a>
+            <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/products/areas?product={Uri.EscapeDataString(product.Id)}")"><span>Areas</span></a>
             <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/user-needs?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"User Needs for {product.Id} – {product.Name}")"><span>User Needs</span></a>
             <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/requirements?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Requirements for {product.Id} – {product.Name}")"><span>Requirements</span></a>
             <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/test-cases?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Test Cases for {product.Id} – {product.Name}")"><span>Test Cases</span></a>
