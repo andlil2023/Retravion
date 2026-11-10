@@ -27,7 +27,7 @@ internal static class AiWorkflowEndpoints
                 form["confirm"] != "true") return Results.BadRequest();
             context.RequestServices.GetRequiredService<SessionTicketStore>().RecordActivity(context.User.FindFirstValue(SessionTicketStore.SessionClaim));
             var result = await operations.Save(context.User, new(before, revision), enabled, context.RequestAborted);
-            return result.IsSuccess ? Results.LocalRedirect("/settings/ai-workflow?saved=true") : Results.BadRequest(new { error = result.Error });
+            return result.IsSuccess ? Results.LocalRedirect("/settings/mcp?saved=true") : Results.BadRequest(new { error = result.Error });
         }).AllowAnonymous(); // All access checks live in operations; never trust endpoint anonymity as permission.
 
         app.MapGet("/settings/ai-workflow/packages/{version}/{client}", (string version, string client, HttpContext context) =>

@@ -16,7 +16,8 @@
                New application pages are protected even without an authorization attribute. *@
             <AuthorizeView Policy="@(routeData.PageType == typeof(ReplacementPage)
                 ? "PasswordReplacementRequired"
-                : routeData.PageType.Namespace == "Retravion.Web.Features.Identity.Users"
+                : routeData.PageType == typeof(Retravion.Web.Features.Mcp.McpSettings)
+                    || routeData.PageType.Namespace == "Retravion.Web.Features.Identity.Users"
                     ? "Administrator" : "CompletedPasswordReplacement")">
                 <Authorized>
                     <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />

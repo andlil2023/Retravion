@@ -243,8 +243,8 @@ Host names and requests with an Origin header are rejected. Do not expose this
 endpoint through a remote proxy or publish the container port on all interfaces.
 
 MCP starts **disabled**, including when upgrading from the earlier always-available
-MCP host. In **Settings → AI Workflow**, only an administrator can enable or disable
-it for all users. The setting is stored in PostgreSQL and survives restarts. Disabling
+MCP host. In **Settings → MCP settings** (`/settings/mcp`), only an administrator can
+enable or disable it for all users. Administrators can also reach MCP settings from AI Workflow. The setting is stored in PostgreSQL and survives restarts. Disabling
 invalidates all issued MCP credentials; re-enabling requires fresh credentials. Requests
 already executing when disabling begins may complete; requests starting after confirmed
 disabling are denied. Browser access, setup instructions and downloads remain available.
