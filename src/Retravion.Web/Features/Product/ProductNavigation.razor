@@ -26,18 +26,28 @@
         @foreach (var product in _products)
         {
             var selected = IsSelected(product.Id);
-            <a class="navigation-node product-navigation-item @(selected ? "selected" : "")" href="@($"/products/details?id={Uri.EscapeDataString(product.Id)}")" aria-current="@(selected ? "page" : null)"><MudIcon Icon="@Icons.Material.Outlined.Inventory2" /><span>@product.Id – @product.Name</span></a>
-            <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/products/areas?product={Uri.EscapeDataString(product.Id)}")"><MudIcon Icon="@Icons.Material.Outlined.Category" /><span>Areas</span></a>
-            <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/user-needs?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"User Needs for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.People" /><span>User Needs</span></a>
-            <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/requirements?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Requirements for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.ChecklistRtl" /><span>Requirements</span></a>
-            <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/test-cases?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Test Cases for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span>Test Cases</span></a>
-            <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/revisions?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Revisions for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.History" /><span>Revisions</span></a>
+            var expanded = !_collapsedProducts.Contains(product.InternalId);
+            var childrenId = $"product-navigation-children-{Uri.EscapeDataString(product.Id)}";
+            <div class="product-navigation-product" @key="product.InternalId">
+                <div class="product-navigation-heading">
+                    <button type="button" class="product-node-toggle" aria-label="@($"{(expanded ? "Collapse" : "Expand")} {product.Id} – {product.Name}")" aria-expanded="@(expanded ? "true" : "false")" aria-controls="@childrenId" @onclick="() => Toggle(product.InternalId)"><MudIcon Icon="@(expanded ? Icons.Material.Outlined.ExpandMore : Icons.Material.Outlined.ChevronRight)" /></button>
+                    <a class="navigation-node product-navigation-item @(selected ? "selected" : "")" href="@($"/products/details?id={Uri.EscapeDataString(product.Id)}")" aria-current="@(selected ? "page" : null)"><MudIcon Icon="@Icons.Material.Outlined.Inventory2" /><span>@product.Id – @product.Name</span></a>
+                </div>
+                <div id="@childrenId" class="product-navigation-children" hidden="@(!expanded)">
+                    <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/products/areas?product={Uri.EscapeDataString(product.Id)}")"><MudIcon Icon="@Icons.Material.Outlined.Category" /><span>Areas</span></a>
+                    <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/user-needs?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"User Needs for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.People" /><span>User Needs</span></a>
+                    <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/requirements?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Requirements for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.ChecklistRtl" /><span>Requirements</span></a>
+                    <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/test-cases?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Test Cases for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span>Test Cases</span></a>
+                    <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/revisions?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Revisions for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.History" /><span>Revisions</span></a>
+                </div>
+            </div>
         }
     }
 </div>
 
 @code {
     private IReadOnlyList<Retravion.Domain.Product.Product> _products = [];
+    private readonly HashSet<Guid> _collapsedProducts = [];
     private string? _error;
     private bool _loading = true, _disposed;
     private int _loadVersion;
@@ -96,6 +106,11 @@
         await loading;
         if (!_disposed) StateHasChanged();
     });
+
+    private void Toggle(Guid productId)
+    {
+        if (!_collapsedProducts.Add(productId)) _collapsedProducts.Remove(productId);
+    }
 
     public void Dispose() { _disposed = true; Navigation.LocationChanged -= LocationChanged; }
 }
