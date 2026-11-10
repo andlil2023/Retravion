@@ -165,7 +165,7 @@ public sealed partial class AccountManagementTests
                 using var denied = await host.Send("tools/call", new { name = tool, arguments = new { title = "secret", actor = "spoof", steps = new object?[] { null } } }, state == "active" ? "https://evil.invalid" : null);
                 Assert.Equal(state == "active" ? HttpStatusCode.Forbidden : HttpStatusCode.Unauthorized, denied.StatusCode);
                 Assert.Equal(count + 1, audit.Events.Count);
-                var entry = audit.Events[^1];
+                var entry = audit.Events.Last();
                 Assert.Equal(tool.StartsWith("create", StringComparison.Ordinal) ? "test-case.create" : "test-case.edit", entry.Action);
                 Assert.IsType<AuditTarget.Unknown>(entry.Target); Assert.Null(entry.TestCaseChange);
                 Assert.Equal(AuditActionOutcome.Failure, entry.Outcome);

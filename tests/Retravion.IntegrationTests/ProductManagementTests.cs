@@ -45,9 +45,7 @@ public sealed partial class AccountManagementTests
         var operations = scope.ServiceProvider.GetRequiredService<ProductOperations>();
         var home = await user.GetStringAsync("/home");
         Assert.Contains("href=\"/products\"", home);
-        Assert.Contains("aria-controls=\"product-navigation-list\"", home);
-        Assert.True(home.IndexOf("aria-controls=\"product-navigation-list\"", StringComparison.Ordinal) <
-                    home.IndexOf("href=\"/products\"", StringComparison.Ordinal));
+        AssertProductNavigationExpanded(home);
         Assert.Contains("No products found.", home);
         var landing = await user.GetStringAsync("/products");
         Assert.Contains("Search Product ID or name", landing);
@@ -92,6 +90,27 @@ public sealed partial class AccountManagementTests
         var details = await user.GetStringAsync(detailPath);
         Assert.Contains("class=\"navigation-node product-navigation-item selected\"", details);
         Assert.Contains("href=\"/products/details?id=" + Uri.EscapeDataString(id) + "\"", details);
+        AssertProductNavigationExpanded(details);
+        var navigation = Regex.Match(details, "<div id=\"product-navigation-list\"[^>]*>[\\s\\S]*?</div>").Value;
+        var encodedId = Uri.EscapeDataString(id);
+        var expectedNodes = new[]
+        {
+            (Href: $"/products/details?id={encodedId}", Label: $"{id} – <script>Product</script>", Icon: MudBlazor.Icons.Material.Outlined.Inventory2),
+            (Href: $"/products/areas?product={encodedId}", Label: "Areas", Icon: MudBlazor.Icons.Material.Outlined.Category),
+            (Href: $"/user-needs?product={encodedId}", Label: "User Needs", Icon: MudBlazor.Icons.Material.Outlined.People),
+            (Href: $"/requirements?product={encodedId}", Label: "Requirements", Icon: MudBlazor.Icons.Material.Outlined.ChecklistRtl),
+            (Href: $"/test-cases?product={encodedId}", Label: "Test Cases", Icon: MudBlazor.Icons.Material.Outlined.FactCheck),
+            (Href: $"/revisions?product={encodedId}", Label: "Revisions", Icon: MudBlazor.Icons.Material.Outlined.History)
+        };
+        var nodes = Regex.Matches(navigation, "<a\\b[^>]*>[\\s\\S]*?</a>").Cast<Match>().ToArray();
+        Assert.Equal(expectedNodes.Length, nodes.Length);
+        foreach (var expected in expectedNodes)
+        {
+            var node = Assert.Single(nodes, node => node.Value.Contains($"href=\"{expected.Href}\"", StringComparison.Ordinal)).Value;
+            Assert.Equal(expected.Label, WebUtility.HtmlDecode(Regex.Match(node, "<span>([\\s\\S]*?)</span>").Groups[1].Value));
+            Assert.Contains(expected.Icon, node);
+            Assert.Matches("<svg[^>]*aria-hidden=\"true\"", node);
+        }
         Assert.Contains("&lt;script&gt;Product&lt;/script&gt;", details);
         Assert.Contains("&lt;b&gt;Plain description&lt;/b&gt;", details);
         Assert.DoesNotContain("<script>Product</script>", details);
@@ -202,6 +221,16 @@ public sealed partial class AccountManagementTests
         Assert.Equal(0, products.Calls);
     }
 
+    private static void AssertProductNavigationExpanded(string html)
+    {
+        var list = Regex.Match(html, "<div id=\"product-navigation-list\"[^>]*>");
+        Assert.True(list.Success);
+        Assert.DoesNotContain("hidden", list.Value);
+        Assert.DoesNotContain("product-navigation-toggle", html);
+        Assert.DoesNotContain("Collapse products", html);
+        Assert.DoesNotContain("Expand products", html);
+    }
+
     private static void AssertProductAction(string html, string action)
     {
         var header = Regex.Match(html, "<header\\b[^>]*class=\"page-toolbar\"[^>]*>[\\s\\S]*?</header>");
@@ -274,6 +303,7 @@ public sealed partial class AccountManagementTests
             var html = component.ToHtmlString();
             Assert.Contains("Renamed", html);
             Assert.DoesNotContain("First name", html);
+            AssertProductNavigationExpanded(html);
             products.FailList = true;
             services.GetRequiredService<NavigationManager>().NavigateTo("/home");
             Assert.Contains("Could not load products.", component.ToHtmlString());
@@ -303,6 +333,7 @@ public sealed partial class AccountManagementTests
 
         var failed = await user.GetStringAsync("/home");
         Assert.Contains("Could not load products.", failed);
+        AssertProductNavigationExpanded(failed);
         Assert.Contains(">Retry</button>", failed);
         Assert.DoesNotContain("sensitive provider details", failed);
         products.ThrowList = false;
@@ -313,6 +344,7 @@ public sealed partial class AccountManagementTests
         products.FailList = false;
         var recovered = await user.GetStringAsync("/home");
         Assert.Contains("No products found.", recovered);
+        AssertProductNavigationExpanded(recovered);
         Assert.DoesNotContain("Could not load products.", recovered);
     }
 
