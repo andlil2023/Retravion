@@ -28,6 +28,79 @@ namespace Retravion.IntegrationTests;
 public sealed partial class PostgresProductTests
 {
     [PostgresFact]
+    public async Task RevisionListCreationIsHeaderNavigationAndHiddenWhenRetiredOrLoadingFails()
+    {
+        await using var db = await Database.Create();
+        var products = new PostgresProductStore(db.ConnectionString);
+        var product = (await new CreateProduct(products).Execute("P & Q", "Product", ProductKind.System, "")).Value;
+        var active = (await new CreateProduct(products).Execute("Active", "Active", ProductKind.System, "")).Value;
+        var store = new PostgresRevisionStore(db.ConnectionString);
+        await using var host = new McpTestHost(s =>
+        {
+            s.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            s.AddSingleton<IRevisionStore>(store); s.AddSingleton<IRevisionChangeTransaction>(store);
+        });
+        await host.Login(); await host.Replace(); var token = await host.Authenticate();
+        var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(token);
+        using var scope = host.Factory.Services.CreateScope();
+        await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton<IJSRuntime, CaseJS>().AddSingleton<NavigationManager>(new CaseNavigation())
+            .AddSingleton<AuthenticationStateProvider>(new CaseAuthentication(principal))
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<RevisionOperations>())
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<ProductOperations>()).BuildServiceProvider();
+        await using var renderer = new CaseRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            async Task Mount(string id) => await renderer.Mount(typeof(RevisionListWithHeader), new()
+                { [nameof(RevisionListWithHeader.ProductId)] = id });
+            void AssertNoCreation()
+            {
+                Assert.Single(renderer.Components<Retravion.Web.Components.PageHeader>());
+                Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.Href?.Contains("/revisions/create") == true);
+                Assert.DoesNotContain("Create empty Draft", renderer.Text());
+            }
+            await Mount(product.Id);
+            Assert.Empty(renderer.Errors);
+            Assert.Contains("Create Revision", renderer.Text());
+            var button = Assert.Single(renderer.Components<MudButton>(), b => b.Href?.Contains("/revisions/create") == true);
+            Assert.Equal("/revisions/create?product=P%20%26%20Q", button.Href);
+            Assert.Equal(Variant.Text, button.Variant); Assert.Equal(Color.Default, button.Color);
+            Assert.Equal(Icons.Material.Outlined.Add, button.StartIcon);
+            Assert.Single(renderer.Components<MudButton>(), b => b.Href?.Contains("/revisions/create") == true);
+            Assert.DoesNotContain("Create empty Draft", renderer.Text());
+            var header = Assert.Single(renderer.Components<Retravion.Web.Components.PageHeader>());
+            using var actions = new Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder();
+            header.Actions!(actions);
+            Assert.Contains(actions.GetFrames().Array.Take(actions.GetFrames().Count), frame =>
+                frame.FrameType == Microsoft.AspNetCore.Components.RenderTree.RenderTreeFrameType.Component && frame.ComponentType == typeof(MudButton));
+            Assert.True((await products.Update(product, product.Retire().Value)).IsSuccess);
+            await Mount(product.Id); Assert.Contains("read-only", renderer.Text()); AssertNoCreation();
+            await Mount("missing");
+            Assert.Single(renderer.Elements("div"), attrs => attrs.Any(a => a.AttributeName == "role" && Equals(a.AttributeValue, "alert")));
+            AssertNoCreation();
+            var row = await RevCreate(store, active.InternalId, "Invalid persisted revision");
+            await using var connection = new Npgsql.NpgsqlConnection(db.ConnectionString); await connection.OpenAsync();
+            await using var corrupt = new Npgsql.NpgsqlCommand("UPDATE retravion_revision.revision SET selections='[null]'::jsonb WHERE internal_id=$1", connection);
+            corrupt.Parameters.AddWithValue(row.Value.InternalId); await corrupt.ExecuteNonQueryAsync();
+            Assert.True((await store.List(active.InternalId)).IsFailure);
+            await Mount(active.Id);
+            Assert.Single(renderer.Elements("div"), attrs => attrs.Any(a => a.AttributeName == "role" && Equals(a.AttributeValue, "alert")));
+            AssertNoCreation();
+        });
+        Assert.Empty(renderer.Errors);
+    }
+
+    private sealed class RevisionListWithHeader : RevisionList
+    {
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder)
+        {
+            builder.OpenRegion(0); base.BuildRenderTree(builder); builder.CloseRegion();
+            builder.OpenComponent<Microsoft.AspNetCore.Components.Sections.SectionOutlet>(1);
+            builder.AddAttribute(2, "SectionName", "product-page-header"); builder.CloseComponent();
+        }
+    }
+
+    [PostgresFact]
     public async Task RevisionPagesCreateEditSelectReplaceRemoveInspectHistoryAndConfirmDeletion()
     {
         await using var db = await Database.Create();
