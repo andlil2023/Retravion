@@ -4,7 +4,11 @@
 @inject AuthenticationStateProvider Authentication
 
 <PageTitle>Revisions · Retravion</PageTitle>
-<SectionContent SectionName="product-page-header"><PageHeader Title="Revisions" BackHref="/products" BackText="Products" /></SectionContent>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Revisions" BackHref="/products" BackText="Products">
+        <Actions>@if (_product?.IsActive == true) { <MudButton Href="@($"/revisions/create?product={Uri.EscapeDataString(_product.Id)}")" StartIcon="@Icons.Material.Outlined.Add">Create Revision</MudButton> }</Actions>
+    </PageHeader>
+</SectionContent>
 @if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
 @if (_product is not null)
 {
@@ -18,8 +22,6 @@
         </RowTemplate>
         <NoRecordsContent><MudText>No revisions.</MudText></NoRecordsContent>
     </MudTable>
-    @if (_product.IsActive)
-    { <div class="mt-4"><MudButton Href="@($"/revisions/create?product={Uri.EscapeDataString(_product.Id)}")" Variant="Variant.Filled" Color="Color.Primary">Create empty Draft</MudButton></div> }
 }
 @code {
     [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
