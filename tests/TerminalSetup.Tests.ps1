@@ -80,7 +80,9 @@ try {
     $saved = [Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPem((Get-Content (Join-Path $runtime 'retravion.pem') -Raw))
     Assert-True ($saved.Thumbprint -eq $certificate.Thumbprint) 'Confirmed certificate saved as PEM'
     Assert-True (Test-Path (Join-Path $runtime 'bridge/tools.json')) 'Tool list installed'
-    Assert-True (Test-Path (Join-Path $project '.pi/skills/retravion/SKILL.md')) 'Skill installed'
+    $skillSource = Get-Content (Join-Path $source 'SKILL.md') -Raw
+    Assert-True ((Get-Content (Join-Path $project '.pi/skills/retravion/SKILL.md') -Raw) -ceq $skillSource) 'Current skill installed unchanged for Pi'
+    Assert-True ($skillSource.Contains('`create_draft_requirement`') -and $skillSource.Contains('`edit_draft_requirement`')) 'Installed skill supports Requirement Draft writes'
     Assert-True (-not (Test-Path (Join-Path $project '.mcp.json'))) 'Other client untouched'
     Assert-True (-not (Get-ChildItem $project -Recurse -Force -File | Select-String -SimpleMatch 'RETRAVION_MCP_TOKEN')) 'No token variable anywhere'
 
@@ -126,7 +128,7 @@ console.log(JSON.stringify({ status: trusted.status, text: trusted.text, refused
     # Claude uses its own paths and shares the bridge; removing one client keeps the other working.
     & $setup -Client claude -Directory $project -CertificateFile $cer -Fingerprint $fingerprint 6>$null
     Assert-True ((Get-Content (Join-Path $project '.mcp.json') -Raw | ConvertFrom-Json).mcpServers.retravion.command -eq 'node') 'Claude entry added'
-    Assert-True (Test-Path (Join-Path $project '.claude/skills/retravion/SKILL.md')) 'Claude skill installed'
+    Assert-True ((Get-Content (Join-Path $project '.claude/skills/retravion/SKILL.md') -Raw) -ceq $skillSource) 'Current skill installed unchanged for Claude'
     & $setup -Directory $project -Remove 6>$null
     $config = Get-Content (Join-Path $project '.pi/mcp.json') -Raw | ConvertFrom-Json
     Assert-True ($null -eq $config.mcpServers.PSObject.Properties['retravion'] -and $config.mcpServers.other.url -eq 'https://example.invalid/mcp') 'Only the Retravion entry removed'

@@ -341,8 +341,11 @@ integration version and SHA-256. These fixed packages contain only
 (`bridge/server.mjs`, `bridge/tools.json`); no credentials, user records or terminal client.
 A hash checks file integrity, not publisher identity. Downloading grants no access.
 
-The skill reads Products and User Needs and requires explicit conversation approval
-before Draft writes; it does not confer lifecycle approval or new permissions.
+Integration 2.1.0 guides Product, User Need and Requirement reads and requires explicit
+conversation approval before User Need or Requirement Draft writes. It preserves revision
+checks and prohibits automatic retries, including stale or uncertain writes. Test Case
+workflows, relationship/link writes and lifecycle operations remain unsupported by the
+skill; it does not confer lifecycle approval or new permissions.
 
 To update, run the new ZIP's `mcp_setup.ps1` again. To remove, run it with `-Remove`:
 it deletes only Retravion's skill and server entry, and the shared bridge folder once no
