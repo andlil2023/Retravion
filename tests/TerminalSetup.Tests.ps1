@@ -46,6 +46,12 @@ try {
     Assert-True ((Get-Content (Join-Path $project '.pi/mcp.json') -Raw) -ceq $existing) 'Configuration untouched after refusal'
     Assert-True (-not (Test-Path (Join-Path $project '.retravion-terminal'))) 'Nothing trusted or installed after refusal'
 
+    # The project is never a terminal configuration folder or, implicitly, the extracted ZIP folder.
+    Assert-Throws { & $setup -Directory (Join-Path $project '.pi') -CertificateFile $cer -Fingerprint $fingerprint } 'not a project directory'
+    Push-Location $package
+    try { Assert-Throws { & $setup -CertificateFile $cer -Fingerprint $fingerprint } 'Pass -Directory' } finally { Pop-Location }
+    Assert-True (-not (Test-Path (Join-Path $project '.pi/.pi')) -and -not (Test-Path (Join-Path $package '.retravion-terminal'))) 'Nothing installed in the wrong place'
+
     # Declining the interactive confirmation changes nothing either.
     function global:Read-Host { 'no' }
     try { Assert-Throws { & $setup -Directory $project -CertificateFile $cer 6>$null } 'Certificate not confirmed' }

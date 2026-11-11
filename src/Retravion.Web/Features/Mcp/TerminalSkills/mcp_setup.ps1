@@ -61,6 +61,14 @@ function Read-RetravionConfig([string] $Path) {
 }
 
 $root = (Resolve-Path -LiteralPath $Directory).Path
+# Guard against installing one level too deep: the project is the folder that contains .pi or .claude,
+# and it is never the folder the ZIP was extracted into unless you say so.
+if (@('.pi', '.claude', '.retravion-terminal') -contains (Split-Path -Leaf $root)) {
+    throw "$root is a terminal configuration folder, not a project directory. Pass -Directory <your project directory>. Nothing was changed."
+}
+if (-not $PSBoundParameters.ContainsKey('Directory') -and $root -eq (Resolve-Path -LiteralPath $PSScriptRoot).Path) {
+    throw 'Pass -Directory <your project directory>. Without it the extracted ZIP folder itself would be used. Nothing was changed.'
+}
 $skill = Join-Path $root $(if ($Client -eq 'pi') { '.pi/skills/retravion/SKILL.md' } else { '.claude/skills/retravion/SKILL.md' })
 $configPath = Join-Path $root $(if ($Client -eq 'pi') { '.pi/mcp.json' } else { '.mcp.json' })
 $runtime = Join-Path $root '.retravion-terminal'
