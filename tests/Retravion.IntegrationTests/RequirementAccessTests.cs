@@ -21,11 +21,14 @@ public sealed partial class AccountManagementTests
         var store = new RequirementStoreDouble();
         var needStore = new NeedStoreDouble();
         var caseStore = new CaseGateStore();
+        var featureStore = new FeatureGateStore();
         await using var original = new AdministratorWebFactory(new StartupAdministratorStore(), "admin", Initial);
         await using var factory = original.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.AddSingleton<IRequirementStore>(store); services.AddSingleton<IRequirementChangeTransaction>(store);
             services.AddSingleton<IRequirementLinkStore>(store);
+            services.AddSingleton<Retravion.Application.Feature.IFeatureStore>(featureStore);
+            services.AddSingleton<Retravion.Application.Feature.IFeatureChangeTransaction>(featureStore);
             services.AddSingleton<Retravion.Application.TestCase.ITestCaseStore>(caseStore);
             services.AddSingleton<Retravion.Application.TestCase.ITestCaseChangeTransaction>(caseStore);
             services.AddSingleton<Retravion.Application.UserNeed.IUserNeedStore>(needStore);

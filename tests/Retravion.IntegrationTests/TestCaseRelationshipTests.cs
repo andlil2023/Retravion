@@ -27,6 +27,9 @@ public sealed partial class PostgresProductTests
         var cases = new PostgresTestCaseStore(connectionString);
         services.AddSingleton<ITestCaseStore>(cases);
         services.AddSingleton<ITestCaseChangeTransaction>(cases);
+        var features = new Retravion.Infrastructure.Feature.PostgresFeatureStore(connectionString);
+        services.AddSingleton<Retravion.Application.Feature.IFeatureStore>(features);
+        services.AddSingleton<Retravion.Application.Feature.IFeatureChangeTransaction>(features);
     }
 
     private sealed class CaseRelationshipFixture : IAsyncDisposable
@@ -57,6 +60,7 @@ public sealed partial class PostgresProductTests
             if (linked) row = (await cases.ChangeLink(row, "add", CaseEndpoint(data.Owner), null, CaseActor, CaseTime)).Value;
             var host = new McpTestHost(services =>
             {
+                RegisterRelationshipCases(services, database.ConnectionString);
                 services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
                 services.AddSingleton<IRequirementStore>(requirements);
                 services.AddSingleton<IRequirementLinkStore>(requirements);

@@ -74,7 +74,7 @@ public sealed partial class PostgresProductTests
                 await ExplorationClick(renderer, "Inspect " + root.Label);
                 await ManagementButton(renderer, "Add link for " + root.Label).OnClick.InvokeAsync(new MouseEventArgs());
                 Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString() == "Add selected link");
-                Assert.Equal(new[] { "need", "parent", "child", "test-case" }, renderer.Components<MudSelectItem<string>>().Select(i => i.Value));
+                Assert.Equal(new[] { "need", "parent", "child", "test-case", "feature" }, renderer.Components<MudSelectItem<string>>().Select(i => i.Value));
                 Assert.Equal("need", renderer.Components<MudSelect<string>>().Single().GetState(x => x.Value));
                 var parentChoice = renderer.Components<MudSelectItem<string>>().Single(i => i.Value == "parent");
                 await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync(parentChoice.Value);

@@ -42,6 +42,8 @@ public sealed partial class AccountManagementTests
             foreach (var decision in new[] { "InReview", "Approved", "Draft", "secret-decision" }) Assert.True((await operations.Review(principal, expected, decision, "secret-comment")).IsFailure);
             Assert.True((await operations.Reopen(principal, expected, "secret-reason")).IsFailure);
             Assert.True((await operations.CreateSuccessor(principal, expected, "secret-reason")).IsFailure);
+            foreach (var action in new[] { "add", "remove", "retarget", "secret-action" })
+                Assert.True((await operations.ChangeLink(principal, expected, action, new(Guid.Empty, Guid.Empty), null)).IsFailure);
         }
         foreach (var principal in new[] { new ClaimsPrincipal(new ClaimsIdentity()), restricted, revoked })
         {
@@ -50,11 +52,11 @@ public sealed partial class AccountManagementTests
             Assert.True((await operations.Find(principal, expected.Feature.InternalId)).IsFailure);
             Assert.True((await operations.Versions(principal, expected.Feature.InternalId)).IsFailure);
             Assert.True((await operations.History(principal, expected.Feature.InternalId)).IsFailure);
-            Assert.Equal(8, audit.Events.Count);
+            Assert.Equal(12, audit.Events.Count);
             Assert.All(audit.Events, e => { Assert.Equal(AuditActionOutcome.Failure, e.Outcome); Assert.IsType<AuditTarget.Unknown>(e.Target); Assert.Null(e.FeatureChange); Assert.DoesNotContain("secret", e.Action); });
         }
         foreach (var throws in new[] { false, true }) { audit.Fail = true; audit.Throw = throws; await Mutations(revoked); }
-        Assert.Equal(16, logger.Messages.Count); Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Feature change audit submission failed.", message));
+        Assert.Equal(24, logger.Messages.Count); Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Feature change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
     }
     private sealed class FeatureAuditLogger : ILogger<FeatureOperations>
@@ -78,5 +80,6 @@ public sealed partial class AccountManagementTests
         public Task<Result<FeatureSnapshot>> Review(FeatureSnapshot expected, string decision, string? comment, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Func<Task<bool>>? authorized = null) => Called<Task<Result<FeatureSnapshot>>>();
         public Task<Result<FeatureSnapshot>> Reopen(FeatureSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Func<Task<bool>>? authorized = null) => Called<Task<Result<FeatureSnapshot>>>();
         public Task<Result<FeatureSnapshot>> CreateSuccessor(FeatureSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) => Called<Task<Result<FeatureSnapshot>>>();
+        public Task<Result<FeatureSnapshot>> ChangeLink(FeatureSnapshot expected, string operation, FeatureRequirementLink target, FeatureRequirementLink? replacement, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Func<Task<bool>>? authorized = null) => Called<Task<Result<FeatureSnapshot>>>();
     }
 }
