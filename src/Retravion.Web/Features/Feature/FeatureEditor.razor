@@ -1,0 +1,85 @@
+@page "/features/create"
+@page "/features/edit"
+@inject FeatureOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>@(_editing ? "Edit" : "Create") Feature · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="@(_editing ? "Edit Feature" : "Create Feature")" BackHref="@BackPath" BackText="Features" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_pending is not null) { <MudButton OnClick="RetrieveOutcome" Disabled="_busy">Retrieve operation outcome before retrying</MudButton> }
+@if (_message is not null) { <p role="status">@_message</p> }
+@if (_ready)
+{
+    <MudPaper Class="product-card" Elevation="0"><form id="feature-form" @onsubmit="Save" @onsubmit:preventDefault aria-label="Save Feature">
+        <div class="pa-4"><p>@_product!.Id – @_product.Name · @(_existing?.Feature.Id ?? "ID assigned on creation") · Draft</p><p>Drafts may be incomplete. A title is required for review.</p><MudTextField @bind-Value="_title" Label="Title" Immediate="true" Disabled="_busy" /></div>
+        <DescriptionEditor @key="_formKey" FieldOnly="true" InputId="feature-description" InitialDescription="@_description" DescriptionChanged="@(value => _description = value)" Label="Description" Busy="_busy" />
+    </form></MudPaper>
+    <div class="product-actions"><MudButton ButtonType="ButtonType.Submit" form="feature-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _pending is not null)">Save Draft</MudButton><MudButton Href="@BackPath" Disabled="_busy">Cancel</MudButton></div>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "version")] public Guid? VersionId { get; set; }
+    private FeatureSnapshot? _existing;
+    private Retravion.Domain.Product.Product? _product;
+    private Guid? _pending;
+    private Guid _pendingProduct, _formKey;
+    private string _title = "", _description = "";
+    private string? _error, _message;
+    private bool _busy, _ready, _editing;
+    private string BackPath => _existing is not null ? $"/features/details?id={_existing.Feature.InternalId}&version={_existing.Feature.VersionId}" : $"/features?product={Uri.EscapeDataString(ProductId ?? "")}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _ready = false; _error = null; _existing = null; _product = null; _title = _description = ""; _formKey = Guid.NewGuid();
+        _editing = Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.EndsWith("/edit", StringComparison.OrdinalIgnoreCase);
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        if (_editing)
+        {
+            var found = await Operations.Find(actor, Id, VersionId); if (found.IsFailure) { _error = found.Error; return; }
+            if (found.Value.HasNoValue) { _error = "Feature version not found."; return; }
+            _existing = found.Value.Value;
+            if (_existing.Feature.Status != "Draft") { _error = "Only Draft Features can be edited."; return; }
+            var versions = await Operations.Versions(actor, Id); if (versions.IsFailure) { _error = versions.Error; return; }
+            if (versions.Value.LastOrDefault()?.Feature.VersionId != _existing.Feature.VersionId) { _error = "This earlier version is read-only because a newer version exists."; return; }
+            var products = await Products.List(actor); if (products.IsFailure) { _error = products.Error; return; }
+            _product = products.Value.SingleOrDefault(p => p.InternalId == _existing.Feature.ProductInternalId);
+            _title = _existing.Feature.Content.Title; _description = _existing.Feature.Content.Description;
+        }
+        else { var found = await Products.Retrieve(actor, ProductId); if (found.IsFailure) { _error = found.Error; return; } _product = found.Value; }
+        if (_product?.IsActive != true) { _error = "The responsible Product is retired or no longer exists."; return; }
+        _ready = true;
+    }
+    private async Task RetrieveOutcome()
+    {
+        if (_busy || _pending is null || _product is null) return;
+        _busy = true;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            var outcome = await Operations.Outcome(actor, _pendingProduct, _pending.Value);
+            if (outcome.IsFailure) { _error = outcome.Error; return; }
+            if (outcome.Value.HasValue) { var change = outcome.Value.Value; _pending = null; Navigation.NavigateTo($"/features/details?id={change.InternalId}&version={change.VersionId}"); }
+            else
+            {
+                _pending = null; _error = null; _message = "No change committed for this operation. Review the current record before a user-directed retry.";
+                if (_existing is not null) { var current = await Operations.Find(actor, _existing.Feature.InternalId); if (current.IsFailure || current.Value.HasNoValue || current.Value.Value.Revision != _existing.Revision) { _ready = false; _error = "The Feature changed or could not be retrieved. Reload and review current values before retrying."; } }
+            }
+        }
+        finally { _busy = false; }
+    }
+    private async Task Save()
+    {
+        if (_busy || !_ready || _pending is not null) return;
+        _busy = true; _error = null;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User; _pending = Guid.NewGuid(); _pendingProduct = _product!.InternalId;
+            var result = _existing is null ? await Operations.Create(actor, _product.InternalId, _title, _description, operationId: _pending) : await Operations.Edit(actor, _existing, _title, _description, operationId: _pending);
+            if (result.IsFailure) { _error = result.Error; if (!result.Error.Contains("outcome could not be confirmed", StringComparison.Ordinal)) _pending = null; }
+            else { _pending = null; Navigation.NavigateTo($"/features/details?id={result.Value.Feature.InternalId}&version={result.Value.Feature.VersionId}"); }
+        }
+        finally { _busy = false; }
+    }
+}

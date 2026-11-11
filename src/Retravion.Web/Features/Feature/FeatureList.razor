@@ -1,0 +1,41 @@
+@page "/features"
+@inject FeatureOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Features · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Features" BackHref="@ProductPath" BackText="Product details"><Actions>@if (_product?.IsActive == true) { <MudButton Href="@CreatePath" StartIcon="@Icons.Material.Outlined.Add">Create Feature</MudButton> }</Actions></PageHeader></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+else if (_features is null) { <p role="status">Loading Features…</p> }
+else
+{
+    <p>@_product!.Id – @_product.Name</p>
+    @if (!_product.IsActive) { <p>Features are read-only while this Product is retired.</p> }
+    <MudTextField T="string" @bind-Value="_search" Label="Search ID or title" Immediate="true" />
+    <MudSelect T="string" @bind-Value="_status" Label="Status filter">
+        <MudSelectItem Value="@("All")">All statuses</MudSelectItem><MudSelectItem Value="@("Draft")">Draft</MudSelectItem><MudSelectItem Value="@("InReview")">In Review</MudSelectItem><MudSelectItem Value="@("Approved")">Approved</MudSelectItem>
+    </MudSelect>
+    <MudTable Items="Filtered" Dense="true" Hover="true" Elevation="0" aria-label="Features">
+        <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Version</MudTh><MudTh>Status</MudTh></HeaderContent>
+        <RowTemplate><MudTd DataLabel="ID"><MudLink Href="@($"/features/details?id={context.Feature.InternalId}&version={context.Feature.VersionId}")">@context.Feature.Id</MudLink></MudTd><MudTd DataLabel="Title">@context.Feature.Content.Title</MudTd><MudTd DataLabel="Version">v@context.Feature.VersionNumber</MudTd><MudTd DataLabel="Status">@(context.Feature.Status == "InReview" ? "In Review" : context.Feature.Status)</MudTd></RowTemplate>
+        <NoRecordsContent><p>No Features match these filters.</p></NoRecordsContent>
+    </MudTable>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    private Retravion.Domain.Product.Product? _product;
+    private IReadOnlyList<FeatureSnapshot>? _features;
+    private string? _error;
+    private string _search = "", _status = "All";
+    private IEnumerable<FeatureSnapshot> Filtered => (_features ?? []).Where(row => (_status == "All" || row.Feature.Status == _status) && (row.Feature.Id.Contains(_search, StringComparison.OrdinalIgnoreCase) || row.Feature.Content.Title.Contains(_search, StringComparison.OrdinalIgnoreCase)));
+    private string ProductPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
+    private string CreatePath => $"/features/create?product={Uri.EscapeDataString(ProductId ?? "")}";
+    protected override async Task OnParametersSetAsync()
+    {
+        _features = null; _product = null; _error = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, ProductId); if (product.IsFailure) { _error = product.Error; return; }
+        _product = product.Value; var result = await Operations.List(actor, _product.InternalId);
+        if (result.IsFailure) _error = result.Error; else _features = result.Value;
+    }
+}

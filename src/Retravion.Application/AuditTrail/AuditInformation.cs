@@ -15,6 +15,7 @@ public sealed record AuditInformation
     public TestCaseAuditDetails? TestCaseChange { get; }
     public RevisionAuditDetails? RevisionChange { get; }
     public ProductAreaAuditDetails? ProductAreaChange { get; }
+    public FeatureAuditDetails? FeatureChange { get; }
 
     public AuditInformation(
         AuditActor actor,
@@ -28,7 +29,8 @@ public sealed record AuditInformation
         AiWorkflowAuditDetails? aiWorkflowChange = null,
         TestCaseAuditDetails? testCaseChange = null,
         RevisionAuditDetails? revisionChange = null,
-        ProductAreaAuditDetails? productAreaChange = null)
+        ProductAreaAuditDetails? productAreaChange = null,
+        FeatureAuditDetails? featureChange = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
@@ -50,5 +52,6 @@ public sealed record AuditInformation
         TestCaseChange = testCaseChange;
         RevisionChange = revisionChange;
         ProductAreaChange = productAreaChange;
+        FeatureChange = featureChange;
     }
 }
