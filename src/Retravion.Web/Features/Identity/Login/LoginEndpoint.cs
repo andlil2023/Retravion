@@ -24,13 +24,16 @@ internal static class LoginEndpoint
         }
 
         var form = await context.Request.ReadFormAsync(context.RequestAborted);
+        // Only a well-formed terminal connection code is carried through sign-in; no return address is accepted.
+        var connect = Retravion.Web.Features.Mcp.McpConnections.Normalize(form["connect"]);
+        var failed = connect is null ? "/?failed=true" : $"/?failed=true&connect={connect}";
         var result = await signIn.Authenticate(form["username"].ToString(), form["password"].ToString(),
             context.RequestAborted);
         if (result.IsFailure)
         {
             await SubmitDecision(audit, time, loggerFactory, context.RequestAborted, null);
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return Results.LocalRedirect("/?failed=true");
+            return Results.LocalRedirect(failed);
         }
 
         var loaded = await store.LoadForSignIn(result.Value, context.RequestAborted);
@@ -41,14 +44,14 @@ internal static class LoginEndpoint
         {
             await SubmitDecision(audit, time, loggerFactory, context.RequestAborted, null);
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return Results.LocalRedirect("/?failed=true");
+            return Results.LocalRedirect(failed);
         }
 
         if (!await SubmitDecision(audit, time, loggerFactory, context.RequestAborted, result.Value) ||
             context.RequestAborted.IsCancellationRequested)
         {
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return Results.LocalRedirect("/?failed=true");
+            return Results.LocalRedirect(failed);
         }
 
         // Reset and final validation/issuance must be ordered as one process-local operation.
@@ -64,12 +67,13 @@ internal static class LoginEndpoint
                 context.RequestAborted.IsCancellationRequested)
             {
                 await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                return Results.LocalRedirect("/?failed=true");
+                return Results.LocalRedirect(failed);
             }
 
             var restricted = loaded.Value.Value.RequiresPasswordReplacement;
             await PasswordReplacementEndpoint.SignIn(context, loaded.Value.Value, restricted);
-            return Results.LocalRedirect(restricted ? "/password-replacement" : "/home");
+            return Results.LocalRedirect(restricted ? "/password-replacement"
+                : connect is null ? "/home" : $"/settings/ai-workflow?connect={connect}");
         }
         finally { sessions.CredentialGate.Release(); }
     });

@@ -3,16 +3,21 @@ name: retravion
 description: Read Retravion Products and User Needs, and prepare or apply User Need Draft changes through authenticated MCP. Use when the user asks to work with Retravion product context or User Needs from an AI terminal.
 ---
 
-# Retravion workflow — integration 1.0.0
+# Retravion workflow — integration 2.0.0
 
 ## Connect safely
 
-Use the terminal's native Retravion MCP connection. Setup instructions are in the downloaded README.
+Retravion tools come from the local `retravion` bridge installed by `mcp_setup.ps1` (see the downloaded README).
 The application administrator must enable AI MCP in Settings → AI Workflow.
-The human signs in in their browser, completes any password replacement and creates a credential there.
-Never ask the user to paste passwords, browser cookies, bearer credentials or provider keys into the conversation.
-Credentials belong in the terminal environment, not source files, prompts or URLs.
-If authorization is missing, expired, disabled or revoked, stop and ask the human to reconnect through the browser flow.
+
+1. Ask the user whether they accept connecting this terminal to Retravion. Continue only on a clear yes.
+2. Call `rtv_connect`. It opens the user's browser at Retravion. If it reports that the browser could not be opened, show the returned link. Always show the returned code.
+3. The user signs in in the browser if needed, checks that the code matches, and approves. The code can also be entered on the AI Workflow page.
+4. When the user confirms they have approved, call `rtv_complete_connection`.
+
+Never ask the user to paste passwords, browser cookies, credentials or provider keys into the conversation. The credential stays inside the bridge; there is nothing to copy or configure.
+Access renews while in use. If a tool reports that the connection ended (logout, 30 idle minutes, restart, revocation or MCP disabled), ask the user and connect again. Do not retry the failed write; read the current state first.
+Call `rtv_disconnect` when the user is finished.
 Do not attempt to bypass the gate or retry mutations to fix authorization.
 
 ## Establish context

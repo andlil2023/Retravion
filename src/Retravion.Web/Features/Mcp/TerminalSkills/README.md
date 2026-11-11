@@ -1,40 +1,48 @@
-# Retravion — %CLIENT% integration 1.0.0
+# Retravion — %CLIENT% integration 2.0.0
 
-Requires the %CLIENT% terminal with native Streamable HTTP MCP and Agent Skills support.
-No terminal client, installer, OAuth service or companion bridge is included. Use the terminal vendor's installation instructions.
-This skill guides six tools: read-only Products and User Need reads/Draft writes. The server may also expose Requirement tools; Requirement workflows are not included in this skill version. The skill does not enable additional entities.
+Connect %CLIENT% on this machine to Retravion: run one setup script per project, then approve each connection in your browser. There is no token to copy and no environment variable to set.
 
-## Install into your project directory
+Requires %CLIENT%, Node.js 22 or later, and Retravion running on this machine. Remote deployment is unsupported.
+This skill guides six tools: read-only Products and User Need reads/Draft writes. The bridge also forwards the server's Requirement and Test Case tools; those workflows are not included in this skill version.
 
-1. Extract the ZIP into a temporary directory and review all files. Verify its SHA-256 against the value on the authenticated AI Workflow page; the hash checks integrity, not publisher identity.
-2. Copy `skills/retravion/SKILL.md` to `%SKILL_PATH%/SKILL.md` in your project. If that path already exists, back it up and compare it before deliberately replacing it. Do not replace an entire existing skills directory.
-3. Merge the `retravion` server entry from `mcp.example.json` into `%CONFIG_PATH%` in your project. Create that file only if absent. Preserve unrelated server entries and other configuration. If a `retravion` entry already exists, back it up and compare it first.
-4. The example uses `https://localhost:8443/mcp`. Adjust it to the application's actual loopback endpoint/port. Remote deployment is unsupported. Trust the local HTTPS certificate in the client runtime; never disable TLS verification. Current Node clients can use `NODE_USE_SYSTEM_CA=1` with a trusted Windows certificate, or `NODE_EXTRA_CA_CERTS` pointing to a trusted PEM certificate.
-5. Ask an administrator to enable MCP in Settings → AI Workflow. Sign in in your browser, finish required password replacement and create an MCP credential. In PowerShell 7, set it without placing it in shell history:
+## Set up once per project directory
+
+1. Extract the ZIP into a temporary directory and review its files. Verify its SHA-256 against the value on the authenticated AI Workflow page; the hash checks integrity, not publisher identity.
+2. Ask an administrator to enable MCP in Settings → AI Workflow, and make sure Retravion is running.
+3. Run the setup script, naming your project directory:
 
    ```powershell
-   $env:RETRAVION_MCP_TOKEN = Read-Host 'MCP token' -MaskInput
+   powershell.exe -ExecutionPolicy Bypass -File .\mcp_setup.ps1 -Directory C:\work\MyApp
    ```
 
-   Never put the credential itself into the JSON file, source control, prompts, URLs or shared logs. The `${RETRAVION_MCP_TOKEN}` reference in the example is intentional.
-6. Start `%EXECUTABLE%` from this project directory with that environment. Review the client's normal project-trust/MCP approval prompts. Check the connection using `%EXECUTABLE% mcp list`; in Pi `/reload` rescans skills/configuration, but restart the terminal when its inherited environment changes.
-7. Discover/invoke `%SKILL_COMMAND%`, or ask “Use the retravion skill. Read my Products and help prepare User Need Drafts.” The skill requires explicit conversation approval before writes. Server permissions still apply.
+   Add `-Endpoint https://localhost:<port>/mcp` if Retravion does not use port 8443.
+4. The script shows the SHA-256 fingerprint of Retravion's HTTPS certificate. Compare it with the fingerprint on the AI Workflow page and type `TRUST` only if they match.
 
-## Reconnect
+The script installs `%SKILL_PATH%/SKILL.md`, the bridge and the confirmed certificate in `.retravion-terminal/`, and adds only the `retravion` entry to `%CONFIG_PATH%`. Preserve unrelated server entries: the script keeps them, and every other setting, unchanged. Nothing is added to the Windows certificate store and TLS verification is never disabled. `.retravion-terminal/` contains no credential; do not commit it, because it holds a path and certificate specific to this machine.
 
-Credentials expire 30 minutes after issuance, or earlier when the browser session ends. Logout, account-session revocation, restart, credential replacement, revocation or global disabling ends access. Re-enabling global MCP does not restore old credentials. Obtain a fresh one in the browser and restart the terminal with the updated environment.
+## Connect in every session
 
-## Update manually
+1. Start `%EXECUTABLE%` in the project directory and accept its normal project-trust and MCP approval prompts.
+2. Run `%SKILL_COMMAND%` and ask it to connect to Retravion. Answer yes when it asks for consent.
+3. Your browser opens at Retravion. Sign in if needed, check that the code matches the one in the terminal, and select **Approve connection**. Signing in takes you on to the approval. If the page does not show the code, enter it on the AI Workflow page.
+4. Tell the terminal you have approved. It is now connected.
 
-Close this terminal's MCP connection, download the new ZIP, review it and back up your existing Retravion skill/server entry.
-Replace only `%SKILL_PATH%/SKILL.md`; merge any documented changes into only the `retravion` entry in `%CONFIG_PATH%`. Preserve endpoint customizations and every unrelated entry/file. Restart and verify skill/tool discovery. Keep the prior ZIP and backups; if verification fails, restore them before reconnecting. An update does not grant new server permissions.
+Access renews while you work. It ends after 30 idle minutes, on browser logout or session expiry, when Retravion restarts, when you select **End terminal connection**, or when an administrator disables MCP. Ask the terminal to connect again; restarting it is not needed.
 
-## Remove manually
+## When the certificate is replaced
 
-Close this terminal's MCP connection. Remove only `%SKILL_PATH%` and the `retravion` server entry from `%CONFIG_PATH%`; retain the config file if any unrelated settings/servers remain. Do not delete the parent skills directory. The other terminal's installation is independent and must be left untouched. Restart the client. Revoke your credential in the browser and clear its environment variable when finished:
+The bridge trusts only the certificate confirmed during setup. If Retravion's certificate is regenerated, connecting fails with an instruction to rerun setup. Run step 3 above again and confirm the new fingerprint.
+
+## Update or remove
+
+To update, close the terminal, extract the new ZIP and run its `mcp_setup.ps1` again.
+
+To remove, close the terminal and run:
 
 ```powershell
-Remove-Item Env:RETRAVION_MCP_TOKEN -ErrorAction SilentlyContinue
+powershell.exe -ExecutionPolicy Bypass -File .\mcp_setup.ps1 -Directory C:\work\MyApp -Remove
 ```
+
+Remove only deletes `%SKILL_PATH%` and the `retravion` entry in `%CONFIG_PATH%`. The shared `.retravion-terminal/` folder is deleted when no other Retravion terminal integration remains in the project.
 
 Never automatically retry a write after an uncertain result or a lost response. Retrieve current state first, then let the human decide whether to retry manually.

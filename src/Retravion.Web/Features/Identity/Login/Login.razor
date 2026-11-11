@@ -16,6 +16,10 @@
 
         <form method="post" action="/identity/login" data-enhance="false" aria-label="Login">
             <AntiforgeryToken />
+            @if (_connect is not null)
+            {
+                <input type="hidden" name="connect" value="@_connect" />
+            }
             <label for="username">Username</label>
             <input id="username" name="username" type="text" autocomplete="username" placeholder="Your username" />
 
@@ -37,4 +41,10 @@
 @code {
     [SupplyParameterFromQuery(Name = "failed")]
     public bool Failed { get; set; }
+
+    // A pending terminal connection code, carried through sign-in to its approval page.
+    [SupplyParameterFromQuery(Name = "connect")]
+    public string? Connect { get; set; }
+    private string? _connect;
+    protected override void OnParametersSet() => _connect = Retravion.Web.Features.Mcp.McpConnections.Normalize(Connect);
 }

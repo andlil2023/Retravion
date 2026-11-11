@@ -47,6 +47,7 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SessionTicketStore>();
 builder.Services.AddSingleton<McpCredentials>();
+builder.Services.AddSingleton<McpConnections>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = "Retravion", Version = "1.0.0" })
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
@@ -247,7 +248,10 @@ app.Use(async (context, next) =>
         if (!authenticated)
         {
             await context.RequestServices.GetRequiredService<AccountAudit>().RejectedRequest(context);
-            context.Response.Redirect("/");
+            // A terminal's approval link survives sign-in. Only its normalized code is carried, never a return address.
+            var connect = HttpMethods.IsGet(context.Request.Method) && path.Equals("/settings/ai-workflow", StringComparison.OrdinalIgnoreCase)
+                ? McpConnections.Normalize(context.Request.Query["connect"]) : null;
+            context.Response.Redirect(connect is null ? "/" : $"/?connect={connect}");
             return;
         }
         if (restricted)

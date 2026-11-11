@@ -238,54 +238,57 @@ data, an explicit reset, and `-UpdateImages` on the target machine.
 Run the app with the local Podman setup above. Keep its published port bound to
 `127.0.0.1`; this increment supports trusted clients on the same machine only,
 not remote deployment or an OAuth authorization server. The `/mcp` endpoint uses
-Streamable HTTP and accepts bearer credentials, not browser cookies. Non-loopback
+Streamable HTTP and accepts the terminal bridge's bearer credential, not browser cookies. Non-loopback
 Host names and requests with an Origin header are rejected. Do not expose this
 endpoint through a remote proxy or publish the container port on all interfaces.
 
 MCP starts **disabled**, including when upgrading from the earlier always-available
 MCP host. In **Settings → MCP settings** (`/settings/mcp`), only an administrator can
 enable or disable it for all users. Administrators can also reach MCP settings from AI Workflow. The setting is stored in PostgreSQL and survives restarts. Disabling
-invalidates all issued MCP credentials; re-enabling requires fresh credentials. Requests
+ends all terminal connections; re-enabling requires connecting again. Requests
 already executing when disabling begins may complete; requests starting after confirmed
 disabling are denied. Browser access, setup instructions and downloads remain available.
-Configuration failures deny MCP access and credential issuance rather than assuming enabled.
+Configuration failures deny MCP access and new connections rather than assuming enabled.
 A settings save requires confirmation. On an uncertain settings save, reload the page
 before deciding whether to retry manually; no automatic retry is performed.
 
-1. Sign in in your browser, complete any required password replacement, and open
-   **https://localhost:8443/settings/ai-workflow** (adjust the port if configured differently).
-   `/mcp-access` remains a compatibility route to the same page. Ask an administrator
-   to enable MCP if it is disabled.
-2. Select **Create MCP credential**. The JSON result contains `token` and
-   `expiresAt`; keep the token private and return to the page afterward. Creating
-   another credential replaces the previous one for this browser session.
-3. In PowerShell 7, set the token without putting it in shell history:
+Terminals connect through a small local bridge shipped in the terminal ZIP. There is
+no credential to copy and no environment variable to set.
+
+**Once per project directory**
+
+1. Sign in, open **https://localhost:8443/settings/ai-workflow** (adjust the port if
+   configured differently) and download the Pi or Claude Code ZIP. `/mcp-access` remains
+   a compatibility route to the same page. Ask an administrator to enable MCP if it is disabled.
+2. Extract the ZIP and run its setup script, naming your project directory. It needs
+   Node.js 22 or later:
 
    ```powershell
-   $env:RETRAVION_MCP_TOKEN = Read-Host 'MCP token' -MaskInput
-   # Node clients must trust the local certificate. Use the Windows trust store;
-   # current Node 22.19+/24 clients support this option. Never disable TLS checks.
-   $env:NODE_USE_SYSTEM_CA = '1'
+   powershell.exe -ExecutionPolicy Bypass -File .\mcp_setup.ps1 -Directory C:\work\MyApp
    ```
 
-4. Configure the client using an environment-variable reference, not a literal token:
+3. The script shows the SHA-256 fingerprint of the application's HTTPS certificate.
+   Compare it with the fingerprint on the AI Workflow page and type `TRUST` only if they
+   match. The bridge then trusts exactly that certificate. Nothing is added to the Windows
+   certificate store and certificate verification is never disabled. Rerun the script only
+   when the certificate is replaced.
 
-   ```powershell
-   # Claude Code: local scope is private user configuration for this working directory.
-   claude mcp add --transport http --scope local retravion https://localhost:8443/mcp --header 'Authorization: Bearer ${RETRAVION_MCP_TOKEN}'
-   claude mcp list
+The script installs the skill, the bridge under `.retravion-terminal/`, and a `retravion`
+stdio entry in `.pi/mcp.json` or `.mcp.json`; unrelated entries are preserved.
 
-   # Pi: user-level configuration, not a committed project configuration.
-   pi mcp add retravion --url https://localhost:8443/mcp --bearer-token-env-var RETRAVION_MCP_TOKEN
-   pi mcp list
-   ```
+**Every session**
 
-   Start the client from that terminal. In an already running Pi session, use
-   `/reload` after changing configuration; restart it if its inherited environment
-   does not contain the token. A project-scoped Claude configuration may require
-   explicit MCP-server approval in Claude before connecting. If a client uses a
-   different Node runtime, configure its trusted CA using that client's documented
-   mechanism rather than bypassing certificate verification.
+1. Start `pi` or `claude` in the project directory and accept its project/MCP prompts.
+2. Run `/skill:retravion` (Pi) or `/retravion` (Claude Code) and ask it to connect. It
+   asks for your consent, then opens your browser at the AI Workflow page; if the browser
+   cannot be opened it shows the link instead.
+3. Sign in if needed, check that the code matches the one in the terminal, and select
+   **Approve connection**. Signing in takes you on to the approval; only the connection
+   code is carried through sign-in. The code can also be entered on the AI Workflow page.
+4. Tell the terminal you have approved.
+
+The bridge adds `rtv_connect`, `rtv_complete_connection` and `rtv_disconnect` and forwards
+the tools below unchanged.
 
 Available tools:
 
@@ -315,16 +318,15 @@ There are no status, review, deletion or new-version tools. Extra arguments such
 changes are checked at the same transactional write boundary as web changes. Writes
 use the authenticated Retravion user and the same atomic audit rules as web writes.
 
-A credential expires 30 minutes after issuance and cannot outlive its browser
-session. Logout, session expiry, account-session revocation, application restart,
-credential replacement, globally disabling MCP and **Revoke MCP credential** end its access. Revocation
-on the page requires confirmation. This does not log out the browser. An expired
-credential requires returning to the authenticated browser flow; there is no
-refresh token. Clear the terminal variable when finished:
+Terminal access renews each time the terminal uses Retravion and ends after 30 idle
+minutes. It cannot outlive the browser session that approved it. Logout, session expiry,
+account-session revocation, application restart, a newer connection approved from the same
+browser session, globally disabling MCP and **End terminal connection** end its access. Ending it
+on the page requires confirmation and does not log out the browser. Afterwards, ask the
+terminal to connect again; restarting it is not needed. The credential exists only in the
+bridge process and as a digest in the application.
 
-```powershell
-Remove-Item Env:RETRAVION_MCP_TOKEN -ErrorAction SilentlyContinue
-```
+Never put credentials into prompts```
 
 Never put credentials into prompts, source control, URLs or shared logs. Do not
 retry a write automatically. If the result says the commit outcome could not be
@@ -334,22 +336,25 @@ retry manually. A lost response likewise does not prove the write rolled back.
 ### Download and install terminal skills
 
 The AI Workflow page offers authenticated Pi and Claude Code ZIP downloads, with
-integration version and SHA-256. These fixed packages contain only a portable
-`skills/retravion/SKILL.md`, a client-specific README and `mcp.example.json`; no
-credentials, user records, terminal client, installer or companion bridge is included.
+integration version and SHA-256. These fixed packages contain only
+`skills/retravion/SKILL.md`, a client-specific README, `mcp_setup.ps1` and the bridge
+(`bridge/server.mjs`, `bridge/tools.json`); no credentials, user records or terminal client.
 A hash checks file integrity, not publisher identity. Downloading grants no access.
 
-Follow the bundled README to copy the skill into `.pi/skills/retravion/` or
-`.claude/skills/retravion/`, and merge just the `retravion` server entry into
-`.pi/mcp.json` or `.mcp.json`. Keep the environment-variable credential reference,
-adjust the localhost port and review the client's normal trust/approval prompts.
-Restart the client and invoke `/skill:retravion` (Pi) or `/retravion` (Claude Code).
 The skill reads Products and User Needs and requires explicit conversation approval
 before Draft writes; it does not confer lifecycle approval or new permissions.
 
-Updates are manual: review the new ZIP, back up the previous skill/config entry and
-replace only Retravion's files/entry. Removal likewise deletes only that skill and
-server entry, leaving all unrelated configuration and the other client intact.
+To update, run the new ZIP's `mcp_setup.ps1` again. To remove, run it with `-Remove`:
+it deletes only Retravion's skill and server entry, and the shared bridge folder once no
+other Retravion terminal integration remains in the project.
+
+Bridge and setup-script checks use fakes, temporary directories and throwaway
+certificates only:
+
+```powershell
+node --test tests/TerminalBridge.Tests.mjs
+pwsh -NoProfile -File tests/TerminalSetup.Tests.ps1
+```
 Future entity support requires an explicitly shipped new integration version.
 
 ## Repository structure

@@ -10,6 +10,8 @@
 @using Retravion.Web.Components
 @inject AiWorkflowOperations Operations
 @inject AuthenticationStateProvider Authentication
+@inject McpConnections Connections
+@inject IConfiguration Configuration
 
 <PageTitle>AI Workflow · Retravion</PageTitle>
 <SectionContent SectionName="mcp-page-header">
@@ -22,34 +24,78 @@
     }
     @if (_error is not null)
     {
-        <MudAlert Severity="Severity.Error" role="alert" Class="mb-4">@_error Credential creation is unavailable.</MudAlert>
+        <MudAlert Severity="Severity.Error" role="alert" Class="mb-4">@_error Terminal connections are unavailable.</MudAlert>
     }
     else if (_settings?.Enabled == false)
     {
-        <MudAlert Severity="Severity.Info" Class="mb-4">MCP is disabled for all users. Ask an administrator to enable it before creating a credential. Browser access is unaffected.</MudAlert>
+        <MudAlert Severity="Severity.Info" Class="mb-4">MCP is disabled for all users. Ask an administrator to enable it before connecting a terminal. Browser access is unaffected.</MudAlert>
+    }
+    @if (Connection == "approved")
+    {
+        <MudAlert Severity="Severity.Success" role="status" Class="mb-4">Connection approved. Return to your terminal and confirm that you have signed in.</MudAlert>
+    }
+    else if (Connection == "denied")
+    {
+        <MudAlert Severity="Severity.Info" role="status" Class="mb-4">Connection denied. The terminal was not given access.</MudAlert>
+    }
+    else if (Connection == "expired")
+    {
+        <MudAlert Severity="Severity.Warning" role="alert" Class="mb-4">That connection request is unknown, already used or expired. Run the connect prompt in your terminal again.</MudAlert>
     }
     <MudPaper Class="pa-4" Elevation="0">
-        <MudText Typo="Typo.h6" HtmlTag="h2">Your terminal credential</MudText>
-        <p>Connect Pi or Claude Code on this machine to <code>/mcp</code> as your signed-in user. Remote access is not supported.</p>
-        <p>A new credential replaces this browser session's previous credential. It expires after 30 minutes or when this session ends. Logging out ends its MCP access.</p>
-        <p>Creation opens JSON: copy the token privately to your terminal, then return here. Never put it in prompts, source files, shared configuration or logs.</p>
+        <MudText Typo="Typo.h6" HtmlTag="h2">Terminal connection</MudText>
+        @if (_code is not null && _pending)
+        {
+            <p>A terminal on this machine asks to use Retravion through <code>/mcp</code> as your signed-in user. Approve only if you started it and this code matches the one in your terminal:</p>
+            <p class="connection-code"><strong>@_code</strong></p>
+            <form id="mcp-approve-form" method="post" action="/mcp-connect/decide" data-enhance="false">
+                <AntiforgeryToken />
+                <input type="hidden" name="code" value="@_code" />
+                <input type="hidden" name="decision" value="approve" />
+            </form>
+            <form id="mcp-deny-form" method="post" action="/mcp-connect/decide" data-enhance="false">
+                <AntiforgeryToken />
+                <input type="hidden" name="code" value="@_code" />
+                <input type="hidden" name="decision" value="deny" />
+            </form>
+        }
+        else
+        {
+            @if (_code is not null)
+            {
+                <MudAlert Severity="Severity.Warning" role="alert" Class="mb-4">That connection request is unknown, already used or expired. Run the connect prompt in your terminal again.</MudAlert>
+            }
+            <p>Run the connect prompt in Pi or Claude Code on this machine. Your browser opens here so you can approve the connection; no credential is shown or copied. Remote access is not supported.</p>
+            <form method="get" action="/settings/ai-workflow" data-enhance="false">
+                <label>Code shown in your terminal <input type="text" name="connect" autocomplete="off" maxlength="9" required /></label>
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Text">Continue</MudButton>
+            </form>
+        }
+        <p>Access renews while the terminal is in use. It ends after 30 idle minutes, or when this browser session ends. Logging out ends its MCP access.</p>
         <details>
             <summary>What MCP can do</summary>
             <p>Read Products and all User Need, Requirement and Test Case statuses; create or edit Draft needs, requirements and test cases under active Products. It cannot modify Products, change lifecycle status, make review decisions or manage links. The downloadable skill guides Product reads and User Need Draft work only.</p>
         </details>
-        <form id="mcp-issue-form" method="post" action="/identity/mcp-token" data-enhance="false"><AntiforgeryToken /></form>
         <form id="mcp-revoke-form" method="post" action="/identity/mcp-token/revoke" data-enhance="false" class="mt-4">
             <AntiforgeryToken />
-            <label><input type="checkbox" required /> Confirm revoking this session's MCP credential</label>
+            <label><input type="checkbox" required /> Confirm ending this session's terminal connection</label>
         </form>
     </MudPaper>
     <div class="credential-actions mt-4 mb-6">
-        <MudButton ButtonType="ButtonType.Submit" form="mcp-issue-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_settings?.Enabled != true)">Create MCP credential</MudButton>
-        <MudButton ButtonType="ButtonType.Submit" form="mcp-revoke-form" Variant="Variant.Filled" Color="Color.Primary">Revoke MCP credential</MudButton>
+        @if (_code is not null && _pending)
+        {
+            <MudButton ButtonType="ButtonType.Submit" form="mcp-approve-form" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_settings?.Enabled != true)">Approve connection</MudButton>
+            <MudButton ButtonType="ButtonType.Submit" form="mcp-deny-form" Variant="Variant.Filled" Color="Color.Primary">Deny connection</MudButton>
+        }
+        <MudButton ButtonType="ButtonType.Submit" form="mcp-revoke-form" Variant="Variant.Filled" Color="Color.Primary">End terminal connection</MudButton>
     </div>
 
     <MudText Typo="Typo.h6" HtmlTag="h2">Terminal integrations</MudText>
-    <p>Install your terminal separately. These downloads add instructions and configuration examples, not credentials or permissions.</p>
+    <p>Install your terminal and Node.js 22 or later separately. Each download contains the skill, the local bridge and <code>mcp_setup.ps1</code>; run that script once per project directory. Downloads contain no credentials and grant no permissions.</p>
+    @if (_fingerprint is not null)
+    {
+        <p class="package-detail">HTTPS certificate SHA-256, to compare during setup: @_fingerprint</p>
+    }
     @if (_packagesUnavailable)
     {
         <MudAlert Severity="Severity.Warning">Terminal skill download files are unavailable.</MudAlert>
@@ -60,10 +106,10 @@
             <MudItem xs="12" md="6">
                 <MudPaper Class="pa-4" Elevation="0">
                     <MudText Typo="Typo.h6" HtmlTag="h3">@(bundle.Client == "pi" ? "Pi" : "Claude Code")</MudText>
-                    <p>Use the native MCP connection and <code>@(bundle.Client == "pi" ? "/skill:retravion" : "/retravion")</code> skill.</p>
+                    <p>Use the local bridge and <code>@(bundle.Client == "pi" ? "/skill:retravion" : "/retravion")</code> skill.</p>
                     <details>
                         <summary>Setup and checksum</summary>
-                        <p>Extract and read the bundled README for installation, connection, updating and removal. Review the ZIP and merge only the Retravion files/entry; preserve unrelated client configuration. Updates and removal are manual.</p>
+                        <p>Extract and read the bundled README for installation, connection, updating and removal. Review the ZIP before running its setup script; it adds only the Retravion files/entry and preserves unrelated client configuration.</p>
                         <p class="package-detail">Integration @TerminalPackages.Version · @bundle.FileName</p>
                         <p class="package-detail">SHA-256 (integrity, not publisher authentication): @bundle.Sha256</p>
                     </details>
@@ -82,6 +128,11 @@
     private bool _administrator;
     private bool _packagesUnavailable;
     private TerminalBundle[] _bundles = [];
+    private string? _code;
+    private bool _pending;
+    private string? _fingerprint;
+    [SupplyParameterFromQuery(Name = "connect")] private string? Connect { get; set; }
+    [SupplyParameterFromQuery(Name = "connection")] private string? Connection { get; set; }
     protected override async Task OnInitializedAsync()
     {
         var principal = (await Authentication.GetAuthenticationStateAsync()).User;
@@ -89,6 +140,10 @@
         if (result.IsFailure) _error = result.Error;
         else _settings = result.Value;
         _administrator = await Operations.CanConfigure(principal);
+        // Only a well-formed code is echoed; whether it is still pending is checked again on decision.
+        _code = Connect is null ? null : McpConnections.Normalize(Connect) ?? "";
+        _pending = Connections.IsPending(_code);
+        _fingerprint = TerminalCertificate.Fingerprint(Configuration);
         try { _bundles = [TerminalPackages.Get("pi")!, TerminalPackages.Get("claude")!]; }
         catch (IOException) { _packagesUnavailable = true; }
     }

@@ -10,6 +10,8 @@
     <InternalsVisibleTo Include="Retravion.IntegrationTests" />
     <EmbeddedResource Include="Features/Mcp/TerminalSkills/SKILL.md" LogicalName="Retravion.TerminalSkills.SKILL.md" />
     <EmbeddedResource Include="Features/Mcp/TerminalSkills/README.md" LogicalName="Retravion.TerminalSkills.README.md" />
-    <EmbeddedResource Include="Features/Mcp/TerminalSkills/mcp.example.json" LogicalName="Retravion.TerminalSkills.mcp.example.json" />
+    <EmbeddedResource Include="Features/Mcp/TerminalSkills/mcp_setup.ps1" LogicalName="Retravion.TerminalSkills.mcp_setup.ps1" />
+    <EmbeddedResource Include="Features/Mcp/TerminalSkills/bridge/server.mjs" LogicalName="Retravion.TerminalSkills.bridge.server.mjs" />
+    <EmbeddedResource Include="Features/Mcp/TerminalSkills/bridge/tools.json" LogicalName="Retravion.TerminalSkills.bridge.tools.json" />
   </ItemGroup>
 </Project>
