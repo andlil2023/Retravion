@@ -252,8 +252,9 @@ public sealed partial class AccountManagementTests
             var skill = Read("skills/retravion/SKILL.md");
             Assert.StartsWith("---\nname: retravion\ndescription:", skill.Replace("\r\n", "\n"));
             foreach (var tool in new[] { "list_products", "read_product", "list_user_needs", "read_user_need", "create_draft_user_need", "edit_draft_user_need",
-                "list_requirements", "read_requirement", "create_draft_requirement", "edit_draft_requirement" }) Assert.Contains($"`{tool}`", skill);
-            Assert.Equal("2.1.0", TerminalPackages.Version);
+                "list_requirements", "read_requirement", "create_draft_requirement", "edit_draft_requirement",
+                "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case" }) Assert.Contains($"`{tool}`", skill);
+            Assert.Equal("2.2.0", TerminalPackages.Version);
             Assert.Equal($"retravion-{client}-{TerminalPackages.Version}.zip", bundle.FileName);
             Assert.Contains($"/packages/{TerminalPackages.Version}/{client}", bundle.DownloadPath);
             Assert.Contains($"integration {TerminalPackages.Version}", skill);
@@ -266,10 +267,17 @@ public sealed partial class AccountManagementTests
             Assert.Contains("preserve the current rationale unless the user explicitly approves", skill);
             Assert.Contains("Do not edit a historical version", skill);
             Assert.Contains("Do not submit for review, approve, return to Draft, create versions, delete or mutate Product data", skill);
-            Assert.Contains("Test Case workflows and relationship/link writes are not supported", skill);
+            Assert.Contains("Relationship/link writes, classification changes and lifecycle operations are not supported", skill);
+            Assert.Contains("Optional `title`, `description`, `preconditions` and `steps` default to empty", skill);
+            Assert.Contains("server generates the Product-scoped manual `id`", skill);
+            Assert.Contains("ordered array of objects", skill);
+            Assert.Contains("`action` and `expectedResult` strings", skill);
+            Assert.Contains("exact working `versionId`, positive returned `revision` as `expectedRevision`", skill);
+            Assert.Contains("fully replaces content", skill);
+            Assert.Contains("if the result remains ambiguous, do not blindly recreate", skill);
             Assert.Contains("On a stale write, do not automatically retry", skill);
             Assert.Contains("obtain fresh approval", skill);
-            Assert.Contains("List/read the affected User Need or Requirement", skill);
+            Assert.Contains("List/read the affected User Need, Requirement or Test Case", skill);
             Assert.Contains("before the user decides whether to retry manually", skill);
             Assert.Contains("explicit human approval", skill);
             Assert.Contains("Never silently overwrite", skill);
@@ -289,8 +297,8 @@ public sealed partial class AccountManagementTests
             Assert.DoesNotContain("rejectUnauthorized", everything);
             var readme = Read("README.md");
             Assert.Contains($"integration {TerminalPackages.Version}", readme);
-            Assert.Contains("Requirement reads/Draft writes", readme);
-            Assert.DoesNotContain("2.0.0", everything);
+            Assert.Contains("Requirement and Test Case reads/Draft writes", readme);
+            Assert.DoesNotContain("2.1.0", everything);
             Assert.Contains(client == "pi" ? ".pi/skills/retravion" : ".claude/skills/retravion", readme);
             Assert.Contains(client == "pi" ? "/skill:retravion" : "/retravion", readme);
             Assert.Contains("Preserve unrelated server entries", readme);
