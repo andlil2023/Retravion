@@ -18,6 +18,7 @@ artifacts/
 
 # Generated local review certificates
 .local/
+.retravion-terminal/
 
 # Local secrets and OS files
 .env
