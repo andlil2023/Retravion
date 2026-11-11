@@ -15,11 +15,12 @@ If instructions conflict, stop and report the conflict; do not silently pick one
 Use prompt input or confirmed conversation context; ask for missing required input and never infer approval.
 
 ## Task workflow
-- Track every implementation task as a GitHub issue labeled `PBI` in https://github.com/users/andlil2023/projects/3. Present the draft for explicit approval before creating it.
+- A PBI is not required for every change. When a PBI is requested, track it as a GitHub issue labeled `PBI` in https://github.com/users/andlil2023/projects/3 and present the draft for explicit approval before creating it.
 - Each PBI must include **What**, **Why**, **Implementation Guide**, **Requirements**, and **Acceptance Criteria** sections. Reference implemented requirements by ID only. If none apply, use `N/A` with a brief explanation. When acceptance criteria do not apply, use `N/A` or explain their omission in that section.
-- Before any change task, fetch `origin` and create a new branch and git worktree from the latest `origin/main`; make all changes there, never on `main`. Default to one PBI per worktree.
-- Keep acceptance criteria in the PBI; report their verification in the PR.
-- Each PBI must include an explicit audit decision and verification plan in its Implementation Guide for every new or changed business-record write operation, using the audit checklist below. If no such operations are affected, state `N/A` and explain why.
+- Before every change, fetch `origin` and create a new branch and Git worktree from the latest `origin/main`; make all changes in that worktree, never on `main`. Default to one PBI per worktree when using PBIs.
+- Keep acceptance criteria in the PBI when there is one; report their verification in the PR.
+- Before implementation, record an explicit audit decision and verification plan for every new or changed business-record write operation using the audit checklist below. Include it in the PBI's Implementation Guide when there is one; otherwise record it in the task plan. If no such operations are affected, state `N/A` and explain why.
+- After implementation is approved, continue through implementation, verification, and required review without stopping at intermediate milestones or asking to continue. Size or complexity alone is not a blocker. Stop only for a specific unresolved decision, conflicting instruction, unavailable prerequisite, or failure that cannot be safely resolved within the approved scope. If interrupted or unable to proceed, report the concrete reason, work completed, and exact remaining steps; do not describe a partial implementation as complete.
 
 ## Before editing
 - Identify the owning feature/module and the smallest coherent change.
@@ -29,7 +30,7 @@ Use prompt input or confirmed conversation context; ask for missing required inp
 - Do not create ADRs, design documents, or new patterns automatically.
 
 ## Audit checklist
-- Identify each affected write operation/path and reference applicable audit requirements by ID in the PBI's Requirements section, including REQ-SYS-AUDIT-003 where applicable.
+- Identify each affected write operation/path and reference applicable audit requirements by ID in the PBI's Requirements section or, when there is no PBI, the task plan, including REQ-SYS-AUDIT-003 where applicable.
 - For each operation, specify expected events and their actor, time, action, target/immutable identity, outcome, and initial or old/new values as required. Explain any decision that no event is required; do not silently omit paths or exceptions.
 - Address successful changes, unauthorized attempts, no-op saves, and uncertain commit outcomes as applicable. State whether reads and validation failures require events; do not assume they all do.
 - Specify change/audit commit consistency, behavior when audit submission or commit fails, uncertain-outcome reporting and retry behavior, and safe operational logging without sensitive submitted values, as required by the applicable requirements.
