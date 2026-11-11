@@ -144,6 +144,13 @@ builder.Services.AddSingleton<ITestCaseChangeTransaction>(_ => new PostgresTestC
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddScoped<TestCaseOperations>();
+builder.Services.AddSingleton<Retravion.Application.Feature.IFeatureStore>(_ => new Retravion.Infrastructure.Feature.PostgresFeatureStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<Retravion.Application.Feature.IFeatureChangeTransaction>(_ => new Retravion.Infrastructure.Feature.PostgresFeatureStore(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddScoped<Retravion.Web.Features.Feature.FeatureOperations>();
 builder.Services.AddSingleton<Retravion.Application.Revision.IRevisionStore>(_ => new Retravion.Infrastructure.Revision.PostgresRevisionStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));

@@ -1,0 +1,101 @@
+@page "/features/details"
+@using Retravion.Application.AuditTrail
+@inject FeatureOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Feature details · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header"><PageHeader Title="Feature details" BackHref="@BackPath" BackText="Features" /></SectionContent>
+@if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
+@if (_uncertain) { <p>No automatic retry. Retrieve the current Feature before deciding on another change.</p><MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="RetrieveOutcome">Retrieve current Feature</MudButton> }
+@if (_feature is not null && _product is not null)
+{
+    var value = _feature.Feature;
+    <p>@_product.Id – @_product.Name</p><h2>@value.Id – @value.Content.Title</h2><p>v@value.VersionNumber · @Status(value.Status)</p>
+    @if (!_product.IsActive) { <p>This Feature is read-only because its Product is retired.</p> }
+    @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
+    <nav aria-label="Feature versions">@foreach (var version in _versions) { <MudLink Href="@($"/features/details?id={Id}&version={version.Feature.VersionId}")">v@version.Feature.VersionNumber · @Status(version.Feature.Status)</MudLink><span> </span> }</nav>
+    <MudPaper Class="product-card pa-4" Elevation="0">
+        @if (value.CreationReason is { } reason) { <p style="white-space:pre-wrap">Successor creation reason: @reason</p> }
+        <section aria-label="Description"><h3>Description</h3><ProductMarkdownView Markdown="@value.Content.Description" /></section>
+    </MudPaper>
+    @if (_product.IsActive && IsLatest && value.Status == "Draft") { <div class="product-actions"><MudButton Href="@($"/features/edit?id={value.InternalId}&version={value.VersionId}")" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _uncertain)">Edit Draft</MudButton></div> }
+    @if (_product.IsActive && IsLatest)
+    {
+        <div class="product-actions">
+            @if (value.Status == "Draft") { <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Disabled="_busy" /><MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _uncertain)" OnClick='@(() => Review("InReview"))'>Submit for review</MudButton> }
+            else if (value.Status == "InReview") { <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Disabled="_busy" /><MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _uncertain)" OnClick='@(() => Review("Approved"))'>Approve</MudButton><MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _uncertain)" OnClick='@(() => Review("Draft"))'>Return to Draft</MudButton> }
+            else { <MudTextField @bind-Value="_reason" Label="Change reason" Required="true" Disabled="_busy" /><MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _uncertain)" OnClick="CreateSuccessor">Create successor Draft</MudButton><MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _uncertain)" OnClick="Reopen">Reopen to Draft</MudButton> }
+        </div>
+    }
+    <p>Reopening requires the latest Approved version, no successor, a reason and no Released-revision protection. Approval is not release.</p>
+    <MudPaper Class="product-card pa-4 mt-4" Elevation="0"><h3>History</h3>
+        @if (_history.Count == 0) { <p>No history recorded.</p> }
+        @foreach (var item in _history)
+        {
+            var change = item.Change; var snapshot = change.After;
+            <details><summary>@(change.Decision ?? item.Action) · v@change.VersionNumber · @item.OccurredAt.ToString("u") · @((item.Actor as AuditActor.Identified)?.Identifier)</summary>
+                <p>@snapshot.Id · @Status(snapshot.Status)</p><p style="white-space:pre-wrap">Comment: @(change.Comment ?? "None")</p>
+                @if (change.Reason is not null) { <p style="white-space:pre-wrap">Change reason: @change.Reason</p> }
+                @if (change.SourceVersionId is { } source) { <MudLink Href="@($"/features/details?id={change.InternalId}&version={source}")">Exact source Feature version</MudLink> }
+                <h4>Title at event</h4><p style="white-space:pre-wrap">@snapshot.Title</p><h4>Description at event</h4><ProductMarkdownView Markdown="@snapshot.Description" />
+            </details>
+        }
+    </MudPaper>
+}
+@code {
+    [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "version")] public Guid? VersionId { get; set; }
+    private FeatureSnapshot? _feature;
+    private Retravion.Domain.Product.Product? _product;
+    private IReadOnlyList<FeatureSnapshot> _versions = [];
+    private IReadOnlyList<FeatureHistory> _history = [];
+    private string? _error, _comment, _reason;
+    private bool _busy, _uncertain;
+    private Guid? _successorOperation;
+    private Guid _pendingProduct;
+    private bool IsLatest => _versions.LastOrDefault()?.Feature.VersionId == _feature?.Feature.VersionId;
+    private string BackPath => _product is null ? "/products" : $"/features?product={Uri.EscapeDataString(_product.Id)}";
+    private static string Status(string value) => value == "InReview" ? "In Review" : value;
+    protected override async Task OnParametersSetAsync() { _comment = null; _reason = null; await Load(); }
+    private async Task Load()
+    {
+        _feature = null; _product = null; _error = null; _versions = []; _history = [];
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var found = await Operations.Find(actor, Id, VersionId); if (found.IsFailure) { _error = found.Error; return; }
+        if (found.Value.HasNoValue) { _error = "Feature version not found."; return; }
+        var products = await Products.List(actor); if (products.IsFailure) { _error = products.Error; return; }
+        _product = products.Value.SingleOrDefault(p => p.InternalId == found.Value.Value.Feature.ProductInternalId);
+        if (_product is null) { _error = "Product not found."; return; }
+        _feature = found.Value.Value;
+        var versions = await Operations.Versions(actor, Id); if (versions.IsFailure) { _error = versions.Error; return; } _versions = versions.Value;
+        var history = await Operations.History(actor, Id); if (history.IsFailure) { _error = history.Error; return; } _history = history.Value;
+        _uncertain = _successorOperation is not null;
+    }
+    private async Task RetrieveOutcome()
+    {
+        if (_busy || !_uncertain) return; _busy = true;
+        try
+        {
+            if (_successorOperation is { } operation) { var outcome = await Operations.Outcome((await Authentication.GetAuthenticationStateAsync()).User, _pendingProduct, operation); if (outcome.IsFailure) { _error = outcome.Error; return; } if (outcome.Value.HasValue) { Id = outcome.Value.Value.InternalId; VersionId = outcome.Value.Value.VersionId; } _successorOperation = null; }
+            else VersionId = null;
+            await Load();
+        }
+        finally { _busy = false; }
+    }
+    private Task Review(string decision) => Change((actor, expected) => Operations.Review(actor, expected, decision, _comment));
+    private Task Reopen() => Change((actor, expected) => Operations.Reopen(actor, expected, _reason));
+    private Task CreateSuccessor() => Change((actor, expected) => { _successorOperation = Guid.NewGuid(); _pendingProduct = expected.Feature.ProductInternalId; return Operations.CreateSuccessor(actor, expected, _reason, operationId: _successorOperation); });
+    private async Task Change(Func<System.Security.Claims.ClaimsPrincipal, FeatureSnapshot, Task<CSharpFunctionalExtensions.Result<FeatureSnapshot>>> operation)
+    {
+        if (_busy || _uncertain || _feature is null) return; _busy = true; _error = null;
+        try
+        {
+            var result = await operation((await Authentication.GetAuthenticationStateAsync()).User, _feature);
+            if (result.IsFailure) { _error = result.Error; _uncertain = result.Error.Contains("could not be confirmed", StringComparison.Ordinal); if (!_uncertain) _successorOperation = null; }
+            else { _successorOperation = null; _comment = null; _reason = null; VersionId = result.Value.Feature.VersionId; Navigation.NavigateTo($"/features/details?id={Id}&version={VersionId}"); await Load(); }
+        }
+        finally { _busy = false; }
+    }
+}
