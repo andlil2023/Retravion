@@ -1,0 +1,405 @@
+[
+  {
+    "name": "create_draft_requirement",
+    "description": "Create a Draft Requirement under an active Product manual ID. Requires a Product-unique manual ID (at most 100 Unicode characters), title, Markdown statement and explicit type: System, Software, Hardware, Safety, Usability or Regulatory. Rationale is optional plain text. Never automatically retry; retrieve before manually retrying uncertain outcomes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "statement": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "productId",
+        "id",
+        "title",
+        "statement",
+        "type"
+      ]
+    }
+  },
+  {
+    "name": "create_draft_test_case",
+    "description": "Create an incomplete unclassified Draft v1 with no links. Optional null content defaults to empty. Never automatically retry; list/read candidates after uncertain creation, and do not blindly recreate an ambiguous result.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "preconditions": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "steps": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "action": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "expectedResult": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "action",
+              "expectedResult"
+            ]
+          },
+          "default": null
+        }
+      },
+      "required": [
+        "productId"
+      ]
+    }
+  },
+  {
+    "name": "create_draft_user_need",
+    "description": "Create a Draft User Need under an active Product's manual ID. Required: Product-scoped ID, title and Markdown statement. Never automatically retry a write; after an uncertain result, list/read before manually retrying.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "statement": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "productId",
+        "id",
+        "title",
+        "statement"
+      ]
+    }
+  },
+  {
+    "name": "edit_draft_requirement",
+    "description": "Replace Draft Requirement content only. Supply immutable internalId and expectedRevision from a prior read, manual ID, title, Markdown statement and explicit type: System, Software, Hardware, Safety, Usability or Regulatory. Omitted/null rationale clears it. Rejects stale writes, non-Draft states and retired Products. No status/review changes. Never automatically retry; retrieve before manually retrying uncertain outcomes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "statement": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "internalId",
+        "expectedRevision",
+        "id",
+        "title",
+        "statement",
+        "type"
+      ]
+    }
+  },
+  {
+    "name": "edit_draft_test_case",
+    "description": "Fully replace exact Draft content using its positive expectedRevision. Preserves identities, links and classification. No lifecycle/link changes. Never automatically retry; retrieve before user-directed retry after uncertain outcomes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "preconditions": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string"
+              },
+              "expectedResult": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "expectedResult"
+            ]
+          }
+        }
+      },
+      "required": [
+        "internalId",
+        "versionId",
+        "expectedRevision",
+        "title",
+        "description",
+        "preconditions",
+        "steps"
+      ]
+    }
+  },
+  {
+    "name": "edit_draft_user_need",
+    "description": "Edit Draft content only. Supply immutable internalId and expectedRevision from a prior read. Stale writes, non-Draft content and retired Products are rejected. No status/review/version changes. Never automatically retry; retrieve before manually retrying uncertain outcomes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "statement": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "internalId",
+        "expectedRevision",
+        "id",
+        "title",
+        "statement"
+      ]
+    }
+  },
+  {
+    "name": "list_products",
+    "description": "List Products, including retired Products. Product information is read-only through MCP.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "list_requirements",
+    "description": "List Requirements in all statuses for a Product manual ID, including retired Products. Returns immutable entity/version identities, working/latest-Approved designations and concurrency revision tokens.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "productId"
+      ]
+    }
+  },
+  {
+    "name": "list_test_cases",
+    "description": "List all Test Cases for a Product manual ID, including retired Products. Selects working version otherwise latest Approved; ordering is not guaranteed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "productId"
+      ]
+    }
+  },
+  {
+    "name": "list_user_needs",
+    "description": "List User Needs in all statuses for a Product's manual ID, including retired Products. Returns immutable identities and revision tokens.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "productId"
+      ]
+    }
+  },
+  {
+    "name": "read_product",
+    "description": "Retrieve a Product by its manual productId, including its full Markdown description and active/retired status. Cannot modify Products.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "productId"
+      ]
+    }
+  },
+  {
+    "name": "read_requirement",
+    "description": "Read Requirement content, versions and retained decision history by immutable internalId. Optional versionId selects exactly that version, never latest substitution. Otherwise returns working version or latest Approved. Retrieve before retrying uncertain writes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid",
+          "default": null
+        }
+      },
+      "required": [
+        "internalId"
+      ]
+    }
+  },
+  {
+    "name": "read_test_case",
+    "description": "Read a Test Case, all version summaries and retained entity history. Optional versionId selects exactly that version; otherwise working or latest Approved. Retrieve before retrying uncertain writes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid",
+          "default": null
+        }
+      },
+      "required": [
+        "internalId"
+      ]
+    }
+  },
+  {
+    "name": "read_user_need",
+    "description": "Read User Need content, versions and decision history by immutable internalId. Optional versionId selects exactly that version, never latest substitution. Otherwise returns working version or latest Approved. Retrieve before retrying uncertain writes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid",
+          "default": null
+        }
+      },
+      "required": [
+        "internalId"
+      ]
+    }
+  }
+]

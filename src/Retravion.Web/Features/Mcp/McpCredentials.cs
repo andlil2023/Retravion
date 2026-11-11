@@ -16,16 +16,16 @@ internal sealed class McpCredentials(SessionTicketStore sessions, TimeProvider t
     private readonly object gate = new();
     private readonly Dictionary<string, Credential> credentials = [];
 
-    internal async Task<IssuedMcpCredential?> Issue(ClaimsPrincipal principal, IAuthorizationService authorization,
+    // The terminal bridge already holds the secret; only its digest is ever bound to the approving session.
+    internal async Task<bool> Issue(ClaimsPrincipal principal, IAuthorizationService authorization, byte[] digest,
         CancellationToken cancellationToken = default)
     {
         var session = principal.FindFirstValue(SessionTicketStore.SessionClaim);
         if (!sessions.IsActive(session) ||
             !(await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded)
-            return null;
+            return false;
         var configuration = await settings.Load(cancellationToken);
-        if (configuration.IsFailure || !configuration.Value.Enabled) return null;
-        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        if (configuration.IsFailure || !configuration.Value.Enabled) return false;
         var expires = time.GetUtcNow() + Lifetime;
         var identity = principal.Clone();
         ((ClaimsIdentity)identity.Identity!).AddClaim(new Claim(CredentialClaim, Guid.NewGuid().ToString("N")));
@@ -35,9 +35,19 @@ internal sealed class McpCredentials(SessionTicketStore sessions, TimeProvider t
         {
             foreach (var key in credentials.Where(p => p.Value.Expires <= time.GetUtcNow() || !sessions.IsActive(p.Value.Session)).Select(p => p.Key).ToArray())
                 credentials.Remove(key);
-            credentials[session!] = new(Digest(token), identity, session!, expires);
+            credentials[session!] = new(digest, identity, session!, expires);
         }
-        return new(token, expires);
+        return true;
+    }
+
+    // Sliding lifetime: permitted terminal activity keeps the credential alive; idle credentials still expire.
+    internal void RecordActivity(ClaimsPrincipal principal)
+    {
+        if (!IsActive(principal)) return;
+        var session = principal.FindFirstValue(SessionTicketStore.SessionClaim)!;
+        lock (gate)
+            if (credentials.TryGetValue(session, out var credential) && credential.Expires > time.GetUtcNow())
+                credentials[session] = credential with { Expires = time.GetUtcNow() + Lifetime };
     }
 
     internal ClaimsPrincipal Resolve(string? token)
@@ -77,8 +87,6 @@ internal sealed class McpCredentials(SessionTicketStore sessions, TimeProvider t
         if (session is not null) lock (gate) credentials.Remove(session);
     }
 
-    private static byte[] Digest(string token) => SHA256.HashData(Encoding.UTF8.GetBytes(token));
+    internal static byte[] Digest(string token) => SHA256.HashData(Encoding.UTF8.GetBytes(token));
     private sealed record Credential(byte[] Digest, ClaimsPrincipal Principal, string Session, DateTimeOffset Expires);
 }
-
-internal sealed record IssuedMcpCredential(string Token, DateTimeOffset ExpiresAt);

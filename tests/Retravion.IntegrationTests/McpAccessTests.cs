@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Retravion.Application.AuditTrail;
@@ -30,8 +31,11 @@ public sealed partial class AccountManagementTests
         using (var pageDenied = await host.Browser.GetAsync("/mcp-access")) Assert.Equal("/password-replacement", pageDenied.Headers.Location?.OriginalString);
         Assert.DoesNotContain("href=\"/settings/ai-workflow\"", await host.Browser.GetStringAsync("/password-replacement"));
         await host.Replace();
-        using (var csrf = await host.Browser.PostAsync("/identity/mcp-token", new FormUrlEncodedContent([])))
+        using (var csrf = await host.Browser.PostAsync("/mcp-connect/decide", new FormUrlEncodedContent([])))
             Assert.Equal(HttpStatusCode.BadRequest, csrf.StatusCode);
+        // The copied-credential route no longer exists.
+        using (var removed = await host.Browser.PostAsync("/identity/mcp-token", await host.Form("/")))
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, removed.StatusCode);
         using (var cookieOnly = await McpTestHost.Send(host.Browser, "tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, cookieOnly.StatusCode);
         Assert.Contains("href=\"/settings/ai-workflow\"", await host.Browser.GetStringAsync("/home"));
         using var pageResponse = await host.Browser.GetAsync("/mcp-access?revoked=true");
@@ -43,9 +47,11 @@ public sealed partial class AccountManagementTests
         Assert.Matches("href=\"/settings/ai-workflow\"[^>]*aria-current=\"page\"", page);
         Assert.Contains("href=\"/home\"", page);
         Assert.Contains("navigation-toggle", page);
-        Assert.Contains("Create MCP credential", page);
-        Assert.Contains("Confirm revoking", page);
-        Assert.Contains("/identity/mcp-token", page);
+        Assert.DoesNotContain("Create MCP credential", page);
+        Assert.DoesNotContain("action=\"/identity/mcp-token\"", page);
+        Assert.Contains("Code shown in your terminal", page);
+        Assert.Contains("Confirm ending", page);
+        Assert.Contains("/identity/mcp-token/revoke", page);
         var token = await host.Authenticate();
         Assert.Equal(64, token.Length);
         var tools = await host.Rpc("tools/list");
@@ -82,7 +88,8 @@ public sealed partial class AccountManagementTests
         // Only the browser flow can issue credentials. A forced restricted credential is rejected too.
         var restricted = await ProductPrincipal(host.Browser, host.Factory.Services, "admin", Initial, "/password-replacement");
         var credentials = host.Factory.Services.GetRequiredService<McpCredentials>();
-        Assert.Null(await credentials.Issue(restricted, host.Factory.Services.GetRequiredService<Microsoft.AspNetCore.Authorization.IAuthorizationService>()));
+        Assert.False(await credentials.Issue(restricted, host.Factory.Services.GetRequiredService<Microsoft.AspNetCore.Authorization.IAuthorizationService>(),
+            McpCredentials.Digest(new string('A', 64))));
         await host.Replace();
         await host.Authenticate();
         var bearer = host.Mcp.DefaultRequestHeaders.Authorization!.Parameter!;
@@ -192,12 +199,199 @@ public sealed partial class AccountManagementTests
         Assert.DoesNotContain("Administration navigation", home);
         var page = await user.GetStringAsync("/mcp-access");
         Assert.Matches("<h1[^>]*>AI Workflow</h1>", page);
-        using var issued = await user.PostAsync("/identity/mcp-token", new FormUrlEncodedContent(new Dictionary<string, string>
-        { ["__RequestVerificationToken"] = Token(page) }));
-        Assert.Equal(HttpStatusCode.OK, issued.StatusCode);
-        var credential = (await issued.Content.ReadFromJsonAsync<IssuedMcpCredential>())!;
-        var principal = factory.Services.GetRequiredService<McpCredentials>().Resolve(credential.Token);
+        using var started = await user.PostAsync("/mcp-connect/start", null);
+        var start = await started.Content.ReadFromJsonAsync<JsonElement>();
+        using var approved = await user.PostAsync("/mcp-connect/decide", new FormUrlEncodedContent(new Dictionary<string, string>
+        { ["__RequestVerificationToken"] = Token(page), ["code"] = start.GetProperty("userCode").GetString()!, ["decision"] = "approve" }));
+        Assert.Equal("/settings/ai-workflow?connection=approved", approved.Headers.Location?.OriginalString);
+        var principal = factory.Services.GetRequiredService<McpCredentials>().Resolve(start.GetProperty("deviceCode").GetString());
         Assert.Equal("mcp-user", principal.FindFirstValue(ClaimTypes.NameIdentifier));
+    }
+
+    [Fact]
+    public async Task TerminalHandoffIsApprovedInTheBrowserOnceAndNeverReturnsACredential()
+    {
+        var clock = new McpClock();
+        await using var host = new McpTestHost(services => services.AddSingleton<TimeProvider>(clock));
+        await host.Login(); await host.Replace();
+        using (var origin = await host.Start(origin: "https://evil.invalid")) Assert.Equal(HttpStatusCode.Forbidden, origin.StatusCode);
+        host.Mcp.DefaultRequestHeaders.Host = "evil.invalid";
+        using (var rebinding = await host.Start()) Assert.Equal(HttpStatusCode.Forbidden, rebinding.StatusCode);
+        host.Mcp.DefaultRequestHeaders.Host = null;
+
+        using (var started = await host.Start())
+        {
+            Assert.Equal("no-store", started.Headers.CacheControl?.ToString());
+            using var document = JsonDocument.Parse(await started.Content.ReadAsStringAsync());
+            var start = document.RootElement;
+            Assert.Equal(new[] { "deviceCode", "expiresIn", "interval", "userCode", "verificationUri" }, start.EnumerateObject().Select(p => p.Name).Order().ToArray());
+            Assert.Matches("^[0-9A-F]{64}$", host.DeviceCode);
+            Assert.Matches("^[A-Z2-9]{4}-[A-Z2-9]{4}$", host.UserCode);
+            Assert.Equal($"https://localhost/settings/ai-workflow?connect={host.UserCode}", start.GetProperty("verificationUri").GetString());
+            Assert.Equal(600, start.GetProperty("expiresIn").GetInt32());
+        }
+        // Until approval the bridge's secret is not a credential.
+        Assert.Equal("pending", await host.Status(host.DeviceCode));
+        host.SetToken(host.DeviceCode);
+        using (var early = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, early.StatusCode);
+        var page = await host.Browser.GetStringAsync($"/settings/ai-workflow?connect={host.UserCode!.ToLowerInvariant()}");
+        Assert.Contains(host.UserCode, page);
+        Assert.Contains("Approve connection", page);
+        Assert.Contains("Deny connection", page);
+        Assert.DoesNotContain(host.DeviceCode!, page);
+        Assert.Contains("unknown, already used or expired", await host.Browser.GetStringAsync("/settings/ai-workflow?connect=ZZZZ-ZZZZ"));
+        Assert.DoesNotContain("<script>", await host.Browser.GetStringAsync("/settings/ai-workflow?connect=%3Cscript%3E"));
+        using (var invalid = await host.Decide("maybe")) Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+
+        using (var approved = await host.Decide("approve"))
+        {
+            Assert.Equal("/settings/ai-workflow?connection=approved", approved.Headers.Location?.OriginalString);
+            Assert.DoesNotContain(host.DeviceCode!, await approved.Content.ReadAsStringAsync());
+        }
+        using (var listed = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+        // Single use: a second decision is refused and the outcome is reported to the bridge once.
+        using (var reused = await host.Decide("deny")) Assert.Equal("/settings/ai-workflow?connection=expired", reused.Headers.Location?.OriginalString);
+        Assert.Equal("approved", await host.Status(host.DeviceCode));
+        Assert.Equal("expired", await host.Status(host.DeviceCode));
+        using (var still = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.OK, still.StatusCode);
+        Assert.Contains("Connection approved", await host.Browser.GetStringAsync("/settings/ai-workflow?connection=approved"));
+
+        // Denied and expired requests never become credentials.
+        using (await host.Start()) { }
+        using (var denied = await host.Decide("deny")) Assert.Equal("/settings/ai-workflow?connection=denied", denied.Headers.Location?.OriginalString);
+        Assert.Equal("denied", await host.Status(host.DeviceCode));
+        host.SetToken(host.DeviceCode);
+        using (var refused = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        using (await host.Start()) { }
+        clock.Now += McpConnections.Lifetime;
+        Assert.Equal("expired", await host.Status(host.DeviceCode));
+        using (var late = await host.Decide("approve")) Assert.Equal("/settings/ai-workflow?connection=expired", late.Headers.Location?.OriginalString);
+        host.SetToken(host.DeviceCode);
+        using (var expired = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, expired.StatusCode);
+        Assert.Equal("expired", await host.Status("unknown"));
+
+        // Pending requests are bounded; expired ones free their place.
+        for (var i = 0; i < McpConnections.Capacity; i++) using (var filled = await host.Start()) Assert.Equal(HttpStatusCode.OK, filled.StatusCode);
+        using (var full = await host.Start()) Assert.Equal(HttpStatusCode.TooManyRequests, full.StatusCode);
+        clock.Now += McpConnections.Lifetime;
+        using (var freed = await host.Start()) Assert.Equal(HttpStatusCode.OK, freed.StatusCode);
+    }
+
+    [Fact]
+    public async Task TerminalApprovalLinkSurvivesSignInWithoutAcceptingAReturnAddress()
+    {
+        await using var host = new McpTestHost();
+        await host.Login(); await host.Replace();
+        using (var logout = await host.Browser.PostAsync("/identity/logout", await host.Form("/home"))) Assert.Equal(HttpStatusCode.Redirect, logout.StatusCode);
+        using (await host.Start()) { }
+        var code = host.UserCode!;
+        // Signed out: the approval link leads to sign-in carrying only the normalized code.
+        using (var link = await host.Browser.GetAsync($"/settings/ai-workflow?connect={code.ToLowerInvariant()}"))
+            Assert.Equal($"/?connect={code}", link.Headers.Location?.OriginalString);
+        foreach (var junk in new[] { "/settings/ai-workflow?connect=https://evil.invalid", "/settings/ai-workflow?connect=%2Fadministration", "/settings/ai-workflow", "/home?connect=" + code })
+            using (var plain = await host.Browser.GetAsync(junk)) Assert.Equal("/", plain.Headers.Location?.OriginalString);
+        Assert.Contains($"name=\"connect\" value=\"{code}\"", await host.Browser.GetStringAsync($"/?connect={code}"));
+        Assert.DoesNotContain("name=\"connect\"", await host.Browser.GetStringAsync("/?connect=https://evil.invalid"));
+        Assert.DoesNotContain("name=\"connect\"", await host.Browser.GetStringAsync("/"));
+
+        async Task<string?> SignIn(string password, string connect)
+        {
+            using var response = await host.Browser.PostAsync("/identity/login", await host.Form("/",
+                new() { ["username"] = "admin", ["password"] = password, ["connect"] = connect }));
+            return response.Headers.Location?.OriginalString;
+        }
+        Assert.Equal($"/?failed=true&connect={code}", await SignIn("wrong", code));
+        Assert.Equal("/?failed=true", await SignIn("wrong", "https://evil.invalid"));
+        Assert.Equal("/home", await SignIn("Replacement123!", "//evil.invalid/settings/ai-workflow"));
+        using (var logout = await host.Browser.PostAsync("/identity/logout", await host.Form("/home"))) Assert.Equal(HttpStatusCode.Redirect, logout.StatusCode);
+        Assert.Equal($"/settings/ai-workflow?connect={code}", await SignIn("Replacement123!", code));
+        Assert.Contains("Approve connection", await host.Browser.GetStringAsync($"/settings/ai-workflow?connect={code}"));
+        using (var approved = await host.Decide("approve")) Assert.Equal("/settings/ai-workflow?connection=approved", approved.Headers.Location?.OriginalString);
+        host.SetToken(host.DeviceCode);
+        using (var listed = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+    }
+
+    [Fact]
+    public async Task TerminalAccessRenewsWhileInUseExpiresWhenIdleAndEndsOnDisconnectOrDisabling()
+    {
+        var clock = new McpClock();
+        var settings = new InMemoryAiWorkflowSettingsStore(true);
+        await using var host = new McpTestHost(services =>
+        {
+            services.AddSingleton<TimeProvider>(clock);
+            services.AddSingleton<IAiWorkflowSettingsStore>(settings);
+        });
+        await host.Login(); await host.Replace(); await host.Authenticate();
+        // Well past the original 30 minutes, activity keeps the same credential alive.
+        for (var i = 0; i < 4; i++)
+        {
+            clock.Now += McpCredentials.Lifetime - TimeSpan.FromMinutes(1);
+            using var active = await host.Send("tools/list");
+            Assert.Equal(HttpStatusCode.OK, active.StatusCode);
+        }
+        // Denied requests do not renew.
+        clock.Now += McpCredentials.Lifetime - TimeSpan.FromMinutes(1);
+        using (var origin = await host.Send("tools/list", origin: "https://evil.invalid")) Assert.Equal(HttpStatusCode.Forbidden, origin.StatusCode);
+        clock.Now += TimeSpan.FromMinutes(1);
+        using (var idle = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, idle.StatusCode);
+
+        // The idle half hour also ended the browser session it was bound to.
+        await host.Login("Replacement123!", "/home");
+        var token = await host.Authenticate();
+        using (var foreign = await host.Disconnect(new string('A', 64))) Assert.Equal(HttpStatusCode.NoContent, foreign.StatusCode);
+        using (var kept = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.OK, kept.StatusCode);
+        using (var disconnected = await host.Disconnect(token)) Assert.Equal(HttpStatusCode.NoContent, disconnected.StatusCode);
+        using (var ended = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, ended.StatusCode);
+
+        // Disabling between request and approval refuses the approval and tells the bridge.
+        using (await host.Start()) { }
+        using (var disabled = await ConfigureAi(host, settings, false)) Assert.Equal(HttpStatusCode.Redirect, disabled.StatusCode);
+        using (var refused = await host.Decide("approve")) Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Equal("denied", await host.Status(host.DeviceCode));
+        using (var blocked = await host.Start()) Assert.Equal(HttpStatusCode.Forbidden, blocked.StatusCode);
+    }
+
+    [Fact]
+    public void CertificateFingerprintIsShownOnlyForAReadableConfiguredCertificate()
+    {
+        using var key = System.Security.Cryptography.RSA.Create(2048);
+        var request = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=localhost", key,
+            System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var path = Path.Combine(Path.GetTempPath(), $"retravion-fingerprint-{Guid.NewGuid():N}.pfx");
+        try
+        {
+            File.WriteAllBytes(path, certificate.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx, "throwaway"));
+            Microsoft.Extensions.Configuration.IConfiguration Configuration(string? file, string? password) =>
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                { ["Kestrel:Certificates:Default:Path"] = file, ["Kestrel:Certificates:Default:Password"] = password }).Build();
+            var expected = string.Join(':', Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(certificate.RawData)).Chunk(2).Select(c => new string(c)));
+            Assert.Equal(expected, TerminalCertificate.Fingerprint(Configuration(path, "throwaway")));
+            Assert.Null(TerminalCertificate.Fingerprint(Configuration(path, "wrong")));
+            Assert.Null(TerminalCertificate.Fingerprint(Configuration(path + ".missing", "throwaway")));
+            Assert.Null(TerminalCertificate.Fingerprint(Configuration(null, null)));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task ShippedBridgeToolListMatchesTheServerToolContracts()
+    {
+        await using var host = new McpTestHost();
+        await host.Login(); await host.Replace(); await host.Authenticate();
+        var server = await host.Rpc("tools/list");
+        using var zip = new System.IO.Compression.ZipArchive(new MemoryStream(TerminalPackages.Get("pi")!.Bytes));
+        using var reader = new StreamReader(zip.GetEntry("bridge/tools.json")!.Open());
+        using var shipped = JsonDocument.Parse(reader.ReadToEnd());
+        static string Contract(JsonElement tool) => JsonSerializer.Serialize(new
+        {
+            name = tool.GetProperty("name").GetString(),
+            description = tool.GetProperty("description").GetString(),
+            inputSchema = JsonSerializer.Serialize(tool.GetProperty("inputSchema"))
+        });
+        // The bridge cannot ask the server before sign-in, so its list is shipped; this keeps it from drifting.
+        Assert.Equal(server.GetProperty("tools").EnumerateArray().Select(Contract).Order(StringComparer.Ordinal).ToArray(),
+            shipped.RootElement.EnumerateArray().Select(Contract).Order(StringComparer.Ordinal).ToArray());
     }
 
     private sealed class McpClock : TimeProvider
@@ -244,16 +438,53 @@ internal sealed class McpTestHost : IAsyncDisposable
         { ["currentPassword"] = "InitialPass123!", ["newPassword"] = "Replacement123!", ["confirmNewPassword"] = "Replacement123!" }));
         Assert.Equal("/home", response.Headers.Location?.OriginalString);
     }
-    internal async Task<HttpResponseMessage> Issue() => await Browser.PostAsync("/identity/mcp-token", await Form("/"));
+    internal string? DeviceCode { get; private set; }
+    internal string? UserCode { get; private set; }
+    // The bridge's side of the handoff: no cookies, no Origin.
+    internal async Task<HttpResponseMessage> Start(string? origin = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp-connect/start");
+        if (origin is not null) request.Headers.Add("Origin", origin);
+        var response = await Mcp.SendAsync(request);
+        if (!response.IsSuccessStatusCode) return response;
+        using var started = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        DeviceCode = started.RootElement.GetProperty("deviceCode").GetString();
+        UserCode = started.RootElement.GetProperty("userCode").GetString();
+        return response;
+    }
+    internal async Task<HttpResponseMessage> Decide(string decision) => await Browser.PostAsync("/mcp-connect/decide",
+        await Form("/", new() { ["code"] = UserCode!, ["decision"] = decision }));
+    internal async Task<string> Status(string? deviceCode)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp-connect/status");
+        request.Headers.Authorization = new("Bearer", deviceCode);
+        using var response = await Mcp.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("status").GetString()!;
+    }
+    internal async Task<HttpResponseMessage> Disconnect(string deviceCode)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp-connect/disconnect");
+        request.Headers.Authorization = new("Bearer", deviceCode);
+        return await Mcp.SendAsync(request);
+    }
+    // Starts a terminal handoff and has the browser user approve it; a refused start is returned as is.
+    internal async Task<HttpResponseMessage> Issue()
+    {
+        var started = await Start();
+        if (!started.IsSuccessStatusCode) return started;
+        started.Dispose();
+        return await Decide("approve");
+    }
     internal async Task<HttpResponseMessage> Revoke() => await Browser.PostAsync("/identity/mcp-token/revoke", await Form("/home"));
     internal async Task<string> Authenticate()
     {
         using var response = await Issue();
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("/settings/ai-workflow?connection=approved", response.Headers.Location?.OriginalString);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
-        var issued = (await response.Content.ReadFromJsonAsync<IssuedMcpCredential>())!;
-        SetToken(issued.Token);
-        return issued.Token;
+        Assert.Equal("approved", await Status(DeviceCode));
+        SetToken(DeviceCode);
+        return DeviceCode!;
     }
     internal void SetToken(string? token) => Mcp.DefaultRequestHeaders.Authorization = token is null ? null : new("Bearer", token);
     internal Task<HttpResponseMessage> Send(string method, object? parameters = null, string? origin = null) => Send(Mcp, method, parameters, origin);

@@ -71,16 +71,55 @@ internal static class McpEndpoints
 
     internal static void MapMcpCredentials(this WebApplication app)
     {
-        app.MapPost("/identity/mcp-token", async (HttpContext context, IAntiforgery antiforgery,
+        // Terminal bridge handoff. The bridge keeps the device code; a signed-in user approves the short user code.
+        app.MapPost("/mcp-connect/start", async (HttpContext context, McpConnections connections,
+            Retravion.Application.AiWorkflow.IAiWorkflowSettingsStore settings) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            if (!TransportAllowed(context)) return Results.StatusCode(403);
+            var configuration = await settings.Load(context.RequestAborted);
+            if (configuration.IsFailure || !configuration.Value.Enabled) return Results.StatusCode(403);
+            var started = connections.Start();
+            if (started is null) return Results.StatusCode(429);
+            return Results.Json(new
+            {
+                deviceCode = started.DeviceCode,
+                userCode = started.UserCode,
+                verificationUri = $"https://{context.Request.Host}/settings/ai-workflow?connect={started.UserCode}",
+                expiresIn = (int)McpConnections.Lifetime.TotalSeconds,
+                interval = 2
+            });
+        }).AllowAnonymous();
+        app.MapPost("/mcp-connect/status", (HttpContext context, McpConnections connections) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            if (!TransportAllowed(context)) return Results.StatusCode(403);
+            return Results.Json(new { status = connections.Status(Bearer(context)).ToString().ToLowerInvariant() });
+        }).AllowAnonymous();
+        app.MapPost("/mcp-connect/disconnect", (HttpContext context, McpCredentials credentials) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            if (!TransportAllowed(context)) return Results.StatusCode(403);
+            var principal = credentials.Resolve(Bearer(context));
+            if (credentials.IsActive(principal)) credentials.Revoke(principal);
+            return Results.NoContent();
+        }).AllowAnonymous();
+        app.MapPost("/mcp-connect/decide", async (HttpContext context, IAntiforgery antiforgery, McpConnections connections,
             McpCredentials credentials, IAuthorizationService authorization) =>
         {
             context.Response.Headers.CacheControl = "no-store";
-            context.Response.Headers["Pragma"] = "no-cache";
-            context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             try { await antiforgery.ValidateRequestAsync(context); }
             catch (AntiforgeryValidationException) { return Results.BadRequest(); }
-            var issued = await credentials.Issue(context.User, authorization, context.RequestAborted);
-            return issued is null ? Results.StatusCode(403) : Results.Json(issued);
+            var form = await context.Request.ReadFormAsync(context.RequestAborted);
+            var approve = form["decision"] == "approve";
+            if (!approve && form["decision"] != "deny") return Results.BadRequest();
+            var digest = connections.Decide(form["code"], approve);
+            if (digest is null) return Results.LocalRedirect("/settings/ai-workflow?connection=expired");
+            if (!approve) return Results.LocalRedirect("/settings/ai-workflow?connection=denied");
+            if (await credentials.Issue(context.User, authorization, digest, context.RequestAborted))
+                return Results.LocalRedirect("/settings/ai-workflow?connection=approved");
+            connections.Deny(digest);
+            return Results.StatusCode(403);
         }).RequireAuthorization("CompletedPasswordReplacement");
         app.MapPost("/identity/mcp-token/revoke", async (HttpContext context, IAntiforgery antiforgery, McpCredentials credentials) =>
         {
@@ -92,6 +131,19 @@ internal static class McpEndpoints
         }).RequireAuthorization("CompletedPasswordReplacement");
     }
 
+    private static bool TransportAllowed(HttpContext context)
+    {
+        var host = context.Request.Host.Host;
+        return !context.Request.Headers.ContainsKey("Origin") &&
+            (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || host == "127.0.0.1" || host == "[::1]");
+    }
+
+    private static string? Bearer(HttpContext context)
+    {
+        var header = context.Request.Headers.Authorization.ToString();
+        return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..] : null;
+    }
+
     internal static void UseMcpAccessGate(this WebApplication app) => app.Use(async (context, next) =>
     {
         if (context.Request.Path.StartsWithSegments("/mcp-access") || context.Request.Path.StartsWithSegments("/settings/ai-workflow"))
@@ -99,12 +151,9 @@ internal static class McpEndpoints
         if (!context.Request.Path.StartsWithSegments("/mcp")) { await next(context); return; }
         context.Response.Headers.CacheControl = "no-store";
         // Terminal clients send no Origin. Reject browser-origin traffic and unexpected hosts (DNS rebinding).
-        var host = context.Request.Host.Host;
-        var transportAllowed = !context.Request.Headers.ContainsKey("Origin") &&
-            (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || host == "127.0.0.1" || host == "[::1]");
-        var header = context.Request.Headers.Authorization.ToString();
+        var transportAllowed = TransportAllowed(context);
         var credentials = context.RequestServices.GetRequiredService<McpCredentials>();
-        context.User = credentials.Resolve(header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..] : null);
+        context.User = credentials.Resolve(Bearer(context));
         var allowed = await credentials.IsAllowed(context.User, context.RequestAborted) &&
             (await context.RequestServices.GetRequiredService<IAuthorizationService>()
                 .AuthorizeAsync(context.User, "CompletedPasswordReplacement")).Succeeded;
@@ -167,6 +216,7 @@ internal static class McpEndpoints
             }
             context.RequestServices.GetRequiredService<SessionTicketStore>()
                 .RecordActivity(context.User.FindFirstValue(SessionTicketStore.SessionClaim));
+            credentials.RecordActivity(context.User);
             var original = context.Request.Body;
             if (document is not null) context.Request.Body = body;
             try { await next(context); }

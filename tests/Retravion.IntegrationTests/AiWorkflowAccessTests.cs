@@ -74,21 +74,23 @@ public sealed partial class AccountManagementTests
         {
             var page = await host.Browser.GetStringAsync(route);
             Assert.Matches("<h1[^>]*>AI Workflow</h1>", page);
-            Assert.Contains("Your terminal credential", page);
+            Assert.Contains("Terminal connection", page);
             Assert.Contains("Terminal integrations", page);
             Assert.Contains("Download Pi skills", page);
             Assert.Contains("Download Claude Code skills", page);
             Assert.DoesNotContain("Application-wide MCP access", page);
             Assert.DoesNotContain("ai-workflow-settings-form", page);
             Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(page, "href=\"/settings/mcp\"").Count);
-            var issue = System.Text.RegularExpressions.Regex.Match(page, "<button(?=[^>]*form=\"mcp-issue-form\")[^>]*>").Value;
-            Assert.NotEmpty(issue);
-            Assert.Equal(!enabled || unavailable, issue.Contains("disabled"));
-            Assert.Contains("30 minutes", page);
-            Assert.Contains("Never put it in prompts", page);
+            // No credential is created or shown here any more; the page only takes the code from the terminal.
+            Assert.DoesNotContain("mcp-issue-form", page);
+            Assert.DoesNotContain("Create MCP credential", page);
+            Assert.Matches("<input[^>]*name=\"connect\"", page);
+            Assert.DoesNotContain("Approve connection", page);
+            Assert.Contains("30 idle minutes", page);
+            Assert.Contains("no credential is shown or copied", page);
             Assert.Contains("Remote access is not supported", page);
-            Assert.Contains("not credentials or permissions", page);
-            Assert.Contains("preserve unrelated client configuration", page);
+            Assert.Contains("contain no credentials and grant no permissions", page);
+            Assert.Contains("preserves unrelated client configuration", page);
             Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(page, "<summary[^>]*>Setup and checksum</summary>").Count);
             Assert.DoesNotContain("<details open", page);
             foreach (var client in new[] { "pi", "claude" })
@@ -98,7 +100,7 @@ public sealed partial class AccountManagementTests
                 Assert.Contains(bundle.Sha256, page);
             }
             if (!enabled && !unavailable) Assert.Contains("MCP is disabled for all users", page);
-            if (unavailable) Assert.Contains("Credential creation is unavailable", page);
+            if (unavailable) Assert.Contains("Terminal connections are unavailable", page);
         }
         Assert.Equal(0, settings.Saves);
     }
@@ -245,7 +247,7 @@ public sealed partial class AccountManagementTests
             var bytes = await response.Content.ReadAsByteArrayAsync();
             Assert.Equal(bundle.Bytes, bytes);
             using var zip = new ZipArchive(new MemoryStream(bytes));
-            Assert.Equal(new[] { "README.md", "mcp.example.json", "skills/retravion/SKILL.md" }, zip.Entries.Select(e => e.FullName).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal(new[] { "README.md", "bridge/server.mjs", "bridge/tools.json", "mcp_setup.ps1", "skills/retravion/SKILL.md" }, zip.Entries.Select(e => e.FullName).Order(StringComparer.Ordinal).ToArray());
             string Read(string name) { using var r = new StreamReader(zip.GetEntry(name)!.Open()); return r.ReadToEnd(); }
             var skill = Read("skills/retravion/SKILL.md");
             Assert.StartsWith("---\nname: retravion\ndescription:", skill.Replace("\r\n", "\n"));
@@ -253,15 +255,27 @@ public sealed partial class AccountManagementTests
             Assert.Contains("explicit human approval", skill);
             Assert.Contains("Never silently overwrite", skill);
             Assert.Contains("Do not automatically retry", skill);
-            using var config = JsonDocument.Parse(Read("mcp.example.json"));
-            Assert.Equal("Bearer ${RETRAVION_MCP_TOKEN}", config.RootElement.GetProperty("mcpServers").GetProperty("retravion").GetProperty("headers").GetProperty("Authorization").GetString());
+            foreach (var tool in new[] { "rtv_connect", "rtv_complete_connection", "rtv_disconnect" }) { Assert.Contains(tool, skill); Assert.Contains(tool, Read("bridge/server.mjs")); }
+            Assert.Contains("Ask the user whether they accept", skill);
+            // Each download's setup defaults to its own client; nothing carries a copied credential,
+            // changes the Windows certificate store or weakens TLS verification.
+            var setup = Read("mcp_setup.ps1");
+            Assert.Contains($"$Client = '{client}'", setup);
+            Assert.DoesNotContain("%CLIENT_ID%", setup);
+            Assert.DoesNotContain("Cert:", setup);
+            var everything = string.Concat(zip.Entries.Select(e => Read(e.FullName)));
+            Assert.DoesNotContain("RETRAVION_MCP_TOKEN", everything);
+            Assert.DoesNotContain("NODE_EXTRA_CA_CERTS", everything);
+            Assert.DoesNotContain("NODE_USE_SYSTEM_CA", everything);
+            Assert.DoesNotContain("rejectUnauthorized", everything);
             var readme = Read("README.md");
             Assert.Contains(client == "pi" ? ".pi/skills/retravion" : ".claude/skills/retravion", readme);
             Assert.Contains(client == "pi" ? "/skill:retravion" : "/retravion", readme);
             Assert.Contains("Preserve unrelated server entries", readme);
             Assert.Contains("Remove only", readme);
             Assert.DoesNotContain("%CLIENT%", readme);
-            Assert.DoesNotContain("InitialPass123!", skill + readme + Read("mcp.example.json"));
+            Assert.Contains("mcp_setup.ps1", readme);
+            Assert.DoesNotContain("InitialPass123!", everything);
         }
         using (var unknown = await host.Browser.GetAsync("/settings/ai-workflow/packages/0.0.0/pi")) Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
         using (var unknown = await host.Browser.GetAsync($"/settings/ai-workflow/packages/{TerminalPackages.Version}/other")) Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
@@ -274,8 +288,10 @@ public sealed partial class AccountManagementTests
         var hook = new SettingsReadHook(settings);
         await using var host = new McpTestHost(services => services.AddSingleton<IAiWorkflowSettingsStore>(hook));
         await host.Login(); await host.Replace();
+        using (await host.Start()) { }
         hook.AfterLoad = () => settings.Current = new(true, settings.Current.Revision + 2); // Disable, then re-enable after the issuance snapshot.
-        await host.Authenticate();
+        using (var approved = await host.Decide("approve")) Assert.Equal("/settings/ai-workflow?connection=approved", approved.Headers.Location?.OriginalString);
+        host.SetToken(host.DeviceCode);
         using (var denied = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         await host.Authenticate();
         Assert.Equal(14, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
