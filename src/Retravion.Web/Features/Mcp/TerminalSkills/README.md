@@ -1,9 +1,9 @@
-# Retravion — %CLIENT% integration 2.0.0
+# Retravion — %CLIENT% integration 2.1.0
 
 Connect %CLIENT% on this machine to Retravion: run one setup script per project, then approve each connection in your browser. There is no token to copy and no environment variable to set.
 
 Requires %CLIENT%, Node.js 22 or later, and Retravion running on this machine. Remote deployment is unsupported.
-This skill guides six tools: read-only Products and User Need reads/Draft writes. The bridge also forwards the server's Requirement and Test Case tools; those workflows are not included in this skill version.
+This skill guides ten server tools: read-only Products, User Need reads/Draft writes and Requirement reads/Draft writes. Requirement writes require an explicit type (System, Software, Hardware, Safety, Usability or Regulatory); rationale is optional plain text, and omitted/null rationale clears it on edit. The skill requires explicit human approval of proposed content before saving, a current revision for edits, and fresh approval after stale writes. The bridge also forwards the server's Test Case tools; Test Case workflows, relationship/link writes and lifecycle operations are not supported by this skill version.
 
 ## Set up once per project directory
 
