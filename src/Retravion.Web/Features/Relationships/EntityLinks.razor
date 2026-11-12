@@ -16,7 +16,7 @@ else
     { <MudAlert Severity="@(_requiresRetrieval ? Severity.Error : Severity.Success)" role="status" Class="mb-3">@_message</MudAlert> }
     @if (_requiresRetrieval)
     { <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Retrieve">Retrieve relationships before another action</MudButton> }
-    <div class="link-workspace" aria-busy="@_busy">
+    <div class="link-workspace @(_anchor is not null && !_table ? "adding-link" : "")" aria-busy="@_busy">
         <section class="diagram-panel" aria-label="Relationship workspace">
             <div class="diagram-toolbar">
                 <div role="group" aria-label="Relationship view">
@@ -57,7 +57,7 @@ else
         <aside class="record-inspector" aria-label="Selected record inspector">
             @if (_anchor is not null)
             {
-                <MudPaper Class="inspector-card pa-4" Elevation="0">
+                <MudPaper Class="inspector-card add-link-card pa-4" Elevation="0">
                     <span class="eyebrow">@(_reviewing ? "3 · Review" : "1 · Relationship / 2 · Select record")</span>
                     <h3>@(_reviewing ? "Review link" : "Add link")</h3>
                     <p>@_anchor.Label</p>
@@ -72,8 +72,8 @@ else
                         <div class="candidate-list" role="group" aria-label="Matching exact versions">
                             @foreach (var candidate in MatchingCandidates)
                             {
-                                <MudButton Class="candidate" Variant="@(_selected == candidate.VersionId ? Variant.Outlined : Variant.Text)" OnClick="@(() => SelectCandidate(candidate.VersionId))" Disabled="_busy" aria-pressed="@(_selected == candidate.VersionId)" aria-label="@($"Select {candidate.Label}")" data-version="@candidate.VersionId">
-                                    <span><strong>@candidate.Id</strong> · v@(candidate.VersionNumber) · @candidate.Status<br />@candidate.Title</span>
+                                <MudButton Class="candidate" Variant="Variant.Outlined" OnClick="@(() => SelectCandidate(candidate.VersionId))" Disabled="_busy" aria-pressed="@(_selected == candidate.VersionId ? "true" : "false")" aria-label="@($"Select {candidate.Label}")" data-version="@candidate.VersionId">
+                                    <span class="candidate-content"><span><strong>@candidate.Id</strong> · v@(candidate.VersionNumber) · @candidate.Status</span><span>@candidate.Title</span>@if (_selected == candidate.VersionId) { <strong class="candidate-selection">✓ Selected</strong> }</span>
                                 </MudButton>
                             }
                         </div>
