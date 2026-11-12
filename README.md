@@ -292,6 +292,9 @@ the tools below unchanged.
 
 Available tools:
 
+`explore_relationships` is read-only: supply `kind` (user-need, requirement, test-case or feature), immutable `internalId` and required exact `versionId`. Direct incoming/outgoing edges retain exact endpoints, ownership, direction, Product, status and newer-version indicators. Optional `expandedVersionIds` expands only explicitly selected reachable versions (at most 20; repeats load once). `limit` defaults to 100 (1–200), separately capping edges and unavailable provenance snapshots. Report truncation, omitted counts and unexpanded IDs; never imply a complete transitive closure or absent hidden links. Unavailable origins are stored copy-time snapshots only, not live/expandable sources. No relationship mutations are exposed.
+
+
 | Tool | Input / behavior |
 | --- | --- |
 | `list_products` | No arguments; read-only Products, including retired Products |
@@ -341,7 +344,7 @@ integration version and SHA-256. These fixed packages contain only
 (`bridge/server.mjs`, `bridge/tools.json`); no credentials, user records or terminal client.
 A hash checks file integrity, not publisher identity. Downloading grants no access.
 
-Integration 2.3.0 guides Product, User Need, Requirement, Test Case and Feature reads and requires
+Integration 2.4.0 guides Product, User Need, Requirement, Test Case and Feature reads and requires
 explicit conversation approval before User Need, Requirement, Test Case or Feature Draft writes.
 Test Case tools are `list_test_cases`, `read_test_case`, `create_draft_test_case` and
 `edit_draft_test_case`. Creation generates the ID and permits empty content; edits replace
@@ -362,7 +365,7 @@ project. Include the existing `-Endpoint` if not using port 8443 and confirm the
 fingerprint again. This replaces only the selected Retravion skill, shared bridge and
 Retravion configuration; unrelated MCP entries and settings are preserved. For both clients,
 run each client's setup so both skills are current. Check the installed `SKILL.md` heading
-for `integration 2.3.0`, restart the terminal, reload the skill and connect again. Use a new
+for `integration 2.4.0`, restart the terminal, reload the skill and connect again. Use a new
 session if old instructions still report an older version or exclude Features; do not bypass the old
 skill by calling tools directly.
 

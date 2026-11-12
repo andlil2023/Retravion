@@ -53,7 +53,7 @@ internal sealed record RelationshipExploration(RelationshipView Root, IReadOnlyL
         .DistinctBy(v => (v.Copy.VersionId, v.SourceVersionId)).ToArray();
 }
 
-// Web-only composition of existing authorized feature contracts; no new public or MCP surface.
+// Shared composition of existing authorized feature contracts for web and read-only MCP exploration.
 internal sealed class RelationshipOperations(RequirementOperations requirements, UserNeedOperations needs, ProductOperations products,
     TestCaseOperations testCases, FeatureOperations features)
 {

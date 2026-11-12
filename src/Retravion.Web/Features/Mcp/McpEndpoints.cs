@@ -14,6 +14,7 @@ internal static class McpEndpoints
     private const int MaxBodyBytes = 1024 * 1024;
     private static readonly Dictionary<string, string[]> Arguments = new(StringComparer.Ordinal)
     {
+        ["explore_relationships"] = ["kind", "internalId", "versionId", "expandedVersionIds", "limit"],
         ["list_features"] = ["productId"],
         ["read_feature"] = ["internalId", "versionId"],
         ["create_draft_feature"] = ["productId", "title", "description"],
@@ -251,6 +252,12 @@ internal static class McpEndpoints
             }
             if (tool is "list_features" or "read_feature" or "create_draft_feature" or "edit_draft_feature" &&
                 (!parameters.TryGetProperty("arguments", out var featureArguments) || !ValidFeatureArguments(tool, featureArguments)))
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+            if (tool == "explore_relationships" &&
+                (!parameters.TryGetProperty("arguments", out var relationshipArguments) || !RelationshipMcpTools.ValidArguments(relationshipArguments)))
             {
                 context.Response.StatusCode = 400;
                 return;
