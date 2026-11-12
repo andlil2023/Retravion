@@ -23,13 +23,13 @@ const fixture = `<!doctype html><html><head><meta charset="utf-8"><style>
 body { margin:0; } ${editorCss}
 </style></head><body><button id="background">Background action</button><div style="height:100px"></div>
 <dialog open class="description-editor-shell" role="group" aria-label="Markdown editor">
-<form><div class="description-toolbar"><h2>Description</h2><div class="description-tools">
+<div class="product-card mud-paper"><form><div class="description-editor-content"><div class="description-toolbar"><h2>Description</h2><div class="description-tools">
 <button type="button" data-markdown-fullscreen-toggle>Fullscreen Markdown editor</button>
 <button type="button" id="arrangement">Stacked</button></div></div>
-<div class="description-layout side-by-side"><div class="description-source"><textarea rows="12">Original</textarea></div>
+<div class="description-layout side-by-side"><div class="description-source"><label>Description (Markdown)</label><textarea rows="12">Original</textarea></div>
 <div class="description-splitter" role="separator" tabindex="0" aria-orientation="vertical"
 aria-label="Resize Markdown and preview panes" aria-valuemin="25" aria-valuemax="75" aria-valuenow="50"></div>
-<section class="description-preview"><h3>Preview</h3><div style="height:1600px">Long preview</div></section></div></form>
+<section class="description-preview"><h3>Preview</h3><div style="height:1600px">Long preview</div></section></div></div></form></div>
 <div class="product-actions"><button type="submit" id="save">Save</button><a href="#cancel" id="cancel">Cancel</a></div>
 </dialog><button id="confirmation" hidden>Confirm status change</button><script type="module">
 import { setFullscreen, initializeSplitter, dispose } from '/module.js';
@@ -76,7 +76,8 @@ async function waitFor(expression) {
         if (await evaluate(expression)) return;
         await delay(50);
     }
-    assert.fail(`Timed out: ${expression}`);
+    const diagnostics = await evaluate('({path: location.pathname, panes: [...document.querySelectorAll(".description-layout")].map(layout => ({style: layout.getAttribute("style"), source: layout.querySelector(".description-source").getBoundingClientRect().height, preview: layout.querySelector(".description-preview").getBoundingClientRect().height})), alerts: [...document.querySelectorAll("[role=alert]")].map(alert => alert.textContent.trim()), invalidFields: [...document.querySelectorAll(":invalid")].map(field => ({id: field.id, message: field.validationMessage}))})');
+    assert.fail(`Timed out: ${expression}; ${JSON.stringify(diagnostics)}`);
 }
 async function key(key, code, virtualKey) {
     for (const type of ['keyDown', 'keyUp'])
@@ -109,6 +110,18 @@ try {
     await evaluate(`window.splitter = root.querySelector('[role=separator]');
         window.layout = root.querySelector('.description-layout');
         editor.value = 'Splitter draft'; editor.setSelectionRange(2, 7, 'backward');`);
+    // Resize the real textarea in both directions; preview content cannot set pane height.
+    const matchingHeights = 'Math.abs(root.querySelector(".description-source").getBoundingClientRect().height - root.querySelector(".description-preview").getBoundingClientRect().height) < 1';
+    for (const arrangement of ['side-by-side', 'stacked']) {
+        await evaluate(`layout.className = 'description-layout ${arrangement}'`);
+        for (const height of [610, 350]) {
+            await evaluate(`editor.style.height = '${height}px'`);
+            await waitFor(matchingHeights);
+            assert.ok(await evaluate(`Math.abs(editor.getBoundingClientRect().height - ${height}) < 20`));
+        }
+    }
+    await evaluate('layout.className = "description-layout side-by-side"');
+    console.log('PASS: expanded/shrunk editor and preview heights match in both orientations');
     const splitValue = () => evaluate('Number(splitter.getAttribute("aria-valuenow"))');
     const handlePosition = () => evaluate('(() => { const r = splitter.getBoundingClientRect(); return { x:r.x + r.width/2, y:r.y + 30 }; })()');
     let handle = await handlePosition();
@@ -158,6 +171,11 @@ try {
         assert.equal(await evaluate('document.activeElement === editor'), true);
         const geometry = await evaluate('({ width: root.getBoundingClientRect().width, height: root.getBoundingClientRect().height, x: root.getBoundingClientRect().x, y: root.getBoundingClientRect().y })');
         assert.deepEqual(geometry, { width, height, x: 0, y: 0 });
+        await waitFor(matchingHeights);
+        const panes = await evaluate('({layout: layout.getBoundingClientRect().height, source: root.querySelector(".description-source").getBoundingClientRect().height, textarea: editor.getBoundingClientRect().height, bottom: layout.getBoundingClientRect().bottom, actions: root.querySelector(".product-actions").getBoundingClientRect().top})');
+        assert.ok(panes.layout > height * 0.65, 'Fullscreen expands the editing surface, not just its background.');
+        assert.ok(Math.abs(panes.bottom - panes.actions + 16) < 2, 'Panes fill the space above actions.');
+        assert.ok(panes.textarea > 80, 'Textarea fits within its fullscreen pane.');
         assert.equal(await evaluate("root.querySelector('.description-preview').scrollHeight > root.querySelector('.description-preview').clientHeight"), true);
         assert.equal(await evaluate("document.documentElement.style.overflow"), 'hidden');
         await evaluate("document.querySelector('#background').focus()");
@@ -227,6 +245,47 @@ try {
     await evaluate('cleanupEditor()');
     assert.equal(await evaluate("document.documentElement.style.overflow"), '', 'Disposal restores page scrolling.');
     console.log('PASS: busy fallback focus and disposal cleanup');
+    // Field-only editors stay inside their owner's form, with independent controls/state.
+    await evaluate(`(async () => {
+        const { initializeSplitter, setFullscreen, dispose } = await import('/module.js');
+        const form = document.createElement('form'); document.body.append(form);
+        window.parentSubmits = 0; form.onsubmit = event => { event.preventDefault(); parentSubmits++; };
+        window.fields = [0, 1].map(index => {
+            const field = document.createElement('dialog'); field.open = true;
+            field.className = 'description-editor-shell field-only';
+            field.append(root.querySelector('.description-editor-content').cloneNode(true));
+            field.querySelector('textarea').disabled = false;
+            field.querySelector('textarea').value = 'Independent draft ' + index;
+            form.append(field); initializeSplitter(field);
+            field.querySelector('[data-markdown-fullscreen-toggle]').onclick = () => setFullscreen(field, !field.matches(':modal'));
+            field.querySelector('#arrangement').onclick = () => field.querySelector('.description-layout').className = 'description-layout stacked';
+            field.addEventListener('cancel', event => { event.preventDefault(); setFullscreen(field, false); });
+            return field;
+        });
+        window.disposeFields = () => { fields.forEach(dispose); form.remove(); };
+    })()`);
+    for (const width of [1280, 390]) {
+        await command('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+        await evaluate('fields[0].querySelector("textarea").style.height = "510px"');
+        await waitFor('Math.abs(fields[0].querySelector(".description-source").getBoundingClientRect().height - fields[0].querySelector(".description-preview").getBoundingClientRect().height) < 1');
+        const otherHeight = await evaluate('fields[1].querySelector("textarea").clientHeight');
+        await evaluate('fields[0].querySelector("[data-markdown-fullscreen-toggle]").click()');
+        await waitFor('fields[0].matches(":modal")');
+        assert.equal(await evaluate('fields[0].getBoundingClientRect().width'), width);
+        assert.equal(await evaluate('fields[0].getBoundingClientRect().height'), 800);
+        assert.ok(await evaluate('fields[0].querySelector(".description-layout").clientHeight > 650'), 'Field-only panes fill fullscreen.');
+        await key('Escape', 'Escape', 27);
+        await waitFor('!fields[0].matches(":modal")');
+        assert.equal(await evaluate('fields[0].querySelector("textarea").value'), 'Independent draft 0');
+        assert.equal(await evaluate('fields[1].querySelector("textarea").clientHeight'), otherHeight);
+        assert.equal(await evaluate('fields[0].querySelector("textarea").style.height'), '510px');
+        assert.equal(await evaluate('document.activeElement === fields[0].querySelector("[data-markdown-fullscreen-toggle]")'), true);
+        assert.equal(await evaluate('parentSubmits'), 0, 'Display controls must not submit the owner form.');
+        assert.equal(await evaluate('fields[0].querySelector("form")'), null, 'No nested forms.');
+    }
+    await evaluate('fields[1].querySelector("[data-markdown-fullscreen-toggle]").click(); disposeFields()');
+    assert.equal(await evaluate('document.documentElement.style.overflow'), '');
+    console.log('PASS: multiple field-only editors, resize/fullscreen geometry, independent drafts, form ownership, focus and disposal');
     // Optional end-to-end pass against a separately started disposable app/database.
     // Credentials are supplied only via environment, never printed by these checks.
     if (process.env.RETRAVION_FULLSCREEN_APP_URL) {
@@ -270,6 +329,19 @@ try {
         await waitFor("!document.querySelector('dialog').matches(':modal') && document.querySelector('dialog').getAttribute('role') === 'group'");
         await waitFor("document.activeElement.hasAttribute('data-markdown-fullscreen-toggle')");
         assert.equal(await evaluate('actualEditor === document.querySelector("textarea")'), true);
+        await evaluate(`const idLabel = [...document.querySelectorAll('label')].find(label => label.textContent.trim().startsWith('Product ID'));
+            const idInput = document.getElementById(idLabel.htmlFor); idInput.value = 'EDITOR-BROWSER-001';
+            idInput.dispatchEvent(new Event('change', { bubbles: true }));`);
+        const kindPosition = await evaluate(`(() => {
+            const label = [...document.querySelectorAll('label')].find(label => label.textContent.trim().replace('*','').trim() === 'Kind');
+            const input = document.getElementById(label.htmlFor); input.scrollIntoView({block:'center'});
+            const rect = input.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        })()`);
+        await command('Input.dispatchMouseEvent', { type: 'mousePressed', ...kindPosition, button: 'left', clickCount: 1 });
+        await command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...kindPosition, button: 'left', clickCount: 1 });
+        await waitFor('[...document.querySelectorAll(".mud-list-item")].some(item => item.textContent.trim() === "System")');
+        await evaluate('[...document.querySelectorAll(".mud-list-item")].find(item => item.textContent.trim() === "System").click()');
+        await delay(200);
         await evaluate("document.querySelector('[data-markdown-fullscreen-toggle]').click()");
         await waitFor("document.querySelector('dialog').matches(':modal')");
         await evaluate(`const invalidNameLabel = [...document.querySelectorAll('label')].find(label => label.textContent.trim().replace('*','').trim() === 'Name');
@@ -312,6 +384,63 @@ try {
         await waitFor("location.pathname === '/products/details'");
         assert.equal(await evaluate("document.documentElement.style.overflow"), '', 'Cancel navigation cleans modal scroll lock.');
         console.log('PASS: actual Blazor Product create/edit, Escape, same textarea, failed-create feedback, save/cancel navigation and cleanup');
+        // Exercise the rendered shared editor on real full-page and embedded-field callers.
+        for (const entity of ['features', 'user-needs', 'test-cases']) {
+            let editQuery;
+            for (const mode of ['create', 'edit']) {
+                const route = new URL(`/${entity}/${mode}`, app);
+                route.search = mode === 'create' ? new URLSearchParams({ product: productId }).toString() : editQuery;
+                await command('Page.navigate', { url: route.href });
+                await command('Page.bringToFront');
+                await waitFor('Boolean(document.querySelector("[role=separator][aria-valuetext]"))');
+                if (mode === 'create') {
+                    await evaluate(`(() => {
+                        for (const [labelText, value] of [['Title', 'Shared editor browser test'], ['User Need ID', 'UN-EDITOR-001']]) {
+                            const label = [...document.querySelectorAll('label')].find(label => label.textContent.trim().startsWith(labelText));
+                            if (!label) continue;
+                            const input = document.getElementById(label.htmlFor); input.value = value;
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    })()`);
+                    if (entity === 'test-cases') {
+                        await evaluate('[...document.querySelectorAll("button")].find(button => button.textContent.trim() === "Add step").click()');
+                        await waitFor('document.querySelectorAll(".description-editor-shell").length === 4');
+                        await waitFor('document.querySelectorAll("[role=separator][aria-valuetext]").length === 4');
+                    }
+                }
+                const count = await evaluate('document.querySelectorAll(".description-editor-shell").length');
+                assert.equal(count, entity === 'test-cases' ? 4 : 1);
+                for (let index = 0; index < count; index++) {
+                    const draft = `## ${entity} ${mode} field ${index}`;
+                    await evaluate(`window.activeShell = document.querySelectorAll('.description-editor-shell')[${index}];
+                        window.activeTextarea = activeShell.querySelector('textarea');
+                        activeTextarea.value = ${JSON.stringify(draft)};
+                        activeTextarea.dispatchEvent(new Event('input', { bubbles: true }));`);
+                    await delay(200); // Allow the server-side binding/preview render to finish before resizing.
+                    await evaluate('activeTextarea.style.height = "530px"');
+                    await waitFor('Math.abs(activeShell.querySelector(".description-source").getBoundingClientRect().height - activeShell.querySelector(".description-preview").getBoundingClientRect().height) < 1');
+                    await evaluate('activeShell.querySelector("[aria-label=Stacked]").click()');
+                    await waitFor('Boolean(activeShell.querySelector(".description-layout.stacked"))');
+                    await evaluate('activeShell.querySelector("[data-markdown-fullscreen-toggle]").click()');
+                    await waitFor('activeShell.matches(":modal")');
+                    assert.deepEqual(await evaluate('({width: activeShell.getBoundingClientRect().width, height: activeShell.getBoundingClientRect().height})'), { width: 1280, height: 800 });
+                    assert.ok(await evaluate('activeShell.querySelector(".description-layout").getBoundingClientRect().height > 400'), 'Actual panes expand inside the fullscreen shell.');
+                    await key('Escape', 'Escape', 27);
+                    await waitFor('!activeShell.matches(":modal") && activeShell.querySelector("[data-markdown-fullscreen-toggle]").getAttribute("aria-busy")?.toLowerCase() !== "true"');
+                    assert.equal(await evaluate('activeTextarea === activeShell.querySelector("textarea")'), true);
+                    assert.equal(await evaluate('activeTextarea.value'), draft);
+                    assert.equal(await evaluate('activeTextarea.style.height'), '530px');
+                }
+                await delay(200); // Finish the fullscreen-exit render before submitting the owner form.
+                const formId = { features: 'feature-form', 'user-needs': 'user-need-form', 'test-cases': 'test-case-form' }[entity];
+                await evaluate(`document.getElementById(${JSON.stringify(formId)}).requestSubmit()`);
+                await waitFor(`location.pathname === '/${entity}/details'`);
+                editQuery = await evaluate('location.search');
+                await waitFor(`document.body.textContent.includes('${entity} ${mode} field 0')`);
+                assert.equal(await evaluate('document.documentElement.style.overflow'), '');
+                console.log(`PASS: actual Blazor ${entity} ${mode}: all ${count} Markdown fields resize/orient/fullscreen, retain drafts and save`);
+            }
+        }
     }
     await command('Browser.close');
 } finally {

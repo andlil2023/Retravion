@@ -24,7 +24,23 @@
     color: var(--mud-palette-text-primary);
 }
 .description-editor-shell.is-fullscreen::backdrop { background: var(--mud-palette-background); }
-.is-fullscreen .description-preview { max-height: 70dvh; }
+/* Fill the viewport with the editing surface, not just the dialog background. */
+.description-editor-shell.is-fullscreen { display: flex; flex-direction: column; gap: 1rem; }
+.is-fullscreen ::deep .product-card,
+.is-fullscreen form,
+.is-fullscreen .description-editor-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+.is-fullscreen form ::deep > :not(.description-editor-content) { flex: 0 0 auto; }
+.is-fullscreen .description-toolbar { flex-shrink: 0; }
+.is-fullscreen .description-layout { flex: 1; min-height: 20rem; grid-template-rows: minmax(0, 1fr); }
+.is-fullscreen .description-layout.stacked { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.is-fullscreen .description-source { align-self: stretch; display: flex; flex-direction: column; min-height: 0; }
+.is-fullscreen .description-source textarea { flex: 1; min-height: 0; resize: none; }
+.is-fullscreen .description-preview { block-size: auto; min-height: 0; }
 .description-toolbar {
     display: flex;
     align-items: center;
@@ -42,9 +58,7 @@
 .description-layout.side-by-side {
     grid-template-columns: minmax(0, var(--markdown-source-width, 1fr)) 1.5rem minmax(0, var(--markdown-preview-width, 1fr));
 }
-.description-layout.field-only { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.field-only .description-source textarea { min-height: 10rem; }
-.field-only .description-preview { block-size: 14rem; }
+.field-only:not(.is-fullscreen) .description-source textarea { min-height: 10rem; }
 .description-splitter {
     position: relative;
     cursor: col-resize;
@@ -69,12 +83,13 @@
 .description-source, .description-preview { min-width: 0; padding: 1.25rem 1.5rem; }
 /* Live diagram loading must not resize the editor or toggle the page scrollbar. */
 .description-preview {
-    block-size: 26rem;
+    block-size: var(--markdown-pane-height, 26rem);
     box-sizing: border-box;
     overflow-wrap: anywhere;
     overflow: auto;
     scrollbar-gutter: stable;
 }
+.description-source { align-self: start; }
 .description-source label, .description-preview h3 {
     display: block;
     margin: 0 0 1rem;
@@ -100,5 +115,6 @@
     .description-toolbar { flex-wrap: wrap; }
     .description-splitter { display: none; }
     .description-layout.side-by-side { grid-template-columns: minmax(0, 1fr); }
+    .is-fullscreen .description-layout.side-by-side { grid-template-rows: repeat(2, minmax(0, 1fr)); }
     .description-preview { border-left: 0; border-top: 1px solid var(--mud-palette-divider); }
 }

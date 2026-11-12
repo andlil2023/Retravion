@@ -189,7 +189,7 @@ public sealed class ProductDescriptionEditorTests
     }
 
     [Fact]
-    public async Task FieldOnlyEditorHasUniqueControlIdentityLivePreviewAndNoFormOrFullscreenSideEffects()
+    public async Task FieldOnlyEditorHasSharedControlsLivePreviewAndNoNestedForm()
     {
         var js = new RecordingJS();
         await using var services = new ServiceCollection().AddLogging().AddMudServices()
@@ -208,8 +208,15 @@ public sealed class ProductDescriptionEditorTests
             };
             await renderer.Mount(parameters);
             renderer.AssertAttribute("id", "unique-action"); renderer.AssertAttribute("for", "unique-action");
-            renderer.AssertNoElement("form"); renderer.AssertNoElement("dialog");
-            Assert.DoesNotContain(js.Calls, call => call.Name is "initializeSplitter" or "setFullscreen");
+            renderer.AssertNoElement("form");
+            renderer.AssertToolbarOrder();
+            Assert.Single(js.Calls, call => call.Name == "initializeSplitter");
+            Assert.DoesNotContain(js.Calls, call => call.Name == "setFullscreen");
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Stacked");
+            renderer.AssertLayout("stacked");
+            await renderer.Event("button", "onclick", new MouseEventArgs(), "Fullscreen Markdown editor");
+            renderer.AssertAttribute("aria-modal", "true");
+            Assert.Contains(js.Calls, call => call.Name == "setFullscreen" && Equals(call.Args![1], true));
             await renderer.Event("textarea", "oninput", new ChangeEventArgs { Value = "**Action**" });
             Assert.Contains("<strong>Action</strong>", renderer.Markup());
             Assert.Equal(new[] { "**Action**" }, changed);
@@ -222,6 +229,12 @@ public sealed class ProductDescriptionEditorTests
             await renderer.Render(parameters);
             await renderer.Event("textarea", "oninput", new ChangeEventArgs { Value = "Blocked" });
             Assert.Single(changed);
+            await renderer.Event("dialog", "oncancel", EventArgs.Empty);
+            renderer.AssertAttribute("role", "group");
+            renderer.AssertLayout("stacked");
+            Assert.Contains("<strong>Action</strong>", renderer.Markup());
+            Assert.Contains(js.Calls, call => call.Name == "setFullscreen" && Equals(call.Args![1], false));
+            renderer.AssertNoElement("form");
         });
         Assert.Empty(renderer.Errors);
     }
