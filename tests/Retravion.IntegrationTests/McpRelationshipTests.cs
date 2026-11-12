@@ -27,7 +27,7 @@ public sealed partial class AccountManagementTests
         var tool = Assert.Single(tools, t => t.GetProperty("name").GetString() == "explore_relationships");
         Assert.True(tool.GetProperty("annotations").GetProperty("readOnlyHint").GetBoolean());
         Assert.Equal(new[] { "kind", "internalId", "versionId" }, tool.GetProperty("inputSchema").GetProperty("required").EnumerateArray().Select(v => v.GetString()));
-        Assert.DoesNotContain(tools, t => t.GetProperty("name").GetString()!.Contains("link", StringComparison.Ordinal));
+        Assert.Single(tools, t => t.GetProperty("name").GetString() == "change_draft_link");
         var valid = new Dictionary<string, object?> { ["kind"] = "requirement", ["internalId"] = Guid.NewGuid(), ["versionId"] = Guid.NewGuid() };
         async Task Reject(object arguments)
         {

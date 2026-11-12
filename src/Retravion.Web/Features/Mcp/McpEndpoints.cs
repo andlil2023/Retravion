@@ -14,6 +14,7 @@ internal static class McpEndpoints
     private const int MaxBodyBytes = 1024 * 1024;
     private static readonly Dictionary<string, string[]> Arguments = new(StringComparer.Ordinal)
     {
+        ["change_draft_link"] = ["ownerKind", "ownerId", "ownerVersionId", "expectedRevision", "relationship", "operation", "targetId", "targetVersionId", "confirmed", "replacementVersionId"],
         ["explore_relationships"] = ["kind", "internalId", "versionId", "expandedVersionIds", "limit"],
         ["list_features"] = ["productId"],
         ["read_feature"] = ["internalId", "versionId"],
@@ -221,6 +222,9 @@ internal static class McpEndpoints
                 tool = name.GetString();
             if (!allowed || !transportAllowed)
             {
+                if (tool == "change_draft_link")
+                    await context.RequestServices.GetRequiredService<RequirementOperations>().DeniedMcpMutation(context.User,
+                        "relationship.change", context.RequestAborted);
                 if (tool is "create_draft_user_need" or "edit_draft_user_need")
                     await context.RequestServices.GetRequiredService<UserNeedOperations>().DeniedMcpMutation(context.User,
                         tool == "create_draft_user_need" ? "need.create" : "need.edit", context.RequestAborted);
@@ -252,6 +256,12 @@ internal static class McpEndpoints
             }
             if (tool is "list_features" or "read_feature" or "create_draft_feature" or "edit_draft_feature" &&
                 (!parameters.TryGetProperty("arguments", out var featureArguments) || !ValidFeatureArguments(tool, featureArguments)))
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+            if (tool == "change_draft_link" &&
+                (!parameters.TryGetProperty("arguments", out var mutationArguments) || !RelationshipMutationMcpTools.ValidArguments(mutationArguments)))
             {
                 context.Response.StatusCode = 400;
                 return;

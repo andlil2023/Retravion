@@ -154,7 +154,7 @@ public sealed partial class AccountManagementTests
         using var scope = host.Factory.Services.CreateScope();
         Assert.True((await scope.ServiceProvider.GetRequiredService<UserNeedOperations>().EditDraft(principal, Guid.NewGuid(), 1, "ID", "secret", "secret")).IsFailure);
         await host.Authenticate();
-        Assert.Equal(19, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(20, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
         settings.Unavailable = true;
         using (var unavailable = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, unavailable.StatusCode);
         using (var unavailableIssue = await host.Issue()) Assert.Equal(HttpStatusCode.Forbidden, unavailableIssue.StatusCode);
@@ -255,7 +255,7 @@ public sealed partial class AccountManagementTests
                 "list_requirements", "read_requirement", "create_draft_requirement", "edit_draft_requirement",
                 "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case",
                 "list_features", "read_feature", "create_draft_feature", "edit_draft_feature" }) Assert.Contains($"`{tool}`", skill);
-            Assert.Equal("2.4.0", TerminalPackages.Version);
+            Assert.Equal("2.5.0", TerminalPackages.Version);
             Assert.Equal($"retravion-{client}-{TerminalPackages.Version}.zip", bundle.FileName);
             Assert.Contains($"/packages/{TerminalPackages.Version}/{client}", bundle.DownloadPath);
             Assert.Contains($"integration {TerminalPackages.Version}", skill);
@@ -268,7 +268,7 @@ public sealed partial class AccountManagementTests
             Assert.Contains("preserve the current rationale unless the user explicitly approves", skill);
             Assert.Contains("Do not edit a historical version", skill);
             Assert.Contains("Do not submit for review, approve, reject, reopen, return to Draft, create successor versions, release, retire/reactivate, delete or mutate Product data", skill);
-            Assert.Contains("Relationship/link writes, classification changes and lifecycle operations are not supported", skill);
+            Assert.Contains("Provenance writes, classification changes and lifecycle operations are not supported", skill);
             Assert.Contains("Optional `title`, `description`, `preconditions` and `steps` default to empty", skill);
             Assert.Contains("server generates the Product-scoped manual `id`", skill);
             Assert.Contains("ordered array of objects", skill);
@@ -325,7 +325,7 @@ public sealed partial class AccountManagementTests
         host.SetToken(host.DeviceCode);
         using (var denied = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         await host.Authenticate();
-        Assert.Equal(19, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(20, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
     }
 
     [Fact]

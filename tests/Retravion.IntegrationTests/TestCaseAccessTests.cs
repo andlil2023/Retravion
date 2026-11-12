@@ -146,7 +146,7 @@ public sealed partial class AccountManagementTests
         { Calls++; throw new InvalidOperationException(); }
         public Task<Result<TestCaseSnapshot>> Reopen(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
+        public Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null)
         { Calls++; throw new InvalidOperationException(); }
         public Task<Result<TestCaseSnapshot>> Create(Guid productInternalId, TestCaseContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? areaId = null, Guid? operationId = null, Func<Task<bool>>? authorized = null)
         { Calls++; throw new InvalidOperationException(); }

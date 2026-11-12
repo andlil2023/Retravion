@@ -56,6 +56,7 @@ builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = "Re
     .WithTools<RequirementMcpTools>()
     .WithTools<FeatureMcpTools>()
     .WithTools<RelationshipMcpTools>()
+    .WithTools<RelationshipMutationMcpTools>()
     .WithTools<TestCaseMcpTools>();
 builder.Services.AddScoped<AuthenticationStateProvider, SessionAuthenticationStateProvider>();
 builder.Services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)

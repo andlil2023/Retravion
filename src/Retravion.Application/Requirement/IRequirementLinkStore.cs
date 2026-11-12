@@ -21,15 +21,15 @@ public interface IRequirementLinkStore
     Task<Result<Maybe<RequirementParentLink>>> Parent(Guid requirementInternalId, Guid versionId,
         CancellationToken cancellationToken = default);
     Task<Result<RequirementSnapshot>> AddParent(RequirementSnapshot expected, RequirementParentLink target,
-        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null);
     Task<Result<RequirementSnapshot>> RemoveParent(RequirementSnapshot expected, AuditActor actor,
-        DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null);
     Task<Result<RequirementSnapshot>> ReplaceParent(RequirementSnapshot expected, RequirementParentLink target,
-        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null);
     /// <summary>Atomically change an existing link to another exact version of the same User Need.</summary>
     Task<Result<RequirementSnapshot>> RetargetLink(RequirementSnapshot expected, RequirementUserNeedLink target,
         RequirementUserNeedLink replacement, AuditActor actor, DateTimeOffset occurredAt,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null);
     Task<Result<RequirementSnapshot>> ChangeLink(RequirementSnapshot expected, RequirementUserNeedLink target, bool add,
-        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default);
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null);
 }

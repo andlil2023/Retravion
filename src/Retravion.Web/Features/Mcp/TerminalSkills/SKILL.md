@@ -3,7 +3,7 @@ name: retravion
 description: Read Retravion Products, User Needs, Requirements, Test Cases and Features, and prepare or apply supported Draft changes through authenticated MCP. Use when the user asks to work with these records from an AI terminal.
 ---
 
-# Retravion workflow — integration 2.4.0
+# Retravion workflow — integration 2.5.0
 
 ## Connect safely
 
@@ -35,7 +35,7 @@ Do not attempt to bypass the gate or retry mutations to fix authorization.
 
 Use `explore_relationships` with `kind` (`user-need`, `requirement`, `test-case`, `feature`), immutable `internalId` and required exact `versionId` from a read response. Never substitute the latest version. The root returns direct incoming/outgoing edges: owner-to-target (copy-to-source for provenance), exact endpoint statuses, Product identity and newer-version indicators. These do not grant permission to edit.
 
-Only explicitly requested reachable `expandedVersionIds` load additional neighborhoods (at most 20 IDs; repeats load once). Reissue with the chosen expansion set or explicitly select a new exact root to focus elsewhere. `limit` defaults to 100, range 1–200, and separately caps edges and unavailable snapshots. Always report `truncated`, omitted counts and unexpanded IDs; never describe a bounded neighborhood as complete traceability or infer that hidden links are absent. Unavailable provenance is only a stored copy-time snapshot, not a live source or expandable endpoint. It grants no additional access. No relationship mutations are supported.
+Only explicitly requested reachable `expandedVersionIds` load additional neighborhoods (at most 20 IDs; repeats load once). Reissue with the chosen expansion set or explicitly select a new exact root to focus elsewhere. `limit` defaults to 100, range 1–200, and separately caps edges and unavailable snapshots. Always report `truncated`, omitted counts and unexpanded IDs; never describe a bounded neighborhood as complete traceability or infer that hidden links are absent. Unavailable provenance is only a stored copy-time snapshot, not a live source or expandable endpoint. It grants no additional access. This exploration tool never mutates relationships; separately approved ordinary Draft link authoring is described below.
 
 ## Review exact versions — read-only
 
@@ -72,7 +72,7 @@ AI review is read-only, including review of a Draft. A review request never auth
 - Requirement edits replace content: send `internalId`, `expectedRevision`, `id`, `title`, `statement`, `type` and optional `rationale`. Omitted/null rationale clears it; preserve the current rationale unless the user explicitly approves clearing or replacing it.
 - For a Test Case edit, read its current working Draft first. Send its immutable `internalId`, exact working `versionId`, positive returned `revision` as `expectedRevision`, and all of `title`, `description`, `preconditions` and `steps`. This fully replaces content: preserve every field and step not explicitly approved for change. Do not edit a historical version. Existing identities, classification and links are preserved.
 - Show the proposed initial values or old/new content in the terminal and obtain explicit human approval before calling a mutation tool. Approval to discuss or draft is not approval to save.
-- Use only `create_draft_user_need`, `edit_draft_user_need`, `create_draft_requirement`, `edit_draft_requirement`, `create_draft_test_case`, `edit_draft_test_case`, `create_draft_feature` and `edit_draft_feature` for writes. Creation produces a Draft under an active Product; edits require an active Product and a Draft working version.
+- Use only `create_draft_user_need`, `edit_draft_user_need`, `create_draft_requirement`, `edit_draft_requirement`, `create_draft_test_case`, `edit_draft_test_case`, `create_draft_feature`, `edit_draft_feature` and the bounded `change_draft_link` workflow below for writes. Creation produces a Draft under an active Product; edits require an active Product and a Draft working version.
 - Do not submit for review, approve, reject, reopen, return to Draft, create successor versions, release, retire/reactivate, delete or mutate Product data. These operations are not provided by this integration.
 - AI review is read-only. A review request never authorizes a save or automatic application of findings. Humans apply suggestions and review decisions in the web UI; ordinary Draft authoring is a separate, explicitly approved workflow.
 - Never supply an actor identity or status to a write. Retravion authenticates the actor and enforces its own authorization, validation, concurrency and audit rules.
@@ -80,8 +80,16 @@ AI review is read-only, including review of a Draft. A review request never auth
 - Do not automatically retry any mutation. An uncertain commit, timeout or lost response does not prove rollback. List/read the affected User Need, Requirement, Test Case or Feature to establish what persisted before the user decides whether to retry manually; creating again without checking may duplicate work. After uncertain Test Case or Feature creation, list/read candidate records; if the result remains ambiguous, do not blindly recreate.
 - After confirmed success, summarize the resulting manual ID and values. Conversation approval is not lifecycle approval or an electronic signature.
 
+## Ordinary Draft link authoring — never in review mode
+
+Read the exact owner and target before proposing a change. Use `change_draft_link` only after explicit human approval naming the relationship, owner and exact old/new endpoints. Set `confirmed=true` only for that approved proposal. Use `ownerKind` (`requirement`, `test-case`, `feature`), `ownerId`, `ownerVersionId` and the owner's returned positive `revision` as `expectedRevision`.
+
+Supported `relationship` values are `user-need` (Requirement → User Need), `parent` (child → parent Requirement), `verifies` (Test Case → Requirement), and `addresses` (Feature → Requirement). Use `operation=add` or `remove` with `targetId` and exact `targetVersionId`; for `retarget` these identify the old endpoint and `replacementVersionId` identifies another version of the same target entity. Omit the replacement for add/remove. No entity creation, provenance editing or lifecycle transition is implied. Different-parent replacement is not supported by this tool; use the web UI's atomic replacement, never emulate it with remove/add.
+
+Only current eligible Draft owners in active Products can change links. Same-Product, cardinality, hierarchy, exact-version and released-version rules still apply. Never infer approval from a newer-version indicator. After success, read the owner again before another action. After stale/failed/uncertain results, do not retry automatically: retrieve authorized current content and relationships, show what persisted, and obtain fresh approval before a human-directed retry. Review findings and review decisions remain human-applied in the web UI.
+
 ## Capabilities and evolution
 
-This version supports read-only Products, exact-version relationship exploration, and User Need, Requirement, Test Case and Feature reads/Draft writes. Relationship/link writes, classification changes and lifecycle operations are not supported by this skill, even if the bridge lists other tools. It grants no permissions and does not add tools to the server.
+This version supports read-only Products, exact-version relationship exploration, and User Need, Requirement, Test Case and Feature reads/Draft writes. Provenance writes, classification changes and lifecycle operations are not supported by this skill, even if the bridge lists other tools. It grants no permissions and does not add tools to the server.
 Future entities require a new explicitly supported integration version; do not invent tool names or infer capability from a roadmap.
 Manual updates and removal are described in the bundled README.

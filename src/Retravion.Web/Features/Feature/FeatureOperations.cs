@@ -86,7 +86,7 @@ internal sealed class FeatureOperations(IAuthorizationService authorization, Ses
         Change(principal, "feature.reopen", (actor, now) => changes.Reopen(expected, reason, actor, now, token, () => Allowed(principal)), token);
     public Task<Result<FeatureSnapshot>> ChangeLink(ClaimsPrincipal principal, FeatureSnapshot expected, string operation, FeatureRequirementLink target, FeatureRequirementLink? replacement, CancellationToken token = default) =>
         Change(principal, operation switch { "add" => "feature.link.add", "remove" => "feature.link.remove", "retarget" => "feature.link.retarget", _ => "feature.link" },
-            (actor, now) => changes.ChangeLink(expected, operation, target, replacement, actor, now, token, () => Allowed(principal)), token);
+            (actor, now) => changes.ChangeLink(expected, operation, target, replacement, actor, now, token, () => LiveAuthority(principal)), token);
     public Task<Result<FeatureSnapshot>> CreateSuccessor(ClaimsPrincipal principal, FeatureSnapshot expected, string? reason, CancellationToken token = default, Guid? operationId = null) =>
         Change(principal, "feature.version.create", (actor, now) => changes.CreateSuccessor(expected, reason, actor, now, token, operationId, () => Allowed(principal)), token);
     public async Task<Result<IReadOnlyList<FeatureSnapshot>>> List(ClaimsPrincipal principal, Guid product, CancellationToken token = default) =>

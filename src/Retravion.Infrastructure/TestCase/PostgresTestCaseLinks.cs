@@ -12,7 +12,7 @@ namespace Retravion.Infrastructure.TestCase;
 public sealed partial class PostgresTestCaseStore
 {
     public Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target,
-        TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
+        TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null) =>
         Mutate(expected, async (current, connection, transaction) =>
         {
             if (current.Status != "Draft") return Result.Failure<Case>("Only Draft Test Cases can change links.");
@@ -48,7 +48,7 @@ public sealed partial class PostgresTestCaseStore
         {
             "add" => "test-case.link.add", "remove" => "test-case.link.remove", "retarget" => "test-case.link.retarget",
             _ => "test-case.link"
-        }, operation switch { "add" => "LinkAdded", "remove" => "LinkRemoved", "retarget" => "LinkRetargeted", _ => null }, null, cancellationToken);
+        }, operation switch { "add" => "LinkAdded", "remove" => "LinkRemoved", "retarget" => "LinkRetargeted", _ => null }, null, cancellationToken, authorized: authorized);
 
     private static async Task<Result<RequirementState>> Target(NpgsqlConnection connection, NpgsqlTransaction transaction,
         Guid product, TestCaseRequirementLink endpoint, CancellationToken token)

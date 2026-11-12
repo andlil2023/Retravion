@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using CSharpFunctionalExtensions;
 using Retravion.Application.Requirement;
+using Retravion.Domain.Requirement;
 using Retravion.Application.Feature;
 using Retravion.Domain.Feature;
 using Retravion.Web.Features.Feature;
@@ -53,7 +54,7 @@ internal sealed record RelationshipExploration(RelationshipView Root, IReadOnlyL
         .DistinctBy(v => (v.Copy.VersionId, v.SourceVersionId)).ToArray();
 }
 
-// Shared composition of existing authorized feature contracts for web and read-only MCP exploration.
+// Shared composition of existing authorized feature contracts for web and MCP.
 internal sealed class RelationshipOperations(RequirementOperations requirements, UserNeedOperations needs, ProductOperations products,
     TestCaseOperations testCases, FeatureOperations features)
 {
@@ -133,6 +134,45 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
             return Result.Failure("Unsupported relationship change.");
         var changed = await Change(actor, owner.Snapshot, target, relationship, operation == "add", token);
         return changed.IsSuccess ? Result.Success() : Result.Failure(changed.Error);
+    }
+
+    internal async Task<Result> ChangeExact(ClaimsPrincipal actor, string ownerKind, Guid ownerId, Guid ownerVersionId,
+        long expectedRevision, string relationship, string operation, Guid targetId, Guid targetVersionId,
+        Guid? replacementVersionId, CancellationToken token)
+    {
+        async Task<Result> ReadFailure(string error)
+        {
+            if (error == "Access denied.") await requirements.DeniedMcpMutation(actor, "relationship.change", token);
+            return Result.Failure(error);
+        }
+        var owner = await Node(actor, ownerKind, ownerId, ownerVersionId, token);
+        if (owner.IsFailure) return await ReadFailure(owner.Error);
+        var revision = owner.Value.Snapshot?.Revision ?? owner.Value.TestCaseSnapshot?.Revision ?? owner.Value.FeatureSnapshot?.Revision;
+        if (revision != expectedRevision) return Result.Failure("The owner changed. Retrieve it again before editing.");
+        if (!owner.Value.Editable) return Result.Failure("Only the current editable Draft owner can change links.");
+        var targetKind = relationship == NeedRelationship ? "user-need" : "requirement";
+        var target = await Node(actor, targetKind, targetId, targetVersionId, token);
+        if (target.IsFailure) return await ReadFailure(target.Error);
+        RelationshipNode? replacement = null;
+        if (replacementVersionId is { } version)
+        {
+            var found = await Node(actor, targetKind, targetId, version, token);
+            if (found.IsFailure) return await ReadFailure(found.Error);
+            replacement = found.Value;
+        }
+        if (target.Value.ProductInternalId != owner.Value.ProductInternalId ||
+            replacement is not null && replacement.ProductInternalId != owner.Value.ProductInternalId)
+            return Result.Failure("Ordinary links must belong to the same Product.");
+        // RemoveParent has no endpoint argument: verify the explicitly confirmed old endpoint first.
+        // The transaction then checks the captured owner revision, so a concurrent replacement cannot be removed.
+        if (relationship == ParentRelationship && operation == "remove")
+        {
+            var parent = await requirements.Parent(actor, ownerId, ownerVersionId, token);
+            if (parent.IsFailure) return await ReadFailure(parent.Error);
+            if (parent.Value.HasValue && parent.Value.Value != new RequirementParentLink(targetId, targetVersionId))
+                return Result.Failure("The original parent link changed. Retrieve it again.");
+        }
+        return await Change(actor, owner.Value, target.Value, relationship, operation, replacement, token);
     }
 
     internal Task<Result<RequirementSnapshot>> Change(ClaimsPrincipal actor, RequirementSnapshot owner,

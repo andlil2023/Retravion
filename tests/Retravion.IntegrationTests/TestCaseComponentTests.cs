@@ -350,8 +350,8 @@ public sealed partial class PostgresProductTests
         { Calls++; return Store.CreateSuccessor(expected, reason, actor, occurredAt, cancellationToken, operationId, authorized); }
         public Task<Result<TestCaseSnapshot>> Reopen(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
         { Calls++; return Store.Reopen(expected, reason, actor, occurredAt, cancellationToken); }
-        public Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default)
-        { Calls++; return Store.ChangeLink(expected, operation, target, replacement, actor, occurredAt, cancellationToken); }
+        public Task<Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null)
+        { Calls++; return Store.ChangeLink(expected, operation, target, replacement, actor, occurredAt, cancellationToken, authorized); }
     }
     private sealed class CaseAuthentication(ClaimsPrincipal principal) : AuthenticationStateProvider
     { public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(new AuthenticationState(principal)); }

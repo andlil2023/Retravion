@@ -362,7 +362,7 @@ public sealed partial class PostgresProductTests
         public Task<CSharpFunctionalExtensions.Result<TestCaseSnapshot>> Review(TestCaseSnapshot expected, string decision, string? comment, AuditActor actor, DateTimeOffset time, CancellationToken token = default) => throw new NotSupportedException();
         public Task<CSharpFunctionalExtensions.Result<TestCaseSnapshot>> Reopen(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default) => throw new NotSupportedException();
         public Task<CSharpFunctionalExtensions.Result<TestCaseSnapshot>> CreateSuccessor(TestCaseSnapshot expected, string? reason, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) => throw new NotSupportedException();
-        public Task<CSharpFunctionalExtensions.Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset time, CancellationToken token = default) => throw new NotSupportedException();
+        public Task<CSharpFunctionalExtensions.Result<TestCaseSnapshot>> ChangeLink(TestCaseSnapshot expected, string operation, TestCaseRequirementLink target, TestCaseRequirementLink? replacement, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Func<Task<bool>>? authorized = null) => throw new NotSupportedException();
     }
 
     [PostgresFact]

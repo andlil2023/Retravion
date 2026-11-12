@@ -55,7 +55,7 @@ public sealed partial class AccountManagementTests
         var token = await host.Authenticate();
         Assert.Equal(64, token.Length);
         var tools = await host.Rpc("tools/list");
-        Assert.Equal(new[] { "create_draft_feature", "create_draft_requirement", "create_draft_test_case", "create_draft_user_need", "edit_draft_feature", "edit_draft_requirement", "edit_draft_test_case", "edit_draft_user_need", "explore_relationships", "list_features", "list_products", "list_requirements", "list_test_cases", "list_user_needs", "read_feature", "read_product", "read_requirement", "read_test_case", "read_user_need" },
+        Assert.Equal(new[] { "change_draft_link", "create_draft_feature", "create_draft_requirement", "create_draft_test_case", "create_draft_user_need", "edit_draft_feature", "edit_draft_requirement", "edit_draft_test_case", "edit_draft_user_need", "explore_relationships", "list_features", "list_products", "list_requirements", "list_test_cases", "list_user_needs", "read_feature", "read_product", "read_requirement", "read_test_case", "read_user_need" },
             tools.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).Order().ToArray());
         using (var origin = await host.Send("tools/list", origin: "https://evil.invalid")) Assert.Equal(HttpStatusCode.Forbidden, origin.StatusCode);
         host.Mcp.DefaultRequestHeaders.Host = "evil.invalid";
@@ -401,7 +401,7 @@ public sealed partial class AccountManagementTests
         Assert.Contains("Restart", readme);
         using var tools = JsonDocument.Parse(Read("bridge/tools.json"));
         var names = tools.RootElement.EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToArray();
-        Assert.Equal(19, names.Length);
+        Assert.Equal(20, names.Length);
         foreach (var tool in new[] { "explore_relationships", "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case", "list_features", "read_feature", "create_draft_feature", "edit_draft_feature" })
         {
             Assert.Contains(tool, names);
@@ -410,9 +410,9 @@ public sealed partial class AccountManagementTests
         }
         Assert.Contains("AI review is read-only", skill);
         Assert.Contains("A review request never authorizes a save", skill);
-        Assert.Contains("Relationship/link writes, classification changes and lifecycle operations are not supported", skill);
+        Assert.Contains("Provenance writes, classification changes and lifecycle operations are not supported", skill);
         Assert.DoesNotContain(names, name => name is not null &&
-            !(name == "explore_relationships" || name.StartsWith("list_", StringComparison.Ordinal) || name.StartsWith("read_", StringComparison.Ordinal) ||
+            !(name is "explore_relationships" or "change_draft_link" || name.StartsWith("list_", StringComparison.Ordinal) || name.StartsWith("read_", StringComparison.Ordinal) ||
               name.StartsWith("create_draft_", StringComparison.Ordinal) || name.StartsWith("edit_draft_", StringComparison.Ordinal)));
     }
 

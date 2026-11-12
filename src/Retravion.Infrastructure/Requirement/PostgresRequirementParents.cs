@@ -25,19 +25,19 @@ public sealed partial class PostgresRequirementStore
     }, cancellationToken, Result.Success(Maybe<RequirementParentLink>.None));
 
     public Task<Result<RequirementSnapshot>> AddParent(RequirementSnapshot expected, RequirementParentLink target,
-        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
-        ChangeParent(expected, target, "add", actor, occurredAt, cancellationToken);
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null) =>
+        ChangeParent(expected, target, "add", actor, occurredAt, cancellationToken, authorized);
 
     public Task<Result<RequirementSnapshot>> RemoveParent(RequirementSnapshot expected, AuditActor actor,
-        DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
-        ChangeParent(expected, Maybe<RequirementParentLink>.None, "remove", actor, occurredAt, cancellationToken);
+        DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null) =>
+        ChangeParent(expected, Maybe<RequirementParentLink>.None, "remove", actor, occurredAt, cancellationToken, authorized);
 
     public Task<Result<RequirementSnapshot>> ReplaceParent(RequirementSnapshot expected, RequirementParentLink target,
-        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
-        ChangeParent(expected, target, "replace", actor, occurredAt, cancellationToken);
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null) =>
+        ChangeParent(expected, target, "replace", actor, occurredAt, cancellationToken, authorized);
 
     private Task<Result<RequirementSnapshot>> ChangeParent(RequirementSnapshot expected, Maybe<RequirementParentLink> target,
-        string action, AuditActor actor, DateTimeOffset occurredAt, CancellationToken token)
+        string action, AuditActor actor, DateTimeOffset occurredAt, CancellationToken token, Func<Task<bool>>? authorized)
     {
         var editable = RequirementParentLinks.CanChange(expected.Requirement);
         if (editable.IsFailure || actor is not AuditActor.Identified || expected.Revision <= 0)
@@ -100,7 +100,7 @@ public sealed partial class PostgresRequirementStore
                         child.VersionId, child.VersionNumber, child.SourceVersionId, ParentRelationshipType: ParentRelationship,
                         BeforeParent: before.HasValue ? before.Value : null, AfterParent: target.HasValue ? target.Value : null)), token);
             return Result.Success(expected with { Revision = expected.Revision + 1 });
-        }, token);
+        }, token, authorized: authorized);
     }
 
     private static async Task<Maybe<RequirementParentLink>> LoadParent(NpgsqlConnection connection, NpgsqlTransaction transaction,
