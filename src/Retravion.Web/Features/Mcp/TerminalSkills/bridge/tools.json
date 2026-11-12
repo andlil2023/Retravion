@@ -1,5 +1,26 @@
 [
   {
+    "name": "list_revisions",
+    "description": "List Draft and Released Revisions for a Product manual ID, including retired Products. Returns immutable identities and exact explicit selections. Read-only; no preparation, selection or lifecycle changes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": { "productId": { "type": "string" } },
+      "required": ["productId"]
+    }
+  },
+  {
+    "name": "read_revision",
+    "description": "Read a Revision by Product manual ID and Revision immutable internalId. Draft members are the complete calculated outgoing closure; Released members are frozen retained evidence, including recorded area information. Explicit roots and indirect members remain distinct; multiple exact versions of one entity are preserved. Read-only; never substitutes current versions or changes a baseline.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "internalId": { "type": "string", "format": "uuid" }
+      },
+      "required": ["productId", "internalId"]
+    }
+  },
+  {
     "name": "change_draft_link",
     "description": "Change one ordinary link owned by the current editable Draft. Never use in review mode. Requires explicit human approval of relationship and exact owner/old/new endpoints, then confirmed=true. ownerKind: requirement, test-case or feature. relationship: user-need, parent, verifies or addresses (respectively Requirement–User Need, child–parent Requirement, Test Case–Requirement, Feature–Requirement). operation: add, remove or retarget. Supply ownerId, ownerVersionId and positive expectedRevision from a prior read, plus targetId and targetVersionId (old endpoint for retarget). Retarget requires replacementVersionId of the same target entity; omit otherwise. No creation, provenance or lifecycle changes. Never automatically retry; after any uncertain outcome retrieve authorized current state before a human-directed retry.",
     "inputSchema": {

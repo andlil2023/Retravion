@@ -154,7 +154,7 @@ public sealed partial class AccountManagementTests
         using var scope = host.Factory.Services.CreateScope();
         Assert.True((await scope.ServiceProvider.GetRequiredService<UserNeedOperations>().EditDraft(principal, Guid.NewGuid(), 1, "ID", "secret", "secret")).IsFailure);
         await host.Authenticate();
-        Assert.Equal(20, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(22, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
         settings.Unavailable = true;
         using (var unavailable = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, unavailable.StatusCode);
         using (var unavailableIssue = await host.Issue()) Assert.Equal(HttpStatusCode.Forbidden, unavailableIssue.StatusCode);
@@ -255,7 +255,7 @@ public sealed partial class AccountManagementTests
                 "list_requirements", "read_requirement", "create_draft_requirement", "edit_draft_requirement",
                 "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case",
                 "list_features", "read_feature", "create_draft_feature", "edit_draft_feature" }) Assert.Contains($"`{tool}`", skill);
-            Assert.Equal("2.5.0", TerminalPackages.Version);
+            Assert.Equal("2.6.0", TerminalPackages.Version);
             Assert.Equal($"retravion-{client}-{TerminalPackages.Version}.zip", bundle.FileName);
             Assert.Contains($"/packages/{TerminalPackages.Version}/{client}", bundle.DownloadPath);
             Assert.Contains($"integration {TerminalPackages.Version}", skill);
@@ -298,7 +298,7 @@ public sealed partial class AccountManagementTests
             Assert.DoesNotContain("rejectUnauthorized", everything);
             var readme = Read("README.md");
             Assert.Contains($"integration {TerminalPackages.Version}", readme);
-            Assert.Contains("Requirement and Test Case reads/Draft writes", readme);
+            Assert.Contains("Requirement, Test Case and Feature reads/Draft writes", readme);
             Assert.DoesNotContain("2.1.0", everything);
             Assert.Contains(client == "pi" ? ".pi/skills/retravion" : ".claude/skills/retravion", readme);
             Assert.Contains(client == "pi" ? "/skill:retravion" : "/retravion", readme);
@@ -325,7 +325,7 @@ public sealed partial class AccountManagementTests
         host.SetToken(host.DeviceCode);
         using (var denied = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         await host.Authenticate();
-        Assert.Equal(20, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(22, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
     }
 
     [Fact]

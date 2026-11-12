@@ -5,22 +5,27 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.Revision;
 using Retravion.Domain.Revision;
 using Retravion.Web.Features.Identity.Logout;
+using Retravion.Web.Features.Mcp;
 
 namespace Retravion.Web.Features.Revision;
 
 internal sealed class RevisionOperations(IAuthorizationService authorization, SessionTicketStore sessions,
     IRevisionStore store, IRevisionChangeTransaction changes, IAuditSubmission audit, TimeProvider time,
-    ILogger<RevisionOperations> logger)
+    ILogger<RevisionOperations> logger, McpCredentials mcpCredentials)
 {
     private async Task<bool> Allowed(ClaimsPrincipal principal) =>
         sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
         (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
 
+    internal async Task<bool> CanRead(ClaimsPrincipal principal) =>
+        await Allowed(principal) &&
+        (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || await mcpCredentials.IsAllowed(principal));
+
     private async Task<Result<T>> Read<T>(ClaimsPrincipal principal, Func<Task<Result<T>>> read)
     {
-        if (!await Allowed(principal)) return Result.Failure<T>("Access denied.");
+        if (!await CanRead(principal)) return Result.Failure<T>("Access denied.");
         var result = await read();
-        return await Allowed(principal) ? result : Result.Failure<T>("Access denied.");
+        return await CanRead(principal) ? result : Result.Failure<T>("Access denied.");
     }
 
     private async Task<Result<RevisionSnapshot>> Change(ClaimsPrincipal principal, string action,

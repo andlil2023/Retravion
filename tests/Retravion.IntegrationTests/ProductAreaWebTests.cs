@@ -167,7 +167,14 @@ public sealed partial class PostgresProductTests
         var original = (await requirements.Create(Requirement.Create(p.InternalId, "R", "Title", "Statement", RequirementType.System, areaId: area.Area.InternalId).Value, RevActor, RevTime)).Value;
         await using var host = RequirementMcpHost(new PostgresProductStore(db.ConnectionString), requirements, requirements);
         await host.Login(); await host.Replace(); await host.Authenticate();
-        var tools = await host.Rpc("tools/list"); Assert.DoesNotContain("area", tools.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        var tools = await host.Rpc("tools/list");
+        foreach (var tool in tools.GetProperty("tools").EnumerateArray())
+        {
+            // Revision reads now describe frozen area evidence, but no tool accepts area authoring.
+            Assert.DoesNotContain("area", tool.GetProperty("inputSchema").GetRawText(), StringComparison.OrdinalIgnoreCase);
+            if (tool.GetProperty("name").GetString() != "read_revision")
+                Assert.DoesNotContain("area", tool.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        }
         var result = await host.Call("edit_draft_requirement", new { internalId = original.Requirement.InternalId, expectedRevision = original.Revision, id = "R", title = "Changed", statement = "Statement", type = "System" });
         Assert.DoesNotContain("areaId", result.GetRawText(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(area.Area.InternalId, (await requirements.Find(original.Requirement.InternalId)).Value.Value.Requirement.AreaId);

@@ -55,6 +55,7 @@ builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = "Re
     .WithTools<ProductMcpTools>()
     .WithTools<RequirementMcpTools>()
     .WithTools<FeatureMcpTools>()
+    .WithTools<RevisionMcpTools>()
     .WithTools<RelationshipMcpTools>()
     .WithTools<RelationshipMutationMcpTools>()
     .WithTools<TestCaseMcpTools>();
