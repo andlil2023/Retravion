@@ -16,6 +16,8 @@ internal static class McpEndpoints
     {
         ["change_draft_link"] = ["ownerKind", "ownerId", "ownerVersionId", "expectedRevision", "relationship", "operation", "targetId", "targetVersionId", "confirmed", "replacementVersionId"],
         ["explore_relationships"] = ["kind", "internalId", "versionId", "expandedVersionIds", "limit"],
+        ["list_revisions"] = ["productId"],
+        ["read_revision"] = ["productId", "internalId"],
         ["list_features"] = ["productId"],
         ["read_feature"] = ["internalId", "versionId"],
         ["create_draft_feature"] = ["productId", "title", "description"],
@@ -256,6 +258,12 @@ internal static class McpEndpoints
             }
             if (tool is "list_features" or "read_feature" or "create_draft_feature" or "edit_draft_feature" &&
                 (!parameters.TryGetProperty("arguments", out var featureArguments) || !ValidFeatureArguments(tool, featureArguments)))
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+            if (tool is "list_revisions" or "read_revision" &&
+                (!parameters.TryGetProperty("arguments", out var revisionArguments) || !RevisionMcpTools.ValidArguments(tool, revisionArguments)))
             {
                 context.Response.StatusCode = 400;
                 return;
