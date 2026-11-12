@@ -7,7 +7,7 @@ namespace Retravion.Web.Features.Mcp;
 
 internal static class TerminalPackages
 {
-    internal const string Version = "2.6.0";
+    internal const string Version = "2.7.0";
     // Fixed embedded resources, never a directory walk or any user/credential/record content.
     private static readonly (string Resource, string Entry)[] Files =
     [

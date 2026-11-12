@@ -121,10 +121,16 @@ test("shipped exact relationship exploration forwards bounded arguments and resu
 	assert.deepEqual(forwarded, { name: "explore_relationships", arguments: args });
 });
 
-test("shipped Draft link writes forward exact confirmed endpoints once and preserve uncertainty", async () => {
+for (const tool of ["change_draft_link", "create_draft_revision", "edit_draft_revision", "change_draft_revision_selection"])
+test(`shipped ${tool} forwards confirmed arguments once and preserves uncertainty`, async () => {
 	const tools = JSON.parse(readFileSync(new URL("../src/Retravion.Web/Features/Mcp/TerminalSkills/bridge/tools.json", import.meta.url), "utf8"));
 	let calls = 0;
-	const args = { ownerKind: "requirement", ownerId: "11111111-1111-1111-1111-111111111111", ownerVersionId: "22222222-2222-2222-2222-222222222222", expectedRevision: 4, relationship: "user-need", operation: "retarget", targetId: "33333333-3333-3333-3333-333333333333", targetVersionId: "44444444-4444-4444-4444-444444444444", replacementVersionId: "55555555-5555-5555-5555-555555555555", confirmed: true };
+	const target = { kind: "Requirement", internalId: "33333333-3333-3333-3333-333333333333", versionId: "44444444-4444-4444-4444-444444444444", versionNumber: 1 };
+	const args = tool === "change_draft_link"
+		? { ownerKind: "requirement", ownerId: "11111111-1111-1111-1111-111111111111", ownerVersionId: "22222222-2222-2222-2222-222222222222", expectedRevision: 4, relationship: "user-need", operation: "retarget", targetId: target.internalId, targetVersionId: target.versionId, replacementVersionId: "55555555-5555-5555-5555-555555555555", confirmed: true }
+		: tool === "create_draft_revision" ? { productId: "P", identifier: "Baseline", description: "Empty", confirmed: true }
+		: tool === "edit_draft_revision" ? { productId: "P", internalId: "11111111-1111-1111-1111-111111111111", expectedRevision: 4, identifier: "New name", description: "Changed", confirmed: true }
+		: { productId: "P", internalId: "11111111-1111-1111-1111-111111111111", expectedRevision: 4, operation: "replace", target, replacement: { ...target, versionId: "55555555-5555-5555-5555-555555555555", versionNumber: 2 }, confirmed: true };
 	const terminal = new RetravionTerminal({ endpoint, tools, open: async () => true, request: async (url, options) => {
 		const body = options.body && JSON.parse(options.body);
 		if (url.pathname === "/mcp-connect/start") return json({ deviceCode, userCode: "ABCD-2345", verificationUri: "https://localhost:8443/settings/ai-workflow", expiresIn: 600, interval: 2 });
@@ -132,14 +138,14 @@ test("shipped Draft link writes forward exact confirmed endpoints once and prese
 		if (body.id === undefined) return { status: 202, headers: {}, text: "" };
 		if (body.method === "tools/call") {
 			calls++;
-			assert.deepEqual(body.params, { name: "change_draft_link", arguments: args });
+			assert.deepEqual(body.params, { name: tool, arguments: args });
 			throw new Error("lost response");
 		}
 		return json({ jsonrpc: "2.0", id: body.id, result: {} });
 	} });
-	assert.ok(terminal.tools.some(t => t.name === "change_draft_link"));
+	assert.ok(terminal.tools.some(t => t.name === tool));
 	await terminal.call("rtv_connect"); await terminal.call("rtv_complete_connection");
-	const result = await terminal.call("change_draft_link", args);
+	const result = await terminal.call(tool, args);
 	assert.equal(result.isError, true);
 	assert.match(payload(result).error, /uncertain|unknown/i);
 	assert.equal(calls, 1);

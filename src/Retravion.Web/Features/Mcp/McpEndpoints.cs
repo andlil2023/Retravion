@@ -16,6 +16,9 @@ internal static class McpEndpoints
     {
         ["change_draft_link"] = ["ownerKind", "ownerId", "ownerVersionId", "expectedRevision", "relationship", "operation", "targetId", "targetVersionId", "confirmed", "replacementVersionId"],
         ["explore_relationships"] = ["kind", "internalId", "versionId", "expandedVersionIds", "limit"],
+        ["create_draft_revision"] = ["productId", "identifier", "description", "confirmed"],
+        ["edit_draft_revision"] = ["productId", "internalId", "expectedRevision", "identifier", "description", "confirmed"],
+        ["change_draft_revision_selection"] = ["productId", "internalId", "expectedRevision", "operation", "target", "replacement", "confirmed"],
         ["list_revisions"] = ["productId"],
         ["read_revision"] = ["productId", "internalId"],
         ["list_features"] = ["productId"],
@@ -224,6 +227,9 @@ internal static class McpEndpoints
                 tool = name.GetString();
             if (!allowed || !transportAllowed)
             {
+                if (tool is "create_draft_revision" or "edit_draft_revision" or "change_draft_revision_selection")
+                    await context.RequestServices.GetRequiredService<Retravion.Web.Features.Revision.RevisionOperations>().DeniedMcpMutation(context.User,
+                        tool == "create_draft_revision" ? "revision.create" : tool == "edit_draft_revision" ? "revision.edit" : "revision.selection", context.RequestAborted);
                 if (tool == "change_draft_link")
                     await context.RequestServices.GetRequiredService<RequirementOperations>().DeniedMcpMutation(context.User,
                         "relationship.change", context.RequestAborted);
@@ -258,6 +264,12 @@ internal static class McpEndpoints
             }
             if (tool is "list_features" or "read_feature" or "create_draft_feature" or "edit_draft_feature" &&
                 (!parameters.TryGetProperty("arguments", out var featureArguments) || !ValidFeatureArguments(tool, featureArguments)))
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+            if (tool is "create_draft_revision" or "edit_draft_revision" or "change_draft_revision_selection" &&
+                (!parameters.TryGetProperty("arguments", out var preparationArguments) || !RevisionMutationMcpTools.ValidArguments(tool, preparationArguments)))
             {
                 context.Response.StatusCode = 400;
                 return;

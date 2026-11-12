@@ -15,11 +15,10 @@ internal sealed class RevisionOperations(IAuthorizationService authorization, Se
 {
     private async Task<bool> Allowed(ClaimsPrincipal principal) =>
         sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
-        (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
-
-    internal async Task<bool> CanRead(ClaimsPrincipal principal) =>
-        await Allowed(principal) &&
+        (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded &&
         (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || await mcpCredentials.IsAllowed(principal));
+
+    internal Task<bool> CanRead(ClaimsPrincipal principal) => Allowed(principal);
 
     private async Task<Result<T>> Read<T>(ClaimsPrincipal principal, Func<Task<Result<T>>> read)
     {
@@ -53,6 +52,38 @@ internal sealed class RevisionOperations(IAuthorizationService authorization, Se
         logger.LogError("Unauthorized revision change audit submission failed.");
         return result;
     }
+
+    internal Task<Result<RevisionSnapshot>> DeniedMcpMutation(ClaimsPrincipal principal, string action, CancellationToken token) =>
+        Change(principal, action, (_, _, _) => Task.FromResult(Result.Failure<RevisionSnapshot>("Access denied.")), token);
+
+    internal Task<Result<RevisionSnapshot>> PrepareMcp(ClaimsPrincipal principal,
+        Retravion.Application.Product.IProductStore products, string productId, string action, bool confirmed,
+        Guid id, long expectedRevision, string? identifier, string? description,
+        RevisionSelection? target, RevisionSelection? replacement, CancellationToken token) =>
+        Change(principal, action, async (actor, now, allowed) =>
+        {
+            if (!confirmed) return Result.Failure<RevisionSnapshot>("Explicit human approval of the initial or old/new values is required.");
+            var product = await products.Find(productId, token);
+            if (product.IsFailure) return Result.Failure<RevisionSnapshot>(product.Error);
+            if (product.Value.HasNoValue) return Result.Failure<RevisionSnapshot>("Product not found.");
+            var productIdValue = product.Value.Value.InternalId;
+            var operation = Guid.NewGuid();
+            if (action == "revision.create")
+            {
+                var draft = DraftRevision.Create(Guid.NewGuid(), productIdValue, identifier, description);
+                return draft.IsFailure ? Result.Failure<RevisionSnapshot>(draft.Error) :
+                    await changes.Create(operation, draft.Value, actor, now, allowed, token);
+            }
+            if (id == Guid.Empty || expectedRevision <= 0)
+                return Result.Failure<RevisionSnapshot>("An immutable Revision identity and positive expectedRevision are required.");
+            var found = await store.Retrieve(productIdValue, id, token: token);
+            if (found.IsFailure) return Result.Failure<RevisionSnapshot>(found.Error);
+            if (found.Value.Record is not { Deleted: false, Value: DraftRevision } current || current.Revision != expectedRevision)
+                return Result.Failure<RevisionSnapshot>("The Draft Revision changed or is unavailable. Read it before proposing another change.");
+            return action == "revision.edit"
+                ? await changes.Edit(operation, current, identifier, description, actor, now, allowed, token)
+                : await changes.Select(operation, current, action["revision.selection.".Length..], target!, replacement, actor, now, allowed, token);
+        }, token);
 
     public Task<Result<RevisionSnapshot>> Create(ClaimsPrincipal principal, Guid operation, Guid id, Guid product,
         string? identifier, string? description, CancellationToken token = default) =>
