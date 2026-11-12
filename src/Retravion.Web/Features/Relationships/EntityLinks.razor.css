@@ -22,11 +22,30 @@
 .inspector-relationship p.muted { font-size:.72rem; }
 .relationship-actions { display:flex; flex-wrap:wrap; gap:.25rem; }
 .relationship-actions ::deep .mud-button-root { font-size:.7rem; text-transform:none; letter-spacing:normal; }
-.candidate-list { max-height:280px; overflow:auto; display:flex; flex-direction:column; gap:.35rem; margin:.75rem 0; }
-.candidate-list ::deep .candidate { display:block; width:100%; text-align:left; text-transform:none; letter-spacing:normal; padding:.65rem; font-size:.76rem; }
-.candidate-list ::deep .mud-button-label { justify-content:flex-start; }
+/* Let the graph determine the shared row height, not the candidate count. */
+.adding-link { align-items:stretch; }
+.adding-link .record-inspector { contain:size; display:flex; flex-direction:column; overflow:auto; }
+.adding-link ::deep .add-link-card { display:flex; flex-direction:column; flex:1; min-height:0; }
+.adding-link ::deep .add-link-card > * { flex:0 0 auto; }
+.adding-link .candidate-list { flex:1 1 0; min-height:6rem; max-height:none; }
+.adding-link .inspector-actions { flex-shrink:0; }
+.candidate-list { max-height:28rem; overflow:auto; display:flex; flex-direction:column; gap:.5rem; margin:.75rem 0; padding:3px; }
+.candidate-list ::deep .candidate { flex-shrink:0; display:block; width:100%; min-height:44px; text-align:left; text-transform:none; letter-spacing:normal; padding:.65rem; font-size:.82rem; line-height:1.5; color:var(--mud-palette-text-primary); border:1px solid var(--mud-palette-text-secondary); }
+.candidate-list ::deep .candidate:hover:not(:disabled) { background:var(--mud-palette-action-default-hover); border-color:var(--mud-palette-text-primary); }
+.candidate-list ::deep .candidate:focus-visible { outline:2px solid var(--mud-palette-primary); outline-offset:1px; }
+.candidate-list ::deep .candidate[aria-pressed="true"] { border:2px solid var(--mud-palette-primary); padding:calc(.65rem - 1px); }
+.candidate-list ::deep .mud-button-label { justify-content:flex-start; min-width:0; }
+.candidate-content { display:flex; flex-direction:column; width:100%; min-width:0; overflow-wrap:anywhere; white-space:normal; }
+.candidate-selection { margin-top:.25rem; }
 .list-node p { margin:.2rem 0; font-size:.8rem; }
 .list-node .node-expansion { justify-content:flex-start; border:0; }
 .list-node ::deep .mud-button-root { text-transform:none; letter-spacing:normal; text-align:left; }
 .empty-note { font-size:.85rem; padding:1rem; }
-@media(max-width:1100px) { .link-workspace { grid-template-columns:minmax(0,1fr); } .record-inspector { max-width:none; } .focus-heading { align-items:flex-start; flex-direction:column; } }
+@media(max-width:1100px) {
+    .link-workspace { grid-template-columns:minmax(0,1fr); }
+    .record-inspector { max-width:none; }
+    .adding-link .record-inspector { contain:none; }
+    .adding-link ::deep .add-link-card { flex:none; }
+    .adding-link .candidate-list { flex:0 1 auto; min-height:0; max-height:28rem; }
+    .focus-heading { align-items:flex-start; flex-direction:column; }
+}

@@ -26,6 +26,10 @@ public sealed partial class PostgresProductTests
         var store = new PostgresRequirementStore(database.ConnectionString);
         var needs = new PostgresUserNeedStore(database.ConnectionString);
         var d = await RelationshipSetup(products, store, needs);
+        var longTitle = "Long candidate title " + new string('x', 180);
+        for (var i = 0; i < 15; i++)
+            Assert.True((await needs.Create(Retravion.Domain.UserNeed.UserNeed.Create(d.Product.InternalId,
+                $"Candidate-{i:00}", longTitle, "Statement").Value, RequirementActor, RequirementTime)).IsSuccess);
         var draft = await ParentDraft(store, d.Product.InternalId, "Workspace");
         draft = (await store.ChangeLink(draft, Endpoint(d.Need), true, RequirementActor, RequirementTime)).Value;
         await using var host = ManagementHost(products, store, needs, database.ConnectionString);
@@ -83,11 +87,23 @@ public sealed partial class PostgresProductTests
                 var needChoice = renderer.Components<MudSelectItem<string>>().Single(i => i.Value == "need");
                 await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync(needChoice.Value);
                 Assert.True(renderer.Components<MudButton>().Single(b => b.ChildContent is not null && b.Variant == Variant.Filled).Disabled);
+                Assert.Equal(17, CandidateVersions(renderer).Count());
+                Assert.Contains(longTitle, renderer.Text());
+                Assert.All(renderer.Components<MudButton>().Where(b => b.UserAttributes?.ContainsKey("data-version") == true), b =>
+                {
+                    Assert.Equal(Variant.Outlined, b.Variant);
+                    Assert.Equal("False", b.UserAttributes!["aria-pressed"]?.ToString(), ignoreCase: true);
+                });
                 await renderer.Field("Search ID or title").ValueChanged.InvokeAsync("nEeD TiTlE");
                 Assert.Equal("nEeD TiTlE", renderer.Field("Search ID or title").GetState(x => x.Value));
                 Assert.Equal(new[] { d.Need.Need.VersionId, d.NewNeed.Need.VersionId }.Order(), CandidateVersions(renderer).Order());
                 var selected = renderer.Components<MudButton>().Single(b => b.UserAttributes?.GetValueOrDefault("data-version")?.ToString() == d.NewNeed.Need.VersionId.ToString());
                 await selected.OnClick.InvokeAsync(new MouseEventArgs());
+                Assert.Contains("✓ Selected", renderer.Text());
+                Assert.Equal(d.NewNeed.Need.VersionId.ToString(), renderer.Components<MudButton>()
+                    .Single(b => b.UserAttributes?.ContainsKey("data-version") == true &&
+                        string.Equals(b.UserAttributes["aria-pressed"]?.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+                    .UserAttributes!["data-version"]?.ToString());
                 await renderer.Field("Search ID or title").ValueChanged.InvokeAsync("no matching entity");
                 Assert.Empty(CandidateVersions(renderer));
                 Assert.Contains("Selected: User Need N · v2", renderer.Text());
