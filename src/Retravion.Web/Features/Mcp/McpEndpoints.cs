@@ -14,6 +14,10 @@ internal static class McpEndpoints
     private const int MaxBodyBytes = 1024 * 1024;
     private static readonly Dictionary<string, string[]> Arguments = new(StringComparer.Ordinal)
     {
+        ["list_features"] = ["productId"],
+        ["read_feature"] = ["internalId", "versionId"],
+        ["create_draft_feature"] = ["productId", "title", "description"],
+        ["edit_draft_feature"] = ["internalId", "versionId", "expectedRevision", "title", "description"],
         ["list_test_cases"] = ["productId"],
         ["read_test_case"] = ["internalId", "versionId"],
         ["create_draft_test_case"] = ["productId", "title", "description", "preconditions", "steps"],
@@ -65,6 +69,34 @@ internal static class McpEndpoints
                 if (properties.Length != 2 || !step.TryGetProperty("action", out var action) || action.ValueKind != JsonValueKind.String ||
                     !step.TryGetProperty("expectedResult", out var result) || result.ValueKind != JsonValueKind.String) return false;
             }
+        }
+        return true;
+    }
+
+    private static bool ValidFeatureArguments(string tool, JsonElement arguments)
+    {
+        if (arguments.ValueKind != JsonValueKind.Object) return false;
+        var fields = arguments.EnumerateObject().ToArray();
+        if (fields.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != fields.Length) return false;
+        var edit = tool == "edit_draft_feature";
+        bool GuidValue(string name, bool optional = false) =>
+            !arguments.TryGetProperty(name, out var value) ? optional :
+            optional && value.ValueKind == JsonValueKind.Null || value.ValueKind == JsonValueKind.String && value.TryGetGuid(out _);
+        if (tool is "list_features" or "create_draft_feature")
+        {
+            if (!arguments.TryGetProperty("productId", out var product) || product.ValueKind != JsonValueKind.String) return false;
+        }
+        else if (!GuidValue("internalId") || !GuidValue("versionId", !edit)) return false;
+        if (tool is "list_features" or "read_feature") return true;
+        if (edit && (!arguments.TryGetProperty("expectedRevision", out var revision) ||
+            revision.ValueKind != JsonValueKind.Number || !revision.TryGetInt64(out var number) || number <= 0)) return false;
+        foreach (var name in new[] { "title", "description" })
+        {
+            if (!arguments.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            {
+                if (edit) return false;
+            }
+            else if (value.ValueKind != JsonValueKind.String) return false;
         }
         return true;
     }
@@ -194,6 +226,9 @@ internal static class McpEndpoints
                 if (tool is "create_draft_requirement" or "edit_draft_requirement")
                     await context.RequestServices.GetRequiredService<RequirementOperations>().DeniedMcpMutation(context.User,
                         tool == "create_draft_requirement" ? "requirement.create" : "requirement.edit", context.RequestAborted);
+                if (tool is "create_draft_feature" or "edit_draft_feature")
+                    await context.RequestServices.GetRequiredService<Retravion.Web.Features.Feature.FeatureOperations>().DeniedMcpMutation(context.User,
+                        tool == "create_draft_feature" ? "feature.create" : "feature.edit", context.RequestAborted);
                 if (tool is "create_draft_test_case" or "edit_draft_test_case")
                     await context.RequestServices.GetRequiredService<TestCaseOperations>().DeniedMcpMutation(context.User,
                         tool == "create_draft_test_case" ? "test-case.create" : "test-case.edit", context.RequestAborted);
@@ -210,6 +245,12 @@ internal static class McpEndpoints
             }
             if (tool is "list_test_cases" or "read_test_case" or "create_draft_test_case" or "edit_draft_test_case" &&
                 (!parameters.TryGetProperty("arguments", out var caseArguments) || !ValidTestCaseArguments(tool, caseArguments)))
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+            if (tool is "list_features" or "read_feature" or "create_draft_feature" or "edit_draft_feature" &&
+                (!parameters.TryGetProperty("arguments", out var featureArguments) || !ValidFeatureArguments(tool, featureArguments)))
             {
                 context.Response.StatusCode = 400;
                 return;

@@ -5,14 +5,49 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.Feature;
 using Retravion.Domain.Feature;
 using Retravion.Web.Features.Identity.Logout;
+using Retravion.Web.Features.Mcp;
 
 namespace Retravion.Web.Features.Feature;
 
 internal sealed class FeatureOperations(IAuthorizationService authorization, SessionTicketStore sessions,
-    IFeatureStore store, IFeatureChangeTransaction changes, IAuditSubmission audit, TimeProvider time, ILogger<FeatureOperations> logger)
+    IFeatureStore store, IFeatureChangeTransaction changes, IAuditSubmission audit, TimeProvider time, ILogger<FeatureOperations> logger, McpCredentials mcpCredentials)
 {
+    internal Task<bool> CanRead(ClaimsPrincipal principal) => Allowed(principal);
+
+    internal Task<Result<FeatureSnapshot>> DeniedMcpMutation(ClaimsPrincipal principal, string action, CancellationToken token) =>
+        Change(principal, action, (_, _) => Task.FromResult(Result.Failure<FeatureSnapshot>("Access denied.")), token);
+
+    internal Task<Result<FeatureSnapshot>> CreateMcp(ClaimsPrincipal principal, Retravion.Application.Product.IProductStore products,
+        string productId, string? title, string? description, CancellationToken token) =>
+        Change(principal, "feature.create", async (actor, now) =>
+        {
+            var product = await products.Find(productId, token);
+            if (product.IsFailure) return Result.Failure<FeatureSnapshot>(product.Error);
+            if (product.Value.HasNoValue) return Result.Failure<FeatureSnapshot>("Product not found.");
+            return await changes.Create(product.Value.Value.InternalId, FeatureContent.Create(title, description), actor, now, token,
+                authorized: () => LiveAuthority(principal));
+        }, token);
+
+    internal Task<Result<FeatureSnapshot>> EditMcp(ClaimsPrincipal principal, Guid internalId, Guid versionId, long expectedRevision,
+        string title, string description, CancellationToken token) =>
+        Change(principal, "feature.edit", async (actor, now) =>
+        {
+            var found = await store.Find(internalId, versionId, token);
+            if (found.IsFailure) return Result.Failure<FeatureSnapshot>(found.Error);
+            if (found.Value.HasNoValue) return Result.Failure<FeatureSnapshot>("Feature not found.");
+            return await changes.Update(found.Value.Value with { Revision = expectedRevision }, FeatureContent.Create(title, description),
+                actor, now, token, authorized: () => LiveAuthority(principal));
+        }, token);
+
     private async Task<bool> Allowed(ClaimsPrincipal principal) =>
         sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
+        (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || await mcpCredentials.IsAllowed(principal)) &&
+        (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
+
+    // Configuration is checked before transactions; callbacks only recheck live authority to avoid reopening settings under locks.
+    private async Task<bool> LiveAuthority(ClaimsPrincipal principal) =>
+        sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
+        (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || mcpCredentials.IsActive(principal)) &&
         (await authorization.AuthorizeAsync(principal, "CompletedPasswordReplacement")).Succeeded;
 
     private async Task<Result<FeatureSnapshot>> Change(ClaimsPrincipal principal, string action,
