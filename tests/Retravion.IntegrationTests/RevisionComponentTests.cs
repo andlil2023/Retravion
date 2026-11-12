@@ -117,12 +117,14 @@ public sealed partial class PostgresProductTests
         await using var host = new McpTestHost(services =>
         {
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            RegisterRevisionGraphReads(services, db.ConnectionString);
             services.AddSingleton<IRevisionStore>(store); services.AddSingleton<IRevisionChangeTransaction>(writes);
         });
         await host.Login(); await host.Replace(); var token = await host.Authenticate();
         var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(token);
         using var scope = host.Factory.Services.CreateScope(); var navigation = new CaseNavigation(); navigation.Go("revisions/create?product=P");
         await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<RelationshipOperations>())
             .AddSingleton<IJSRuntime, CaseJS>().AddSingleton<NavigationManager>(navigation)
             .AddSingleton<AuthenticationStateProvider>(new CaseAuthentication(principal))
             .AddSingleton(scope.ServiceProvider.GetRequiredService<RevisionOperations>())
@@ -208,6 +210,7 @@ public sealed partial class PostgresProductTests
         var store = new PostgresRevisionStore(db.ConnectionString); var writes = new RevisionWriteHook(store);
         await using var host = new McpTestHost(s =>
         {
+            RegisterRevisionGraphReads(s, db.ConnectionString);
             s.AddSingleton<Retravion.Application.Product.IProductStore>(products);
             s.AddSingleton<IRevisionStore>(store); s.AddSingleton<IRevisionChangeTransaction>(writes);
         });
@@ -215,6 +218,7 @@ public sealed partial class PostgresProductTests
         var principal = host.Factory.Services.GetRequiredService<McpCredentials>().Resolve(token);
         using var scope = host.Factory.Services.CreateScope(); var navigation = new CaseNavigation();
         await using var services = new ServiceCollection().AddLogging().AddMudServices().AddSingleton<IJSRuntime, CaseJS>()
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<RelationshipOperations>())
             .AddSingleton<NavigationManager>(navigation).AddSingleton<AuthenticationStateProvider>(new CaseAuthentication(principal))
             .AddSingleton(scope.ServiceProvider.GetRequiredService<RevisionOperations>()).AddSingleton(scope.ServiceProvider.GetRequiredService<ProductOperations>()).BuildServiceProvider();
         await using var renderer = new CaseRenderer(services, services.GetRequiredService<ILoggerFactory>());
