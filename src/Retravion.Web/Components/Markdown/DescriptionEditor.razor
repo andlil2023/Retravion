@@ -2,29 +2,39 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 
+<dialog open @ref="_dialog" class="description-editor-shell @(_fullscreen ? "is-fullscreen" : "") @(FieldOnly ? "field-only" : "")"
+        role="@(_fullscreen ? "dialog" : "group")" aria-label="@(Label + " Markdown editor")"
+        aria-modal="@(_fullscreen ? "true" : null)" @oncancel="ExitFullscreen" @oncancel:preventDefault>
 @if (FieldOnly)
 {
-    <div class="description-editor-shell" role="group" aria-label="@Label">
-        <div class="description-layout side-by-side field-only">
-            <div class="description-source">
-                <label for="@InputId">@Label (Markdown)</label>
-                <textarea id="@InputId" value="@_markdown" @oninput="Edit" disabled="@(Busy || ReadOnly)" rows="6" spellcheck="true"></textarea>
-            </div>
-            <section aria-label="@(Label + " preview")" class="description-preview">
-                <h3>@Label preview</h3>
-                <ProductMarkdownView Markdown="@_markdown" />
-            </section>
-        </div>
-    </div>
+    @EditorContent
 }
 else
 {
-<dialog open @ref="_dialog" class="description-editor-shell @(_fullscreen ? "is-fullscreen" : "")"
-        role="@(_fullscreen ? "dialog" : "group")" aria-label="Markdown editor"
-        aria-modal="@(_fullscreen ? "true" : null)" @oncancel="ExitFullscreen" @oncancel:preventDefault>
 <MudPaper Class="product-card" Elevation="0">
     <form id="@FormId" @onsubmit="Save" @onsubmit:preventDefault aria-label="@SubmitText">
         @ChildContent
+        @EditorContent
+    </form>
+</MudPaper>
+<div class="product-actions">
+    @Actions
+    <MudButton ButtonType="ButtonType.Submit" form="@FormId" Variant="Variant.Filled" Color="Color.Primary"
+               Disabled="@(Busy || SaveDisabled)" Class="product-button">@SubmitText</MudButton>
+    @if (CancelHref is not null)
+    {
+        <MudButton Href="@CancelHref" Class="product-button">Cancel</MudButton>
+    }
+</div>
+}
+@if (_fullscreenError is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert" Class="mt-4">@_fullscreenError</MudAlert>
+}
+</dialog>
+
+@code {
+    private RenderFragment EditorContent => @<div class="description-editor-content">
         <div class="description-toolbar">
             <h2>@(Optional ? $"{Label} (optional)" : Label)</h2>
             <div class="description-tools" role="group" aria-label="Editor controls">
@@ -40,7 +50,7 @@ else
                 </div>
                 <MudIconButton data-markdown-fullscreen-toggle="true"
                                Icon="@(_fullscreen ? Icons.Material.Outlined.FullscreenExit : Icons.Material.Outlined.Fullscreen)"
-                               Class="product-button" Size="Size.Small" aria-busy="@_changingMode" OnClick="ToggleFullscreen"
+                               Class="product-button" Size="Size.Small" aria-busy="@(_changingMode ? "true" : "false")" OnClick="ToggleFullscreen"
                                aria-label="@(_fullscreen ? "Exit fullscreen Markdown editor" : "Fullscreen Markdown editor")"
                                title="@(_fullscreen ? "Exit fullscreen (Escape)" : "Fullscreen Markdown editor")"
                                aria-expanded="@_fullscreen" />
@@ -49,36 +59,20 @@ else
         <div class="description-layout @_arrangement">
             <div class="description-source">
                 <label for="@InputId">@Label (Markdown)</label>
-                <textarea id="@InputId" value="@_markdown" @oninput="Edit" disabled="@(Busy || ReadOnly)" rows="12" spellcheck="true"></textarea>
+                <textarea id="@InputId" value="@_markdown" @oninput="Edit" disabled="@(Busy || ReadOnly)" rows="@(FieldOnly ? 6 : 12)" spellcheck="true"></textarea>
             </div>
             <div class="description-splitter" role="separator" tabindex="0" aria-orientation="vertical"
                  aria-label="Resize Markdown and preview panes" aria-controls="@InputId"
                  aria-valuemin="25" aria-valuemax="75" aria-valuenow="50"
                  title="Drag to resize; use Left/Right arrow keys, Home or End"></div>
             <section aria-label="@(Label + " preview")" class="description-preview">
-                <h3>Preview</h3>
+                <h3>@(FieldOnly ? Label + " preview" : "Preview")</h3>
                 <ProductMarkdownView Markdown="@_markdown" />
             </section>
         </div>
-    </form>
-</MudPaper>
-<div class="product-actions">
-    @Actions
-    <MudButton ButtonType="ButtonType.Submit" form="@FormId" Variant="Variant.Filled" Color="Color.Primary"
-               Disabled="@(Busy || SaveDisabled)" Class="product-button">@SubmitText</MudButton>
-    @if (CancelHref is not null)
-    {
-        <MudButton Href="@CancelHref" Class="product-button">Cancel</MudButton>
-    }
-</div>
-@if (_fullscreenError is not null)
-{
-    <MudAlert Severity="Severity.Error" role="alert" Class="mt-4">@_fullscreenError</MudAlert>
-}
-</dialog>
-}
 
-@code {
+    </div>;
+
     [Parameter] public bool FieldOnly { get; set; }
     [Parameter] public string InputId { get; set; } = "product-markdown";
     [Parameter, EditorRequired] public string InitialDescription { get; set; } = "";
@@ -121,7 +115,7 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (FieldOnly || (!firstRender && !_applyMode) || _disposed) return;
+        if ((!firstRender && !_applyMode) || _disposed) return;
         var applyMode = _applyMode;
         _applyMode = false;
         try

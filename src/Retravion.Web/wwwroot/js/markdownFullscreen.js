@@ -70,6 +70,14 @@ export function initializeSplitter(dialog) {
     const layout = dialog.querySelector('.description-layout');
     const handle = layout?.querySelector('.description-splitter');
     if (!handle) return;
+    const source = layout.querySelector('.description-source');
+    // Observe only the source: long Markdown/diagram output must not grow the page.
+    // Ignore modal geometry so exiting restores the user's normal editor height.
+    const observer = new ResizeObserver(() => {
+        if (!dialog.classList.contains('is-fullscreen'))
+            layout.style.setProperty('--markdown-pane-height', `${source.getBoundingClientRect().height}px`);
+    });
+    observer.observe(source);
     const controller = new AbortController();
     const options = { signal: controller.signal };
     let pointer = null;
@@ -117,6 +125,7 @@ export function initializeSplitter(dialog) {
     update(share);
     splitters.set(dialog, () => {
         if (pointer !== null && handle.hasPointerCapture(pointer)) handle.releasePointerCapture(pointer);
+        observer.disconnect();
         controller.abort();
     });
 }
