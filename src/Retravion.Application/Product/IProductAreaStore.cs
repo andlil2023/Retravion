@@ -9,7 +9,7 @@ public sealed record ProductAreaHistory(AuditActor Actor, DateTimeOffset Occurre
 public sealed record ProductAreaRetrieval(IReadOnlyList<ProductAreaSnapshot> Areas, IReadOnlyList<ProductAreaHistory> History,
     ProductAreaHistory? Operation);
 
-/// <summary>Web-only Product area administration; authorization is rechecked inside the transaction.</summary>
+/// <summary>Product area reads and web-only administration; write authorization is rechecked inside the transaction.</summary>
 public interface IProductAreaStore
 {
     Task<Result<ProductAreaRetrieval>> Retrieve(Guid product, Guid? operation = null, CancellationToken token = default);

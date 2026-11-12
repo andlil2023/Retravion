@@ -55,7 +55,7 @@ public sealed partial class AccountManagementTests
         var token = await host.Authenticate();
         Assert.Equal(64, token.Length);
         var tools = await host.Rpc("tools/list");
-        Assert.Equal(new[] { "change_draft_link", "change_draft_revision_selection", "create_draft_feature", "create_draft_requirement", "create_draft_revision", "create_draft_test_case", "create_draft_user_need", "edit_draft_feature", "edit_draft_requirement", "edit_draft_revision", "edit_draft_test_case", "edit_draft_user_need", "explore_relationships", "list_features", "list_products", "list_requirements", "list_revisions", "list_test_cases", "list_user_needs", "read_feature", "read_product", "read_requirement", "read_revision", "read_test_case", "read_user_need" },
+        Assert.Equal(new[] { "change_draft_link", "change_draft_revision_selection", "create_draft_feature", "create_draft_requirement", "create_draft_revision", "create_draft_test_case", "create_draft_user_need", "edit_draft_feature", "edit_draft_requirement", "edit_draft_requirement_classification", "edit_draft_revision", "edit_draft_test_case", "edit_draft_test_case_classification", "edit_draft_user_need", "explore_relationships", "list_features", "list_product_areas", "list_products", "list_requirements", "list_revisions", "list_test_cases", "list_user_needs", "read_feature", "read_product", "read_requirement", "read_revision", "read_test_case", "read_user_need" },
             tools.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).Order().ToArray());
         using (var origin = await host.Send("tools/list", origin: "https://evil.invalid")) Assert.Equal(HttpStatusCode.Forbidden, origin.StatusCode);
         host.Mcp.DefaultRequestHeaders.Host = "evil.invalid";
@@ -401,8 +401,8 @@ public sealed partial class AccountManagementTests
         Assert.Contains("Restart", readme);
         using var tools = JsonDocument.Parse(Read("bridge/tools.json"));
         var names = tools.RootElement.EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToArray();
-        Assert.Equal(25, names.Length);
-        foreach (var tool in new[] { "create_draft_revision", "edit_draft_revision", "change_draft_revision_selection", "list_revisions", "read_revision", "explore_relationships", "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case", "list_features", "read_feature", "create_draft_feature", "edit_draft_feature" })
+        Assert.Equal(28, names.Length);
+        foreach (var tool in new[] { "list_product_areas", "edit_draft_requirement_classification", "edit_draft_test_case_classification", "create_draft_revision", "edit_draft_revision", "change_draft_revision_selection", "list_revisions", "read_revision", "explore_relationships", "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case", "list_features", "read_feature", "create_draft_feature", "edit_draft_feature" })
         {
             Assert.Contains(tool, names);
             Assert.Contains($"`{tool}`", skill);
@@ -410,7 +410,7 @@ public sealed partial class AccountManagementTests
         }
         Assert.Contains("AI review is read-only", skill);
         Assert.Contains("A review request never authorizes a save", skill);
-        Assert.Contains("Provenance writes, classification changes and lifecycle operations are not supported", skill);
+        Assert.Contains("Provenance writes, area administration and lifecycle operations are not supported", skill);
         Assert.DoesNotContain(names, name => name is not null &&
             !(name is "explore_relationships" or "change_draft_link" or "change_draft_revision_selection" || name.StartsWith("list_", StringComparison.Ordinal) || name.StartsWith("read_", StringComparison.Ordinal) ||
               name.StartsWith("create_draft_", StringComparison.Ordinal) || name.StartsWith("edit_draft_", StringComparison.Ordinal)));

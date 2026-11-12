@@ -181,7 +181,7 @@ public sealed partial class AccountManagementTests
                 var session = principal.FindFirst(Retravion.Web.Features.Identity.Logout.SessionTicketStore.SessionClaim)!.Value;
                 await host.Factory.Services.GetRequiredService<Retravion.Web.Features.Identity.Logout.SessionTicketStore>().RemoveAsync(session);
             }
-            foreach (var tool in new[] { "create_draft_requirement", "edit_draft_requirement" })
+            foreach (var tool in new[] { "create_draft_requirement", "edit_draft_requirement", "edit_draft_requirement_classification" })
             {
                 using var denied = await host.Send("tools/call", new { name = tool, arguments = new { id = "secret", title = "secret", statement = "secret", type = "secret", rationale = "secret", actor = "spoof" } });
                 Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
@@ -189,22 +189,22 @@ public sealed partial class AccountManagementTests
             using var read = await host.Send("tools/call", new { name = "read_requirement", arguments = new { internalId = Guid.NewGuid() } });
             Assert.Equal(HttpStatusCode.Unauthorized, read.StatusCode);
         }
-        Assert.Equal(6, audit.Events.Count);
+        Assert.Equal(9, audit.Events.Count);
         Assert.All(audit.Events, e =>
         {
             Assert.Contains(e.Action, new[] { "requirement.create", "requirement.edit" }); Assert.IsType<AuditTarget.Unknown>(e.Target);
             Assert.Equal(AuditActionOutcome.Failure, e.Outcome); Assert.Null(e.RequirementChange); Assert.Null(e.UserNeedChange);
         });
-        Assert.All(audit.Events.Take(4), e => Assert.IsType<AuditActor.Unknown>(e.Actor));
-        Assert.All(audit.Events.Skip(4), e => Assert.Equal(new AuditActor.Identified("admin"), e.Actor));
+        Assert.All(audit.Events.Take(6), e => Assert.IsType<AuditActor.Unknown>(e.Actor));
+        Assert.All(audit.Events.Skip(6), e => Assert.Equal(new AuditActor.Identified("admin"), e.Actor));
         foreach (var failure in new[] { "failure", "throw" })
         {
             audit.Mode = failure;
-            foreach (var tool in new[] { "create_draft_requirement", "edit_draft_requirement" })
+            foreach (var tool in new[] { "create_draft_requirement", "edit_draft_requirement", "edit_draft_requirement_classification" })
             { using var denied = await host.Send("tools/call", new { name = tool, arguments = new { title = "secret" } }); Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode); }
         }
         Assert.Equal(0, store.Calls);
-        Assert.Equal(4, logger.Messages.Count);
+        Assert.Equal(6, logger.Messages.Count);
         Assert.All(logger.Messages, m => Assert.Equal("Unauthorized Requirement change audit submission failed.", m));
     }
     private sealed class RequirementMcpRecorder : IAuditSubmission

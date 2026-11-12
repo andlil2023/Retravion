@@ -14,6 +14,25 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
     IRequirementStore store, IRequirementChangeTransaction changes, IAuditSubmission audit, TimeProvider time,
     ILogger<RequirementOperations> logger, McpCredentials mcpCredentials, IRequirementLinkStore links)
 {
+    internal Task<Result<RequirementSnapshot>> ClassifyMcp(ClaimsPrincipal principal, Guid internalId, Guid versionId,
+        long expectedRevision, Guid? areaId, bool confirmed, CancellationToken token) =>
+        Change(principal, "requirement.edit", async (actor, now) =>
+        {
+            if (!confirmed) return Result.Failure<RequirementSnapshot>("Explicit human confirmation of old/new classification is required.");
+            if (internalId == Guid.Empty || versionId == Guid.Empty || expectedRevision <= 0 || areaId == Guid.Empty)
+                return Result.Failure<RequirementSnapshot>("Exact identities and a positive expectedRevision are required.");
+            var found = await store.Find(internalId, token, versionId);
+            if (found.IsFailure) return Result.Failure<RequirementSnapshot>(found.Error);
+            if (found.Value.HasNoValue) return Result.Failure<RequirementSnapshot>("Requirement not found.");
+            var expected = found.Value.Value;
+            if (expected.Revision != expectedRevision)
+                return Result.Failure<RequirementSnapshot>("The version changed. Retrieve it again before editing.");
+            var classified = expected.Requirement.Classify(areaId);
+            return classified.IsFailure ? Result.Failure<RequirementSnapshot>(classified.Error) :
+                await changes.Update(expected, classified.Value, actor, now, cancellationToken: token,
+                    authorized: () => LiveAuthority(principal));
+        }, token);
+
     private async Task<bool> Allowed(ClaimsPrincipal principal) =>
         sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
         (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || await mcpCredentials.IsAllowed(principal)) &&

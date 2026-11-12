@@ -159,7 +159,7 @@ public sealed partial class AccountManagementTests
             var principal = host.Factory.Services.GetRequiredService<Retravion.Web.Features.Mcp.McpCredentials>()
                 .Resolve(host.Mcp.DefaultRequestHeaders.Authorization?.Parameter);
             if (state == "revoked") await host.Factory.Services.GetRequiredService<SessionTicketStore>().RemoveAsync(principal.FindFirstValue(SessionTicketStore.SessionClaim)!);
-            foreach (var tool in new[] { "create_draft_test_case", "edit_draft_test_case" })
+            foreach (var tool in new[] { "create_draft_test_case", "edit_draft_test_case", "edit_draft_test_case_classification" })
             {
                 var count = audit.Events.Count;
                 using var denied = await host.Send("tools/call", new { name = tool, arguments = new { title = "secret", actor = "spoof", steps = new object?[] { null } } }, state == "active" ? "https://evil.invalid" : null);
@@ -184,10 +184,10 @@ public sealed partial class AccountManagementTests
         foreach (var throwing in new[] { false, true })
         {
             audit.Fail = true; audit.Throw = throwing;
-            foreach (var tool in new[] { "create_draft_test_case", "edit_draft_test_case" })
+            foreach (var tool in new[] { "create_draft_test_case", "edit_draft_test_case", "edit_draft_test_case_classification" })
             { using var denied = await host.Send("tools/call", new { name = tool, arguments = new { title = "secret" } }); Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode); }
         }
-        Assert.Equal(4, logger.Messages.Count);
+        Assert.Equal(6, logger.Messages.Count);
         Assert.All(logger.Messages, message => Assert.Equal("Unauthorized Test Case change audit submission failed.", message));
         Assert.Equal(0, store.Calls);
     }
@@ -218,7 +218,7 @@ public sealed partial class PostgresProductTests
         Assert.Equal("TC-001", created.GetProperty("id").GetString());
         Assert.Equal("Draft", created.GetProperty("status").GetString());
         Assert.Empty(created.GetProperty("steps").EnumerateArray()); Assert.Empty(created.GetProperty("links").EnumerateArray());
-        Assert.Equal(new[] { "creationReason", "description", "id", "internalId", "latestApprovedVersionNumber", "links", "preconditions", "productInternalId", "revision", "sourceVersionId", "status", "steps", "title", "versionId", "versionNumber" }, created.EnumerateObject().Select(p => p.Name).Order().ToArray());
+        Assert.Equal(new[] { "areaId", "creationReason", "description", "id", "internalId", "latestApprovedVersionNumber", "links", "preconditions", "productInternalId", "revision", "sourceVersionId", "status", "steps", "title", "versionId", "versionNumber" }, created.EnumerateObject().Select(p => p.Name).Order().ToArray());
         foreach (var field in new[] { "title", "description", "preconditions" }) Assert.Equal("", created.GetProperty(field).GetString());
         var empty = await host.Call("create_draft_test_case", new { productId = "Q", title = (string?)null, description = (string?)null, preconditions = (string?)null, steps = (object?)null });
         Assert.Equal("TC-001", empty.GetProperty("id").GetString());
@@ -257,7 +257,7 @@ public sealed partial class PostgresProductTests
         Assert.Equal("Complete", decision.GetProperty("change").GetProperty("after").GetProperty("title").GetString());
         Assert.Equal("case-author", decision.GetProperty("actor").GetString());
         Assert.Equal(approved.TestCase.VersionId, decision.GetProperty("change").GetProperty("versionId").GetGuid());
-        Assert.DoesNotContain("operationId", detail.GetRawText()); Assert.DoesNotContain("area", detail.GetRawText());
+        Assert.DoesNotContain("operationId", detail.GetRawText()); Assert.Equal(area.Area.InternalId, detail.GetProperty("testCase").GetProperty("areaId").GetGuid());
         Assert.Null(history.Single(h => h.GetProperty("action").GetString() == "test-case.create").GetProperty("change").GetProperty("before").GetString());
         await host.Call("read_test_case", new { internalId = id, versionId = empty.GetProperty("versionId").GetGuid() }, true);
         await host.Call("read_test_case", new { internalId = Guid.NewGuid() }, true);
