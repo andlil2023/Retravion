@@ -255,7 +255,7 @@ public sealed partial class AccountManagementTests
                 "list_requirements", "read_requirement", "create_draft_requirement", "edit_draft_requirement",
                 "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case",
                 "list_features", "read_feature", "create_draft_feature", "edit_draft_feature" }) Assert.Contains($"`{tool}`", skill);
-            Assert.Equal("2.8.0", TerminalPackages.Version);
+            Assert.Equal("2.9.0", TerminalPackages.Version);
             Assert.Equal($"retravion-{client}-{TerminalPackages.Version}.zip", bundle.FileName);
             Assert.Contains($"/packages/{TerminalPackages.Version}/{client}", bundle.DownloadPath);
             Assert.Contains($"integration {TerminalPackages.Version}", skill);

@@ -16,15 +16,18 @@ internal sealed class TestCaseMcpTools(TestCaseOperations operations, IProductSt
     private System.Security.Claims.ClaimsPrincipal Principal => http.HttpContext!.User;
 
     [McpServerTool(Name = "list_test_cases", ReadOnly = true, OpenWorld = false)]
-    [Description("List all Test Cases for a Product manual ID, including retired Products. Selects working version otherwise latest Approved; ordering is not guaranteed.")]
-    public async Task<CallToolResult> List(string productId, CancellationToken cancellationToken)
+    [Description("List all Test Cases for a Product manual ID, including retired Products. Selects working version otherwise latest Approved; ordered by ID and immutable identity." + CollectionDiscovery.Description)]
+    public async Task<CallToolResult> List(string productId, CancellationToken cancellationToken,
+        string? search = null, string? status = null, int? offset = null, int? limit = null)
     {
         if (!await operations.CanRead(Principal)) return Error("Access denied.");
         var product = await products.Find(productId, cancellationToken);
         if (product.IsFailure) return Error(product.Error);
         if (product.Value.HasNoValue) return Error("Product not found.");
         var result = await operations.List(Principal, product.Value.Value.InternalId, cancellationToken);
-        return result.IsFailure ? Error(result.Error) : Success(result.Value.Select(Values));
+        return result.IsFailure ? Error(result.Error) : CollectionDiscovery.Result(result.Value,
+            s => s.TestCase.Id, s => s.TestCase.Content.Title, s => s.TestCase.Status.ToString(), s => s.TestCase.InternalId, Values,
+            ["Draft", "InReview", "Approved"], search, status, offset, limit);
     }
 
     [McpServerTool(Name = "read_test_case", ReadOnly = true, OpenWorld = false)]

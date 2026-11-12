@@ -15,14 +15,17 @@ internal sealed class UserNeedMcpTools(UserNeedOperations operations, IProductSt
     private System.Security.Claims.ClaimsPrincipal Principal => http.HttpContext!.User;
 
     [McpServerTool(Name = "list_user_needs", ReadOnly = true, OpenWorld = false)]
-    [Description("List User Needs in all statuses for a Product's manual ID, including retired Products. Returns immutable identities and revision tokens.")]
-    public async Task<CallToolResult> List(string productId, CancellationToken cancellationToken)
+    [Description("List User Needs in all statuses for a Product's manual ID, including retired Products. Returns immutable identities and revision tokens." + CollectionDiscovery.Description)]
+    public async Task<CallToolResult> List(string productId, CancellationToken cancellationToken,
+        string? search = null, string? status = null, int? offset = null, int? limit = null)
     {
         var product = await products.Find(productId, cancellationToken);
         if (product.IsFailure) return Error(product.Error);
         if (product.Value.HasNoValue) return Error("Product not found.");
         var result = await operations.List(Principal, product.Value.Value.InternalId, cancellationToken);
-        return result.IsFailure ? Error(result.Error) : Success(result.Value.Select(Values));
+        return result.IsFailure ? Error(result.Error) : CollectionDiscovery.Result(result.Value,
+            s => s.Need.Id, s => s.Need.Title, s => s.Need.Status.ToString(), s => s.Need.InternalId, Values,
+            ["Draft", "InReview", "Approved"], search, status, offset, limit);
     }
 
     [McpServerTool(Name = "read_user_need", ReadOnly = true, OpenWorld = false)]

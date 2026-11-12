@@ -19,30 +19,44 @@ internal static class McpEndpoints
         ["create_draft_revision"] = ["productId", "identifier", "description", "confirmed"],
         ["edit_draft_revision"] = ["productId", "internalId", "expectedRevision", "identifier", "description", "confirmed"],
         ["change_draft_revision_selection"] = ["productId", "internalId", "expectedRevision", "operation", "target", "replacement", "confirmed"],
-        ["list_revisions"] = ["productId"],
+        ["list_revisions"] = ["productId", "search", "status", "offset", "limit"],
         ["read_revision"] = ["productId", "internalId"],
-        ["list_features"] = ["productId"],
+        ["list_features"] = ["productId", "search", "status", "offset", "limit"],
         ["read_feature"] = ["internalId", "versionId"],
         ["create_draft_feature"] = ["productId", "title", "description"],
         ["edit_draft_feature"] = ["internalId", "versionId", "expectedRevision", "title", "description"],
-        ["list_test_cases"] = ["productId"],
+        ["list_test_cases"] = ["productId", "search", "status", "offset", "limit"],
         ["read_test_case"] = ["internalId", "versionId"],
         ["create_draft_test_case"] = ["productId", "title", "description", "preconditions", "steps"],
         ["edit_draft_test_case"] = ["internalId", "versionId", "expectedRevision", "title", "description", "preconditions", "steps"],
-        ["list_product_areas"] = ["productId"],
+        ["list_product_areas"] = ["productId", "search", "status", "offset", "limit"],
         ["edit_draft_requirement_classification"] = ["internalId", "versionId", "expectedRevision", "areaId", "confirmed"],
         ["edit_draft_test_case_classification"] = ["internalId", "versionId", "expectedRevision", "areaId", "confirmed"],
-        ["list_products"] = [],
+        ["list_products"] = ["search", "status", "offset", "limit"],
         ["read_product"] = ["productId"],
-        ["list_user_needs"] = ["productId"],
+        ["list_user_needs"] = ["productId", "search", "status", "offset", "limit"],
         ["read_user_need"] = ["internalId", "versionId"],
         ["create_draft_user_need"] = ["productId", "id", "title", "statement"],
         ["edit_draft_user_need"] = ["internalId", "expectedRevision", "id", "title", "statement"],
-        ["list_requirements"] = ["productId"],
+        ["list_requirements"] = ["productId", "search", "status", "offset", "limit"],
         ["read_requirement"] = ["internalId", "versionId"],
         ["create_draft_requirement"] = ["productId", "id", "title", "statement", "type", "rationale"],
         ["edit_draft_requirement"] = ["internalId", "expectedRevision", "id", "title", "statement", "type", "rationale"]
     };
+
+    private static bool ValidDiscoveryArguments(JsonElement arguments)
+    {
+        var fields = arguments.EnumerateObject().ToArray();
+        if (fields.Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != fields.Length) return false;
+        foreach (var field in fields)
+        {
+            if (field.Value.ValueKind == JsonValueKind.Null) continue;
+            if (field.Name is "search" or "status" && field.Value.ValueKind != JsonValueKind.String) return false;
+            if (field.Name is "offset" or "limit" &&
+                (field.Value.ValueKind != JsonValueKind.Number || !field.Value.TryGetInt32(out _))) return false;
+        }
+        return true;
+    }
 
     private static bool ValidClassificationArguments(JsonElement arguments) =>
         arguments.ValueKind == JsonValueKind.Object &&
@@ -267,6 +281,12 @@ internal static class McpEndpoints
                 (arguments.ValueKind != JsonValueKind.Object || arguments.EnumerateObject().Any(p => !accepted.Contains(p.Name, StringComparer.Ordinal))))
             {
                 // Reject lifecycle/actor injection rather than silently ignoring extra fields.
+                context.Response.StatusCode = 400;
+                return;
+            }
+            if (tool is not null && tool.StartsWith("list_", StringComparison.Ordinal) && Arguments.ContainsKey(tool) &&
+                parameters.TryGetProperty("arguments", out var discoveryArguments) && !ValidDiscoveryArguments(discoveryArguments))
+            {
                 context.Response.StatusCode = 400;
                 return;
             }

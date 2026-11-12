@@ -16,14 +16,17 @@ internal sealed class RequirementMcpTools(RequirementOperations operations, IPro
     private System.Security.Claims.ClaimsPrincipal Principal => http.HttpContext!.User;
 
     [McpServerTool(Name = "list_requirements", ReadOnly = true, OpenWorld = false)]
-    [Description("List Requirements in all statuses for a Product manual ID, including retired Products. Returns immutable entity/version identities, working/latest-Approved designations and concurrency revision tokens.")]
-    public async Task<CallToolResult> List(string productId, CancellationToken cancellationToken)
+    [Description("List Requirements in all statuses for a Product manual ID, including retired Products. Returns immutable entity/version identities, working/latest-Approved designations and concurrency revision tokens." + CollectionDiscovery.Description)]
+    public async Task<CallToolResult> List(string productId, CancellationToken cancellationToken,
+        string? search = null, string? status = null, int? offset = null, int? limit = null)
     {
         var product = await products.Find(productId, cancellationToken);
         if (product.IsFailure) return Error(product.Error);
         if (product.Value.HasNoValue) return Error("Product not found.");
         var result = await operations.List(Principal, product.Value.Value.InternalId, cancellationToken);
-        return result.IsFailure ? Error(result.Error) : Success(result.Value.Select(Values));
+        return result.IsFailure ? Error(result.Error) : CollectionDiscovery.Result(result.Value,
+            s => s.Requirement.Id, s => s.Requirement.Title, s => s.Requirement.Status.ToString(), s => s.Requirement.InternalId, Values,
+            ["Draft", "InReview", "Approved"], search, status, offset, limit);
     }
 
     [McpServerTool(Name = "read_requirement", ReadOnly = true, OpenWorld = false)]

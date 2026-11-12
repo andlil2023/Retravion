@@ -11,12 +11,15 @@ namespace Retravion.Web.Features.Mcp;
 internal sealed class ProductMcpTools(IProductStore products, McpCredentials credentials, IHttpContextAccessor http)
 {
     [McpServerTool(Name = "list_products", ReadOnly = true, OpenWorld = false)]
-    [Description("List Products, including retired Products. Product information is read-only through MCP.")]
-    public async Task<CallToolResult> List(CancellationToken cancellationToken)
+    [Description("List Products, including retired Products. Product information is read-only through MCP." + CollectionDiscovery.Description)]
+    public async Task<CallToolResult> List(CancellationToken cancellationToken,
+        string? search = null, string? status = null, int? offset = null, int? limit = null)
     {
         if (!await credentials.IsAllowed(http.HttpContext!.User, cancellationToken)) return Error("Access denied.");
         var result = await products.List(cancellationToken);
-        return result.IsFailure ? Error(result.Error) : Success(result.Value.Select(Values));
+        return result.IsFailure ? Error(result.Error) : CollectionDiscovery.Result(result.Value,
+            p => p.Id, p => p.Name, p => p.IsActive ? "Active" : "Retired", p => p.InternalId, Values,
+            ["Active", "Retired"], search, status, offset, limit);
     }
 
     [McpServerTool(Name = "read_product", ReadOnly = true, OpenWorld = false)]
