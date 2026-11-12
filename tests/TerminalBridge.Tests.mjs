@@ -2,6 +2,7 @@
 // Fakes only: no network, certificate, browser or Retravion credential is used.
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { RetravionTerminal, connectionTools, createRequest, serve, validateEndpoint } from "../src/Retravion.Web/Features/Mcp/TerminalSkills/bridge/server.mjs";
 
@@ -97,6 +98,27 @@ test("complete polls until approved, then forwards tools with the bearer credent
 	assert.equal(forwarded.headers["Mcp-Session-Id"], "session-1");
 	assert.deepEqual(forwarded.body.params, { name: "list_products", arguments: {} });
 	assert.equal((await terminal.call("unknown_tool")).isError, true);
+});
+
+test("shipped exact relationship exploration forwards bounded arguments and results unchanged", async () => {
+	const tools = JSON.parse(readFileSync(new URL("../src/Retravion.Web/Features/Mcp/TerminalSkills/bridge/tools.json", import.meta.url), "utf8"));
+	const { calls } = harness();
+	let forwarded;
+	const result = { content: [{ type: "text", text: JSON.stringify({ truncated: true, omittedEdges: 4, edges: [] }) }] };
+	const terminal = new RetravionTerminal({ endpoint, tools, open: async () => true, request: async (url, options) => {
+		const body = options.body && JSON.parse(options.body);
+		calls.push(body);
+		if (url.pathname === "/mcp-connect/start") return json({ deviceCode, userCode: "ABCD-2345", verificationUri: "https://localhost:8443/settings/ai-workflow", expiresIn: 600, interval: 2 });
+		if (url.pathname === "/mcp-connect/status") return json({ status: "approved" });
+		if (body.id === undefined) return { status: 202, headers: {}, text: "" };
+		if (body.method === "tools/call") { forwarded = body.params; return json({ jsonrpc: "2.0", id: body.id, result }); }
+		return json({ jsonrpc: "2.0", id: body.id, result: {} });
+	} });
+	assert.ok(terminal.tools.some(t => t.name === "explore_relationships"));
+	await terminal.call("rtv_connect"); await terminal.call("rtv_complete_connection");
+	const args = { kind: "requirement", internalId: "11111111-1111-1111-1111-111111111111", versionId: "22222222-2222-2222-2222-222222222222", expandedVersionIds: [], limit: 1 };
+	assert.deepEqual(await terminal.call("explore_relationships", args), result);
+	assert.deepEqual(forwarded, { name: "explore_relationships", arguments: args });
 });
 
 test("complete reports denial, expiry and a still-pending approval", async () => {

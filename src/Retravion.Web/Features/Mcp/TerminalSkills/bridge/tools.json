@@ -1,5 +1,45 @@
 [
   {
+    "name": "explore_relationships",
+    "description": "Read incoming/outgoing relationships from an exact User Need, Requirement, Test Case or Feature version. kind: user-need, requirement, test-case or feature. Only explicitly requested reachable expandedVersionIds are expanded (at most 20); repeated versions load once. limit defaults to 100, range 1-200, independently caps edges and unavailable provenance snapshots. Truncation is disclosed; results are not a complete transitive closure. No mutations.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expandedVersionIds": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "default": null
+        },
+        "limit": {
+          "type": "integer",
+          "default": 100
+        }
+      },
+      "required": [
+        "kind",
+        "internalId",
+        "versionId"
+      ]
+    }
+  },
+  {
     "name": "create_draft_feature",
     "description": "Create an incomplete Draft v1 with no links. Optional null title/description default to empty. Requires explicit human approval of initial values. Never automatically retry; list/read candidates after uncertain creation, and do not blindly recreate an ambiguous result.",
     "inputSchema": {
