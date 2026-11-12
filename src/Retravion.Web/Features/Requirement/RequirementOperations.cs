@@ -118,15 +118,15 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
 
     internal Task<Result<RequirementSnapshot>> AddParent(ClaimsPrincipal principal, RequirementSnapshot expected,
         RequirementParentLink target, CancellationToken token = default) =>
-        Change(principal, "requirement.parent.add", (actor, now) => links.AddParent(expected, target, actor, now, token), token);
+        Change(principal, "requirement.parent.add", (actor, now) => links.AddParent(expected, target, actor, now, token, () => LiveAuthority(principal)), token);
 
     internal Task<Result<RequirementSnapshot>> RemoveParent(ClaimsPrincipal principal, RequirementSnapshot expected,
         CancellationToken token = default) =>
-        Change(principal, "requirement.parent.remove", (actor, now) => links.RemoveParent(expected, actor, now, token), token);
+        Change(principal, "requirement.parent.remove", (actor, now) => links.RemoveParent(expected, actor, now, token, () => LiveAuthority(principal)), token);
 
     internal Task<Result<RequirementSnapshot>> ReplaceParent(ClaimsPrincipal principal, RequirementSnapshot expected,
         RequirementParentLink target, CancellationToken token = default) =>
-        Change(principal, "requirement.parent.replace", (actor, now) => links.ReplaceParent(expected, target, actor, now, token), token);
+        Change(principal, "requirement.parent.replace", (actor, now) => links.ReplaceParent(expected, target, actor, now, token, () => LiveAuthority(principal)), token);
 
     internal Task<Result<RequirementSnapshot>> RetargetParent(ClaimsPrincipal principal, RequirementSnapshot expected,
         RequirementParentLink target, RequirementParentLink replacement, CancellationToken token = default) =>
@@ -139,7 +139,7 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
             if (current.Value.HasNoValue || current.Value.Value != target)
                 return Result.Failure<RequirementSnapshot>("The original parent link changed. Retrieve it again.");
             // ReplaceParent validates the captured owner revision again inside its atomic, cycle-safe transaction.
-            return await links.ReplaceParent(expected, replacement, actor, now, token);
+            return await links.ReplaceParent(expected, replacement, actor, now, token, () => LiveAuthority(principal));
         }, token);
 
     internal async Task<Result<IReadOnlyList<RequirementVersionReference>>> IncomingUserNeed(ClaimsPrincipal principal, Guid id,
@@ -156,15 +156,15 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
 
     internal Task<Result<RequirementSnapshot>> AddLink(ClaimsPrincipal principal, RequirementSnapshot expected,
         RequirementUserNeedLink target, CancellationToken token = default) =>
-        Change(principal, "requirement.link.add", (actor, now) => links.ChangeLink(expected, target, true, actor, now, token), token);
+        Change(principal, "requirement.link.add", (actor, now) => links.ChangeLink(expected, target, true, actor, now, token, () => LiveAuthority(principal)), token);
 
     internal Task<Result<RequirementSnapshot>> RetargetLink(ClaimsPrincipal principal, RequirementSnapshot expected,
         RequirementUserNeedLink target, RequirementUserNeedLink replacement, CancellationToken token = default) =>
-        Change(principal, "requirement.link.retarget", (actor, now) => links.RetargetLink(expected, target, replacement, actor, now, token), token);
+        Change(principal, "requirement.link.retarget", (actor, now) => links.RetargetLink(expected, target, replacement, actor, now, token, () => LiveAuthority(principal)), token);
 
     internal Task<Result<RequirementSnapshot>> RemoveLink(ClaimsPrincipal principal, RequirementSnapshot expected,
         RequirementUserNeedLink target, CancellationToken token = default) =>
-        Change(principal, "requirement.link.remove", (actor, now) => links.ChangeLink(expected, target, false, actor, now, token), token);
+        Change(principal, "requirement.link.remove", (actor, now) => links.ChangeLink(expected, target, false, actor, now, token, () => LiveAuthority(principal)), token);
 
     internal async Task<Result<IReadOnlyList<RequirementUserNeedLink>>> Links(ClaimsPrincipal principal, Guid id,
         Guid versionId, CancellationToken token = default) => await Allowed(principal)

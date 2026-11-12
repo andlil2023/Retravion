@@ -1,5 +1,64 @@
 [
   {
+    "name": "change_draft_link",
+    "description": "Change one ordinary link owned by the current editable Draft. Never use in review mode. Requires explicit human approval of relationship and exact owner/old/new endpoints, then confirmed=true. ownerKind: requirement, test-case or feature. relationship: user-need, parent, verifies or addresses (respectively Requirement–User Need, child–parent Requirement, Test Case–Requirement, Feature–Requirement). operation: add, remove or retarget. Supply ownerId, ownerVersionId and positive expectedRevision from a prior read, plus targetId and targetVersionId (old endpoint for retarget). Retarget requires replacementVersionId of the same target entity; omit otherwise. No creation, provenance or lifecycle changes. Never automatically retry; after any uncertain outcome retrieve authorized current state before a human-directed retry.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ownerKind": {
+          "type": "string"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerVersionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer"
+        },
+        "relationship": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "targetVersionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "replacementVersionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid",
+          "default": null
+        }
+      },
+      "required": [
+        "ownerKind",
+        "ownerId",
+        "ownerVersionId",
+        "expectedRevision",
+        "relationship",
+        "operation",
+        "targetId",
+        "targetVersionId",
+        "confirmed"
+      ]
+    }
+  },
+  {
     "name": "explore_relationships",
     "description": "Read incoming/outgoing relationships from an exact User Need, Requirement, Test Case or Feature version. kind: user-need, requirement, test-case or feature. Only explicitly requested reachable expandedVersionIds are expanded (at most 20); repeated versions load once. limit defaults to 100, range 1-200, independently caps edges and unavailable provenance snapshots. Truncation is disclosed; results are not a complete transitive closure. No mutations.",
     "inputSchema": {

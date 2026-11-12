@@ -123,7 +123,7 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
             "add" => "test-case.link.add", "remove" => "test-case.link.remove", "retarget" => "test-case.link.retarget", _ => "test-case.link"
         }, (actor, now) => operation is "remove" or "retarget" && !confirmed
             ? Task.FromResult(Result.Failure<TestCaseSnapshot>("Explicit confirmation of both exact endpoints is required."))
-            : changes.ChangeLink(expected, operation, target, replacement, actor, now, token), token);
+            : changes.ChangeLink(expected, operation, target, replacement, actor, now, token, () => LiveAuthority(principal)), token);
 
     public async Task<Result<IReadOnlyList<TestCaseSnapshot>>> Versions(ClaimsPrincipal principal, Guid internalId, CancellationToken token = default) =>
         await Allowed(principal) ? await store.Versions(internalId, token) : Result.Failure<IReadOnlyList<TestCaseSnapshot>>("Access denied.");

@@ -27,16 +27,16 @@ public sealed partial class PostgresRequirementStore
     }, cancellationToken, Result.Success<IReadOnlyList<RequirementUserNeedLink>>([]));
 
     public Task<Result<RequirementSnapshot>> ChangeLink(RequirementSnapshot expected, RequirementUserNeedLink target, bool add,
-        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default) =>
-        ChangeLinkCore(expected, target, add, null, actor, occurredAt, cancellationToken);
+        AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null) =>
+        ChangeLinkCore(expected, target, add, null, actor, occurredAt, cancellationToken, authorized);
 
     public Task<Result<RequirementSnapshot>> RetargetLink(RequirementSnapshot expected, RequirementUserNeedLink target,
         RequirementUserNeedLink replacement, AuditActor actor, DateTimeOffset occurredAt,
-        CancellationToken cancellationToken = default) =>
-        ChangeLinkCore(expected, target, false, replacement, actor, occurredAt, cancellationToken);
+        CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null) =>
+        ChangeLinkCore(expected, target, false, replacement, actor, occurredAt, cancellationToken, authorized);
 
     private Task<Result<RequirementSnapshot>> ChangeLinkCore(RequirementSnapshot expected, RequirementUserNeedLink target,
-        bool add, RequirementUserNeedLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken)
+        bool add, RequirementUserNeedLink? replacement, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken, Func<Task<bool>>? authorized)
     {
         var editable = RequirementUserNeedLinks.CanChange(expected.Requirement);
         if (editable.IsFailure || actor is not AuditActor.Identified || expected.Revision <= 0)
@@ -108,7 +108,7 @@ public sealed partial class PostgresRequirementStore
                     requirementChange: new RequirementAuditDetails(r.InternalId, values, values, decision, null,
                         r.VersionId, r.VersionNumber, r.SourceVersionId, RelationshipType: RelationshipType, BeforeLinks: before, AfterLinks: after)), cancellationToken);
             return Result.Success(expected with { Revision = expected.Revision + 1 });
-        }, cancellationToken);
+        }, cancellationToken, authorized: authorized);
     }
 
     private static async Task<IReadOnlyList<RequirementUserNeedLink>> LoadLinks(NpgsqlConnection connection,

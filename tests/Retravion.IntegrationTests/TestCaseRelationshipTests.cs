@@ -47,7 +47,7 @@ public sealed partial class PostgresProductTests
         internal RelationshipOperations Operations => Scope.ServiceProvider.GetRequiredService<RelationshipOperations>();
         internal PostgresAuditQuery Audit => new(Database.ConnectionString);
 
-        internal static async Task<CaseRelationshipFixture> Create(bool linked = false)
+        internal static async Task<CaseRelationshipFixture> Create(bool linked = false, TimeProvider? clock = null, bool postgresSettings = false)
         {
             var database = await Database.Create();
             var products = new PostgresProductStore(database.ConnectionString);
@@ -58,9 +58,14 @@ public sealed partial class PostgresProductTests
             var writes = new CaseWriteHook(cases);
             var row = (await cases.Create(data.Product.InternalId, CaseContent("Relationship procedure"), CaseActor, CaseTime)).Value;
             if (linked) row = (await cases.ChangeLink(row, "add", CaseEndpoint(data.Owner), null, CaseActor, CaseTime)).Value;
+            var settings = postgresSettings ? new Retravion.Infrastructure.AiWorkflow.PostgresAiWorkflowSettingsStore(database.ConnectionString) : null;
+            if (settings is not null)
+                Assert.True((await settings.Save((await settings.Load()).Value, true, CaseActor, CaseTime)).IsSuccess);
             var host = new McpTestHost(services =>
             {
+                if (settings is not null) services.AddSingleton<Retravion.Application.AiWorkflow.IAiWorkflowSettingsStore>(settings);
                 RegisterRelationshipCases(services, database.ConnectionString);
+                if (clock is not null) services.AddSingleton(clock);
                 services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
                 services.AddSingleton<IRequirementStore>(requirements);
                 services.AddSingleton<IRequirementLinkStore>(requirements);

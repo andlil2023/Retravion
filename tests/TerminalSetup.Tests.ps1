@@ -119,7 +119,7 @@ try {
         Assert-True ($skillSource.Contains('`' + $tool + '`')) "Installed skill supports $tool"
     }
     Assert-True ($skillSource.Contains('AI review is read-only') -and $skillSource.Contains('A review request never authorizes a save')) 'Review cannot authorize writes'
-    Assert-True ($skillSource.Contains('release, retire/reactivate, delete or mutate Product data') -and $skillSource.Contains('Relationship/link writes, classification changes and lifecycle operations are not supported')) 'Lifecycle and unsupported writes remain excluded'
+    Assert-True ($skillSource.Contains('release, retire/reactivate, delete or mutate Product data') -and $skillSource.Contains('Provenance writes, classification changes and lifecycle operations are not supported')) 'Lifecycle and unsupported writes remain excluded'
     Assert-True (-not (Test-Path (Join-Path $project '.mcp.json'))) 'Other client untouched'
     Assert-True (-not (Get-ChildItem $project -Recurse -Force -File | Select-String -SimpleMatch 'RETRAVION_MCP_TOKEN')) 'No token variable anywhere'
 
