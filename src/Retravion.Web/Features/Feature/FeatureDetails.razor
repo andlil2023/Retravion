@@ -12,14 +12,15 @@
 @if (_feature is not null && _product is not null)
 {
     var value = _feature.Feature;
-    <p>@_product.Id – @_product.Name</p><h2>@value.Id – @value.Content.Title</h2><p>v@value.VersionNumber · @Status(value.Status)</p>
+    <div class="feature-details">
+    <p>@_product.Id – @_product.Name</p><h2>@value.Id – @value.Content.Title</h2><p>@($"v{value.VersionNumber}") · @Status(value.Status)</p>
     @if (!_product.IsActive) { <p>This Feature is read-only because its Product is retired.</p> }
     @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
     <p><MudLink Href="@($"/products/links?kind=feature&id={value.InternalId}&version={value.VersionId}")">Manage links</MudLink> · Links indicate addressed Requirements, not implementation or verification.</p>
-    <nav aria-label="Feature versions">@foreach (var version in _versions) { <MudLink Href="@($"/features/details?id={Id}&version={version.Feature.VersionId}")">v@version.Feature.VersionNumber · @Status(version.Feature.Status)</MudLink><span> </span> }</nav>
+    <nav aria-label="Feature versions">@foreach (var version in _versions) { <MudLink Href="@($"/features/details?id={Id}&version={version.Feature.VersionId}")">@($"v{version.Feature.VersionNumber}") · @Status(version.Feature.Status)</MudLink><span> </span> }</nav>
     <MudPaper Class="product-card pa-4" Elevation="0">
         @if (value.CreationReason is { } reason) { <p style="white-space:pre-wrap">Successor creation reason: @reason</p> }
-        <section aria-label="Description"><h3>Description</h3><ProductMarkdownView Markdown="@value.Content.Description" /></section>
+        <section aria-label="Description" class="product-markdown"><h3>Description</h3><ProductMarkdownView Markdown="@value.Content.Description" /></section>
     </MudPaper>
     @if (_product.IsActive && IsLatest && value.Status == "Draft") { <div class="product-actions"><MudButton Href="@($"/features/edit?id={value.InternalId}&version={value.VersionId}")" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _uncertain)">Edit Draft</MudButton></div> }
     @if (_product.IsActive && IsLatest)
@@ -36,7 +37,7 @@
         @foreach (var item in _history)
         {
             var change = item.Change; var snapshot = change.After;
-            <details><summary>@(change.Decision ?? item.Action) · v@change.VersionNumber · @item.OccurredAt.ToString("u") · @((item.Actor as AuditActor.Identified)?.Identifier)</summary>
+            <details class="product-markdown"><summary>@(change.Decision ?? item.Action) · @($"v{change.VersionNumber}") · @item.OccurredAt.ToString("u") · @((item.Actor as AuditActor.Identified)?.Identifier)</summary>
                 <p>@snapshot.Id · @Status(snapshot.Status)</p><p style="white-space:pre-wrap">Comment: @(change.Comment ?? "None")</p>
                 @if (change.Reason is not null) { <p style="white-space:pre-wrap">Change reason: @change.Reason</p> }
                 @if (change.SourceVersionId is { } source) { <MudLink Href="@($"/features/details?id={change.InternalId}&version={source}")">Exact source Feature version</MudLink> }
@@ -46,6 +47,7 @@
             </details>
         }
     </MudPaper>
+    </div>
 }
 @code {
     [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
