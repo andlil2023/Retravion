@@ -154,7 +154,7 @@ public sealed partial class AccountManagementTests
         using var scope = host.Factory.Services.CreateScope();
         Assert.True((await scope.ServiceProvider.GetRequiredService<UserNeedOperations>().EditDraft(principal, Guid.NewGuid(), 1, "ID", "secret", "secret")).IsFailure);
         await host.Authenticate();
-        Assert.Equal(14, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(18, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
         settings.Unavailable = true;
         using (var unavailable = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, unavailable.StatusCode);
         using (var unavailableIssue = await host.Issue()) Assert.Equal(HttpStatusCode.Forbidden, unavailableIssue.StatusCode);
@@ -253,8 +253,9 @@ public sealed partial class AccountManagementTests
             Assert.StartsWith("---\nname: retravion\ndescription:", skill.Replace("\r\n", "\n"));
             foreach (var tool in new[] { "list_products", "read_product", "list_user_needs", "read_user_need", "create_draft_user_need", "edit_draft_user_need",
                 "list_requirements", "read_requirement", "create_draft_requirement", "edit_draft_requirement",
-                "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case" }) Assert.Contains($"`{tool}`", skill);
-            Assert.Equal("2.2.0", TerminalPackages.Version);
+                "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case",
+                "list_features", "read_feature", "create_draft_feature", "edit_draft_feature" }) Assert.Contains($"`{tool}`", skill);
+            Assert.Equal("2.3.0", TerminalPackages.Version);
             Assert.Equal($"retravion-{client}-{TerminalPackages.Version}.zip", bundle.FileName);
             Assert.Contains($"/packages/{TerminalPackages.Version}/{client}", bundle.DownloadPath);
             Assert.Contains($"integration {TerminalPackages.Version}", skill);
@@ -277,7 +278,7 @@ public sealed partial class AccountManagementTests
             Assert.Contains("if the result remains ambiguous, do not blindly recreate", skill);
             Assert.Contains("On a stale write, do not automatically retry", skill);
             Assert.Contains("obtain fresh approval", skill);
-            Assert.Contains("List/read the affected User Need, Requirement or Test Case", skill);
+            Assert.Contains("List/read the affected User Need, Requirement, Test Case or Feature", skill);
             Assert.Contains("before the user decides whether to retry manually", skill);
             Assert.Contains("explicit human approval", skill);
             Assert.Contains("Never silently overwrite", skill);
@@ -324,7 +325,7 @@ public sealed partial class AccountManagementTests
         host.SetToken(host.DeviceCode);
         using (var denied = await host.Send("tools/list")) Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         await host.Authenticate();
-        Assert.Equal(14, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
+        Assert.Equal(18, (await host.Rpc("tools/list")).GetProperty("tools").GetArrayLength());
     }
 
     [Fact]

@@ -115,7 +115,7 @@ try {
     $skillSource = Get-Content (Join-Path $source 'SKILL.md') -Raw
     Assert-True ((Get-Content (Join-Path $project '.pi/skills/retravion/SKILL.md') -Raw) -ceq $skillSource) 'Current skill installed unchanged for Pi'
     Assert-True ($skillSource.Contains('`create_draft_requirement`') -and $skillSource.Contains('`edit_draft_requirement`')) 'Installed skill supports Requirement Draft writes'
-    foreach ($tool in @('list_test_cases', 'read_test_case', 'create_draft_test_case', 'edit_draft_test_case')) {
+    foreach ($tool in @('list_test_cases', 'read_test_case', 'create_draft_test_case', 'edit_draft_test_case', 'list_features', 'read_feature', 'create_draft_feature', 'edit_draft_feature')) {
         Assert-True ($skillSource.Contains('`' + $tool + '`')) "Installed skill supports $tool"
     }
     Assert-True ($skillSource.Contains('AI review is read-only') -and $skillSource.Contains('A review request never authorizes a save')) 'Review cannot authorize writes'

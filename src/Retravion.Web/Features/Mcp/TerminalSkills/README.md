@@ -1,4 +1,4 @@
-# Retravion — %CLIENT% integration 2.2.0
+# Retravion — %CLIENT% integration 2.3.0
 
 Connect %CLIENT% on this machine to Retravion: run one setup script per project, then approve each connection in your browser. There is no token to copy and no environment variable to set.
 
@@ -48,9 +48,9 @@ Updates are explicit: downloading a ZIP or upgrading Retravion does not update a
 1. Close the terminal. Download the current ZIP for your client from the AI Workflow page, verify its SHA-256 and extract it into a temporary directory.
 2. Run the **new ZIP's** `mcp_setup.ps1 -Directory C:\work\MyApp`, using the same project directory as before. Include your existing `-Endpoint https://localhost:<port>/mcp` if it is not port 8443; compare and confirm the certificate fingerprint again.
 3. Setup replaces that client's Retravion skill and the shared bridge, preserving unrelated MCP entries and settings. If both clients are installed, rerun each client's new ZIP setup for the same project so neither skill remains outdated.
-4. Check that `%SKILL_PATH%/SKILL.md` says `integration 2.2.0`. Restart `%EXECUTABLE%` in the project, reload `%SKILL_COMMAND%` and connect again. Old conversations may retain older instructions: use a new session if it still reports an older integration or excludes Test Cases.
+4. Check that `%SKILL_PATH%/SKILL.md` says `integration 2.3.0`. Restart `%EXECUTABLE%` in the project, reload `%SKILL_COMMAND%` and connect again. Old conversations may retain older instructions: use a new session if it still reports an older integration or excludes Features.
 
-Integration 2.2.0 supports `list_test_cases`, `read_test_case`, `create_draft_test_case` and `edit_draft_test_case`. Do not bypass an older skill's exclusions by invoking tools directly; explicitly update and reload it first. No integrations are overwritten automatically.
+Integration 2.3.0 supports `list_test_cases`, `read_test_case`, `create_draft_test_case` and `edit_draft_test_case`. Do not bypass an older skill's exclusions by invoking tools directly; explicitly update and reload it first. Feature tools are `list_features`, `read_feature`, `create_draft_feature` and `edit_draft_feature`. Creation generates identities and Draft v1; edits require exact working version and revision and preserve links. Obtain explicit initial/old-new content approval before writing. After uncertain creation, inspect candidate records and never blindly recreate an ambiguous result. No integrations are overwritten automatically.
 
 To remove, close the terminal and run:
 

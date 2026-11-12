@@ -7,7 +7,7 @@ import https from "node:https";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const version = "2.2.0";
+const version = "2.3.0";
 const protocolVersion = "2025-11-25";
 const maxBytes = 16 * 1024 * 1024;
 const loopback = ["localhost", "127.0.0.1", "[::1]"];

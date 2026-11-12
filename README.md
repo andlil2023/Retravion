@@ -341,12 +341,16 @@ integration version and SHA-256. These fixed packages contain only
 (`bridge/server.mjs`, `bridge/tools.json`); no credentials, user records or terminal client.
 A hash checks file integrity, not publisher identity. Downloading grants no access.
 
-Integration 2.2.0 guides Product, User Need, Requirement and Test Case reads and requires
-explicit conversation approval before User Need, Requirement or Test Case Draft writes.
+Integration 2.3.0 guides Product, User Need, Requirement, Test Case and Feature reads and requires
+explicit conversation approval before User Need, Requirement, Test Case or Feature Draft writes.
 Test Case tools are `list_test_cases`, `read_test_case`, `create_draft_test_case` and
 `edit_draft_test_case`. Creation generates the ID and permits empty content; edits replace
 the exact working Draft version's full content and ordered steps. Revision checks and
-no automatic retries (including stale or uncertain writes) remain required. Relationship/link
+no automatic retries (including stale or uncertain writes) remain required. Feature tools are
+`list_features`, `read_feature`, `create_draft_feature` and `edit_draft_feature`. Feature creation
+generates identities and Draft v1; edits replace title/description using the exact working version
+and revision while preserving existing links. After uncertain creation, inspect candidate records;
+never blindly recreate an ambiguous result. Relationship/link
 writes, classification changes and lifecycle operations remain unsupported by the skill;
 it does not confer lifecycle approval or new permissions. AI review is read-only and never
 authorizes saving; humans apply suggestions and review decisions in the web UI.
@@ -358,8 +362,8 @@ project. Include the existing `-Endpoint` if not using port 8443 and confirm the
 fingerprint again. This replaces only the selected Retravion skill, shared bridge and
 Retravion configuration; unrelated MCP entries and settings are preserved. For both clients,
 run each client's setup so both skills are current. Check the installed `SKILL.md` heading
-for `integration 2.2.0`, restart the terminal, reload the skill and connect again. Use a new
-session if old instructions still report 2.1.0 or exclude Test Cases; do not bypass the old
+for `integration 2.3.0`, restart the terminal, reload the skill and connect again. Use a new
+session if old instructions still report an older version or exclude Features; do not bypass the old
 skill by calling tools directly.
 
 To remove, run setup with `-Remove`:
