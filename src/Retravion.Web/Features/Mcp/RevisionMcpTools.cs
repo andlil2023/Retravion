@@ -15,15 +15,18 @@ internal sealed class RevisionMcpTools(RevisionOperations operations, IProductSt
     private System.Security.Claims.ClaimsPrincipal Principal => http.HttpContext!.User;
 
     [McpServerTool(Name = "list_revisions", ReadOnly = true, OpenWorld = false)]
-    [Description("List Draft and Released Revisions for a Product manual ID, including retired Products. Returns immutable identities and exact explicit selections. Read-only; no preparation, selection or lifecycle changes.")]
-    public async Task<CallToolResult> List(string productId, CancellationToken cancellationToken)
+    [Description("List Draft and Released Revisions for a Product manual ID, including retired Products. Returns immutable identities and exact explicit selections. Read-only; no preparation, selection or lifecycle changes." + CollectionDiscovery.Description)]
+    public async Task<CallToolResult> List(string productId, CancellationToken cancellationToken,
+        string? search = null, string? status = null, int? offset = null, int? limit = null)
     {
         if (!await operations.CanRead(Principal)) return Error("Access denied.");
         var product = await products.Find(productId, cancellationToken);
         if (product.IsFailure) return Error(product.Error);
         if (product.Value.HasNoValue) return Error("Product not found.");
         var result = await operations.List(Principal, product.Value.Value.InternalId, cancellationToken);
-        return result.IsFailure ? Error(result.Error) : Success(result.Value.Select(Values));
+        return result.IsFailure ? Error(result.Error) : CollectionDiscovery.Result(result.Value,
+            s => s.Value.Identifier, s => s.Value.Description, s => s.Value.State, s => s.Value.InternalId, Values,
+            ["Draft", "Released"], search, status, offset, limit);
     }
 
     [McpServerTool(Name = "read_revision", ReadOnly = true, OpenWorld = false)]

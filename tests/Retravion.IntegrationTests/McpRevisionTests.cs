@@ -59,13 +59,15 @@ public sealed partial class AccountManagementTests
         {
             foreach (var arguments in new object[] { new { }, new { productId = 12 },
                 new { productId = "P", internalId = "invalid" }, new { productId = "P", actor = "spoofed" },
-                new { productId = "P", selections = Array.Empty<object>() }, new { productId = "P", status = "Released" } })
+                new { productId = "P", selections = Array.Empty<object>() }, new { productId = "P", state = "Released" } })
             {
                 using var invalid = await host.Send("tools/call", new { name, arguments });
                 Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
             }
         }
-        foreach (var arguments in new object[] { new { productId = "P" }, new { productId = "P", internalId = Guid.Empty } })
+        // status is now a supported list filter, but is not accepted by exact reads.
+        foreach (var arguments in new object[] { new { productId = "P" }, new { productId = "P", internalId = Guid.Empty },
+            new { productId = "P", internalId = Guid.NewGuid(), status = "Released" } })
         {
             using var invalid = await host.Send("tools/call", new { name = "read_revision", arguments });
             Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);

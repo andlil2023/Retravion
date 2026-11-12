@@ -233,6 +233,18 @@ A real Windows/Podman smoke test must also
 verify certificate trust, container builds/startup, a second run preserving secrets and
 data, an explicit reset, and `-UpdateImages` on the target machine.
 
+## Targeted collection discovery
+
+Prefer bounded discovery for `list_products`, `list_user_needs`, `list_requirements`, `list_test_cases`, `list_features`, `list_revisions` and `list_product_areas`. Keep the required Product manual `productId` for Product-scoped lists.
+
+- Supply `search` (up to 200 characters) for ordinal case-insensitive ID/title substring matching. Products use ID/name, areas code/label, and Revisions identifier/description.
+- Optional `status` is an exact case-insensitive name: Active/Retired for Products/areas, Draft/Released for Revisions, Draft/InReview/Approved for versioned entities. Filters combine with AND and apply to the existing working-or-latest-Approved selection, not historical versions.
+- Supplying any non-null discovery parameter opts into a page object: `items`, `offset`, `limit`, `total`, `remaining`, `nextOffset`, `complete`. Defaults: offset 0, limit 50; offset must be nonnegative and limit 1–200. Empty search also opts in.
+- Ordering is ordinal ID then immutable identity. `total` counts authorized filtered matches; `remaining` counts matches after this page. Continue with `nextOffset` and identical filters until null. `complete` is true only when this response contains the entire filtered collection (offset 0 with no remaining matches). Never call a page the full Product collection, or treat a filtered absence as global absence.
+- Pages are independent reads, not a frozen snapshot. Concurrent edits may move boundaries; restart discovery if a consistent collection is required.
+- Omitting all discovery parameters (or passing all null) retains the legacy complete-array response for compatibility. Prefer paging in new terminal conversations. Bounds limit returned rows, not underlying store reads; no persistence strategy changes.
+- Example: `list_requirements(productId="P", search="login", status="Draft", limit=20, offset=0)`. After discovery, use exact read tools for selected records. Update/reload older integrations before passing the new parameters.
+
 ## AI Workflow settings and local MCP (Claude Code and Pi)
 
 Run the app with the local Podman setup above. Keep its published port bound to

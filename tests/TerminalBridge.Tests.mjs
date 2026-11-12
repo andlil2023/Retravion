@@ -121,6 +121,27 @@ test("shipped exact relationship exploration forwards bounded arguments and resu
 	assert.deepEqual(forwarded, { name: "explore_relationships", arguments: args });
 });
 
+test("shipped discovery tools forward filters and preserve partial-page metadata", async () => {
+	const tools = JSON.parse(readFileSync(new URL("../src/Retravion.Web/Features/Mcp/TerminalSkills/bridge/tools.json", import.meta.url), "utf8"));
+	let forwarded;
+	const result = { content: [{ type: "text", text: JSON.stringify({ items: [], offset: 20, limit: 20, total: 50, remaining: 10, nextOffset: 40, complete: false }) }] };
+	const terminal = new RetravionTerminal({ endpoint, tools, open: async () => true, request: async (url, options) => {
+		const body = options.body && JSON.parse(options.body);
+		if (url.pathname === "/mcp-connect/start") return json({ deviceCode, userCode: "ABCD-2345", verificationUri: "https://localhost:8443/settings/ai-workflow", expiresIn: 600, interval: 2 });
+		if (url.pathname === "/mcp-connect/status") return json({ status: "approved" });
+		if (body.id === undefined) return { status: 202, headers: {}, text: "" };
+		if (body.method === "tools/call") { forwarded = body.params; return json({ jsonrpc: "2.0", id: body.id, result }); }
+		return json({ jsonrpc: "2.0", id: body.id, result: {} });
+	} });
+	await terminal.call("rtv_connect"); await terminal.call("rtv_complete_connection");
+	for (const tool of tools.filter(t => t.name.startsWith("list_"))) {
+		const args = { search: "login", status: "Draft", offset: 20, limit: 20, ...(tool.name === "list_products" ? {} : { productId: "P" }) };
+		assert.deepEqual(await terminal.call(tool.name, args), result);
+		assert.deepEqual(forwarded, { name: tool.name, arguments: args });
+		for (const key of ["search", "status", "offset", "limit"]) assert.ok(tool.inputSchema.properties[key]);
+	}
+});
+
 for (const tool of ["change_draft_link", "create_draft_revision", "edit_draft_revision", "change_draft_revision_selection"])
 test(`shipped ${tool} forwards confirmed arguments once and preserves uncertainty`, async () => {
 	const tools = JSON.parse(readFileSync(new URL("../src/Retravion.Web/Features/Mcp/TerminalSkills/bridge/tools.json", import.meta.url), "utf8"));
