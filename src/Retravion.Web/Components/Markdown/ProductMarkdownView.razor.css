@@ -1,3 +1,11 @@
+.product-markdown-content { display: flow-root; }
+.product-markdown-content ::deep :is(h1, h2, h3, h4, h5, h6) { margin-block: 1.5rem 0.75rem; }
+.product-markdown-content ::deep :is(p, ul, ol, blockquote, pre, hr) { margin-block: 0.75rem; }
+/* Reserve space for outside markers even without a page-specific document wrapper. */
+.product-markdown-content ::deep :is(ul, ol) { padding-inline-start: 1.5rem; }
+.product-markdown-content ::deep > :first-child { margin-block-start: 0; }
+.product-markdown-content ::deep > :last-child { margin-block-end: 0; }
+
 .product-markdown-content ::deep table { border-collapse: collapse; margin-block: 1rem; }
 .product-markdown-content ::deep th, .product-markdown-content ::deep td {
     border: 1px solid var(--mud-palette-divider);
