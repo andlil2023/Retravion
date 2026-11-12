@@ -18,7 +18,9 @@ const appCss = await readFile(new URL('../src/Retravion.Web/wwwroot/css/app.css'
 const bundledCss = await readFile(new URL('../src/Retravion.Web/obj/Release/net10.0/scopedcss/bundle/Retravion.Web.styles.css', import.meta.url), 'utf8');
 const scope = bundledCss.match(/\.feature-details\[([^\]]+)\]/)?.[1];
 assert.ok(scope, 'Release build must contain Feature details scoped styles.');
-const content = '<div class="product-markdown-content"><h2>Context</h2><p>First paragraph.</p><p>Second paragraph.</p><ul><li>First bullet<ul><li>Nested bullet</li></ul></li><li>Second bullet</li></ul><ol><li>Ordered item</li></ol></div>';
+const markdownScope = bundledCss.match(/\.product-markdown-content\[([^\]]+)\]/)?.[1];
+assert.ok(markdownScope, 'Release build must contain shared Markdown scoped styles.');
+const content = `<div class="product-markdown-content" ${markdownScope}><h2>Context</h2><p>First paragraph.</p><p>Second paragraph.</p><ul><li>First bullet<ul><li>Nested bullet</li></ul></li><li>Second bullet</li></ul><ol><li>Ordered item</li></ol></div>`;
 // Apply the generated scope only to page-owned nodes, just as Razor does.
 const fixture = `<!doctype html><html><head><meta charset="utf-8"><style>
 * { box-sizing:border-box; margin:0; padding:0; }
