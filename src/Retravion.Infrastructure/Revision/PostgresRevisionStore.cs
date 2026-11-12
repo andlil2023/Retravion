@@ -278,8 +278,9 @@ public sealed partial class PostgresRevisionStore(string connectionString,
             await using var c = new NpgsqlConnection(connectionString);
             await c.OpenAsync(token);
             await using var t = await c.BeginTransactionAsync(token);
-            // Match User Need -> Requirement -> Test Case order, before the revision lock and audit lock.
-            await using (var locks = new NpgsqlCommand("SELECT pg_advisory_xact_lock(821749620111); SELECT pg_advisory_xact_lock(821749620112); SELECT pg_advisory_xact_lock(821749620114)", c, t))
+            // Match User Need -> Requirement -> Test Case -> Feature order, before revision and audit.
+            // Feature writes also lock their Requirement targets before their own storage.
+            await using (var locks = new NpgsqlCommand("SELECT pg_advisory_xact_lock(821749620111); SELECT pg_advisory_xact_lock(821749620112); SELECT pg_advisory_xact_lock(821749620114); SELECT pg_advisory_xact_lock(821749620118)", c, t))
                 await locks.ExecuteNonQueryAsync(token);
             await using (var areas = new NpgsqlCommand(PostgresProductAreaStore.Setup, c, t)) await areas.ExecuteNonQueryAsync(token);
             await using (var setup = new NpgsqlCommand(Setup, c, t)) await setup.ExecuteNonQueryAsync(token);

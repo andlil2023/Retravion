@@ -5,6 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using CSharpFunctionalExtensions;
 using Npgsql;
 using Retravion.Application.AuditTrail;
+using Retravion.Application.Feature;
+using Retravion.Domain.Feature;
+using Retravion.Infrastructure.Feature;
 using Retravion.Application.Product.Create;
 using Retravion.Application.Requirement;
 using Retravion.Application.Revision;
@@ -27,7 +30,8 @@ namespace Retravion.IntegrationTests;
 public sealed partial class PostgresProductTests
 {
     private sealed record ReleaseGraph(Product Product, RevisionSnapshot Row, UserNeedSnapshot Need1, UserNeedSnapshot Need2,
-        RequirementSnapshot Parent1, RequirementSnapshot Parent2, RequirementSnapshot Child, TestCaseSnapshot Case1, TestCaseSnapshot Case2);
+        RequirementSnapshot Parent1, RequirementSnapshot Parent2, RequirementSnapshot Child, TestCaseSnapshot Case1, TestCaseSnapshot Case2,
+        FeatureSnapshot Feature);
 
     private static async Task<ReleaseGraph> PrepareRelease(string connection)
     {
@@ -54,14 +58,20 @@ public sealed partial class PostgresProductTests
             return await CaseApprove(cases, value);
         }
         var c1 = await Root("First root"); var c2 = await Root("Shared root");
+        var features = new PostgresFeatureStore(connection);
+        var feature = (await features.Create(product.InternalId, FeatureContent.Create("Release capability", "Exact capability evidence"), RevActor, RevTime)).Value;
+        feature = (await features.ChangeLink(feature, "add", new(child.Requirement.InternalId, child.Requirement.VersionId), null, RevActor, RevTime)).Value;
+        feature = (await features.Review(feature, "InReview", null, RevActor, RevTime)).Value;
+        feature = (await features.Review(feature, "Approved", null, RevActor, RevTime)).Value;
         var revisions = new PostgresRevisionStore(connection);
         var row = await RevCreate(revisions, product.InternalId);
         foreach (var endpoint in new[] {
             new RevisionSelection(RevisionEntityKind.TestCase, c1.TestCase.InternalId, c1.TestCase.VersionId, 1),
             new RevisionSelection(RevisionEntityKind.TestCase, c2.TestCase.InternalId, c2.TestCase.VersionId, 1),
-            new RevisionSelection(RevisionEntityKind.Requirement, parent2.Requirement.InternalId, parent2.Requirement.VersionId, 2) })
+            new RevisionSelection(RevisionEntityKind.Requirement, parent2.Requirement.InternalId, parent2.Requirement.VersionId, 2),
+            new RevisionSelection(RevisionEntityKind.Feature, feature.Feature.InternalId, feature.Feature.VersionId, 1) })
             row = (await revisions.Select(Guid.NewGuid(), row, "add", endpoint, null, RevActor, RevTime, RevAllowed)).Value;
-        return new(product, row, n1, n2, parent, parent2, child, c1, c2);
+        return new(product, row, n1, n2, parent, parent2, child, c1, c2, feature);
     }
 
     private static async Task<RevisionBaseline> ReleasePreview(PostgresRevisionStore store, RevisionSnapshot row) =>
@@ -84,7 +94,7 @@ public sealed partial class PostgresProductTests
         var incomingCase = (await cases.Create(graph.Product.InternalId, CaseContent("Incoming only"), RevActor, RevTime)).Value;
         incomingCase = (await cases.ChangeLink(incomingCase, "add", CaseEndpoint(graph.Child), null, RevActor, RevTime)).Value;
         var preview = await ReleasePreview(store, graph.Row);
-        Assert.Equal(7, preview.Members.Count); Assert.Equal(3, preview.Members.Count(m => m.Explicit));
+        Assert.Equal(8, preview.Members.Count); Assert.Equal(4, preview.Members.Count(m => m.Explicit));
         Assert.All(preview.Members, m => Assert.Equal("Approved", m.Status));
         Assert.Equal(new[] { 1, 2 }, preview.Members.Where(m => m.Endpoint.InternalId == graph.Need1.Need.InternalId).Select(m => m.Endpoint.VersionNumber).Order());
         Assert.Equal(new[] { 1, 2 }, preview.Members.Where(m => m.Endpoint.InternalId == graph.Parent1.Requirement.InternalId).Select(m => m.Endpoint.VersionNumber).Order());
@@ -111,6 +121,11 @@ public sealed partial class PostgresProductTests
         Assert.Equal(operation, (await store.Retrieve(graph.Product.InternalId, released.InternalId, operation)).Value.Operation!.Change.OperationId);
         Assert.True((await needs.Update(graph.Need2, graph.Need2.Need.Reopen("Protected").Value, RevActor, RevTime, "Reopened", "Protected")).IsFailure);
         Assert.True((await requirements.Update(graph.Child, graph.Child.Requirement.Reopen("Protected").Value, RevActor, RevTime, "Reopened", "Protected")).IsFailure);
+        var features = new PostgresFeatureStore(db.ConnectionString);
+        Assert.True((await features.Reopen(graph.Feature, "Protected", RevActor, RevTime)).IsFailure);
+        Assert.True((await features.Update(graph.Feature, FeatureContent.Create("Forbidden", ""), RevActor, RevTime)).IsFailure);
+        Assert.True((await features.ChangeLink(graph.Feature, "remove", new(graph.Child.Requirement.InternalId, graph.Child.Requirement.VersionId), null, RevActor, RevTime)).IsFailure);
+        Assert.True((await features.Review(graph.Feature, "Draft", null, RevActor, RevTime)).IsFailure);
         Assert.True((await cases.Reopen(graph.Case1, "Protected", RevActor, RevTime)).IsFailure);
         Assert.True((await cases.Update(graph.Case1, CaseContent("Forbidden"), RevActor, RevTime)).IsFailure);
         Assert.True((await cases.ChangeLink(graph.Case1, "remove", CaseEndpoint(graph.Child), null, RevActor, RevTime)).IsFailure);
@@ -126,7 +141,7 @@ public sealed partial class PostgresProductTests
         Assert.Equal(eventCount + 1, (await new PostgresAuditQuery(db.ConnectionString).FindAsync(new())).Count);
         // Sharing protection with another release cannot remove or duplicate entity-edit evidence.
         var shared = await RevCreate(store, graph.Product.InternalId, "Shared revision");
-        shared = (await store.Select(Guid.NewGuid(), shared, "add", released.Selections[0], null, RevActor, RevTime, RevAllowed)).Value;
+        shared = (await store.Select(Guid.NewGuid(), shared, "add", released.Selections.Single(e => e.Kind == RevisionEntityKind.Feature), null, RevActor, RevTime, RevAllowed)).Value;
         Assert.True((await ReleaseNow(store, await ReleasePreview(store, shared))).IsSuccess);
         incoming = (await requirements.ChangeLink(incoming, needEndpoint, false, RevActor, RevTime)).Value;
         incoming = (await requirements.RemoveParent(incoming, RevActor, RevTime)).Value;
@@ -134,6 +149,14 @@ public sealed partial class PostgresProductTests
         Assert.True((await requirements.Parent(incoming.Requirement.InternalId, incoming.Requirement.VersionId)).Value.HasNoValue);
         incomingCase = (await cases.ChangeLink(incomingCase, "remove", CaseEndpoint(graph.Child), null, RevActor, RevTime)).Value;
         Assert.Empty(incomingCase.TestCase.Links);
+        Assert.True((await features.Reopen(graph.Feature, "Still protected", RevActor, RevTime)).IsFailure);
+        var successor = (await features.CreateSuccessor(graph.Feature, "Allowed successor", RevActor, RevTime)).Value;
+        Assert.Equal(graph.Feature.Feature.Links.ToArray(), successor.Feature.Links.ToArray());
+        successor = (await features.Update(successor, FeatureContent.Create("Later capability", "Changed description"), RevActor, RevTime)).Value;
+        successor = (await features.ChangeLink(successor, "remove", graph.Feature.Feature.Links[0], null, RevActor, RevTime)).Value;
+        Assert.Empty(successor.Feature.Links);
+        var retainedFeature = (await features.Find(graph.Feature.Feature.InternalId, graph.Feature.Feature.VersionId)).Value.Value;
+        Assert.True(graph.Feature.Feature.SameState(retainedFeature.Feature));
         var n3 = (await needs.CreateSuccessor(graph.Need2, "Allowed successor", RevActor, RevTime)).Value;
         n3 = (await needs.Update(n3, n3.Need.SubmitForReview().Value, RevActor, RevTime, "InReview")).Value;
         Assert.True((await needs.Update(n3, n3.Need.Approve().Value, RevActor, RevTime, "Approved")).IsSuccess);
@@ -146,7 +169,7 @@ public sealed partial class PostgresProductTests
         await using var c = new NpgsqlConnection(db.ConnectionString); await c.OpenAsync();
         await using var t = await c.BeginTransactionAsync();
         await using (var rename = new NpgsqlCommand("ALTER TABLE retravion_requirement.parent_link RENAME TO hidden_parent_link", c, t)) await rename.ExecuteNonQueryAsync();
-        Assert.Equal(7, (await store.Baseline(graph.Product.InternalId, released.InternalId)).Value.Members.Count);
+        Assert.Equal(8, (await store.Baseline(graph.Product.InternalId, released.InternalId)).Value.Members.Count);
         await t.RollbackAsync();
     }
 
@@ -207,6 +230,12 @@ public sealed partial class PostgresProductTests
             var store = new PostgresRequirementStore(connection, commit);
             return (successor ? await store.CreateSuccessor(g.Child, "Next", RevActor, RevTime) :
                 await store.Update(g.Child, g.Child.Requirement.Reopen("Correction").Value, RevActor, RevTime, "Reopened", "Correction")).Map(_ => true);
+        }
+        if (kind == RevisionEntityKind.Feature)
+        {
+            var features = new PostgresFeatureStore(connection, commit);
+            return (successor ? await features.CreateSuccessor(g.Feature, "Next", RevActor, RevTime) :
+                await features.Reopen(g.Feature, "Correction", RevActor, RevTime)).Map(_ => true);
         }
         var cases = new PostgresTestCaseStore(connection, commit);
         return (successor ? await cases.CreateSuccessor(g.Case1, "Next", RevActor, RevTime) :
@@ -410,6 +439,7 @@ public sealed partial class PostgresProductTests
               'needs',(SELECT jsonb_agg(to_jsonb(t) ORDER BY version_id) FROM retravion_need.need_version t),
               'requirements',(SELECT jsonb_agg(to_jsonb(t) ORDER BY version_id) FROM retravion_requirement.requirement_version t),
               'cases',(SELECT jsonb_agg(to_jsonb(t) ORDER BY version_id) FROM retravion_test_case.test_case_version t),
+              'features',(SELECT jsonb_agg(to_jsonb(t) ORDER BY version_id) FROM retravion_feature.feature_version t),
               'audit',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM retravion_audit.event t))::text
             """, c);
         return (string)(await command.ExecuteScalarAsync())!;
@@ -426,6 +456,7 @@ public sealed partial class PostgresProductTests
             ("retravion_need.need_version", g.Need1.Need.VersionId), ("retravion_need.need_version", g.Need2.Need.VersionId),
             ("retravion_requirement.requirement_version", g.Child.Requirement.VersionId), ("retravion_requirement.requirement_version", g.Parent1.Requirement.VersionId),
             ("retravion_test_case.test_case_version", g.Case1.TestCase.VersionId), ("retravion_test_case.test_case_version", g.Case2.TestCase.VersionId),
+            ("retravion_feature.feature_version", g.Feature.Feature.VersionId),
             ("retravion_revision.revision", Guid.Empty), ("retravion_revision.history", Guid.Empty), ("retravion_audit.event", Guid.Empty) })
         {
             var filter = id == Guid.Empty ? "" : $" WHEN (NEW.version_id='{id}')";
@@ -451,8 +482,8 @@ public sealed partial class PostgresProductTests
             if (!committed) Assert.Equal(state, await ReleaseDatabaseState(c));
             else
             {
-                Assert.Equal(7, ((ReleasedRevision)retrieved.Record.Value).Members.Length);
-                Assert.Equal(7, (await ReleasePreview(store, retrieved.Record)).Members.Count);
+                Assert.Equal(8, ((ReleasedRevision)retrieved.Record.Value).Members.Length);
+                Assert.Equal(8, (await ReleasePreview(store, retrieved.Record)).Members.Count);
                 Assert.True((await ReleaseNow(store, preview, operation)).IsFailure);
             }
         }

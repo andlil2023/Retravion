@@ -65,7 +65,10 @@ public sealed partial class PostgresProductTests
             Assert.DoesNotContain("Revision history", renderer.Text());
             await RevisionTab(renderer, 1);
             var baseline = Assert.Single(renderer.Components<MudTable<RevisionBaselineMember>>()).Items!.ToArray();
-            Assert.Equal(7, baseline.Length); Assert.Contains(baseline, m => !m.Explicit);
+            Assert.Equal(8, baseline.Length); Assert.Contains(baseline, m => !m.Explicit);
+            var feature = Assert.Single(baseline, m => m.Endpoint.Kind == RevisionEntityKind.Feature);
+            Assert.Equal("Feature F-001 · v1", RevisionPresentation.Label(feature));
+            Assert.Contains(renderer.Components<MudLink>(), l => l.Href == RevisionPresentation.EndpointPath(feature.Endpoint) && l.Href.StartsWith("/features/details"));
             Assert.Contains("Selected", renderer.Text()); Assert.Contains("Included through links", renderer.Text());
             await renderer.Field("Search contents by ID or title").ValueChanged.InvokeAsync("not a record");
             Assert.Empty(Assert.Single(renderer.Components<MudTable<RevisionBaselineMember>>()).Items!);
@@ -113,7 +116,7 @@ public sealed partial class PostgresProductTests
         {
             await renderer.Mount(typeof(RevisionDetails), new() { [nameof(RevisionDetails.ProductId)] = graph.Product.Id, [nameof(RevisionDetails.Id)] = retiredDraft.Value.InternalId });
             Assert.Contains("Release blocked", renderer.Text());
-            Assert.Contains("All 7 baseline records are Approved", renderer.Text());
+            Assert.Contains("All 8 baseline records are Approved", renderer.Text());
             Assert.DoesNotContain("Ready for release review", renderer.Text());
             Assert.DoesNotContain("0 records need approval", renderer.Text());
             Assert.False(renderer.HasButton("Review release"));
@@ -149,7 +152,8 @@ public sealed partial class PostgresProductTests
         var endpoints = new[] {
             new RevisionSelection(RevisionEntityKind.UserNeed, graph.Need1.Need.InternalId, graph.Need1.Need.VersionId, 1),
             new RevisionSelection(RevisionEntityKind.Requirement, graph.Parent1.Requirement.InternalId, graph.Parent1.Requirement.VersionId, 1),
-            new RevisionSelection(RevisionEntityKind.TestCase, graph.Case1.TestCase.InternalId, graph.Case1.TestCase.VersionId, 1) };
+            new RevisionSelection(RevisionEntityKind.TestCase, graph.Case1.TestCase.InternalId, graph.Case1.TestCase.VersionId, 1),
+            new RevisionSelection(RevisionEntityKind.Feature, graph.Feature.Feature.InternalId, graph.Feature.Feature.VersionId, 1) };
         await renderer.Dispatcher.InvokeAsync(async () =>
         {
             foreach (var endpoint in endpoints)
@@ -174,6 +178,11 @@ public sealed partial class PostgresProductTests
                 await AddRevisionMember(renderer, endpoint);
                 Assert.Equal(endpoint, Assert.Single((await store.Retrieve(graph.Product.InternalId, row.Value.InternalId)).Value.Record!.Value.Selections));
                 Assert.Equal(baseline + 1, (await audit.FindAsync(new())).Count);
+                if (endpoint.Kind == RevisionEntityKind.Feature)
+                {
+                    await InspectMembership(renderer, "Feature F-001 · v1");
+                    Assert.Contains(renderer.Components<MudLink>(), l => l.Href == $"/products/links?kind=feature&id={endpoint.InternalId}&version={endpoint.VersionId}");
+                }
             }
             var deniedRow = await RevCreate(store, graph.Product.InternalId, "Denied callback");
             await MountMembership(renderer, graph.Product.Id, deniedRow.Value.InternalId);

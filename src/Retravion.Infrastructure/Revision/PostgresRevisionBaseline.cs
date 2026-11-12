@@ -3,6 +3,7 @@ using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Npgsql;
 using Retravion.Application.Revision;
+using Retravion.Domain.Feature;
 using Retravion.Domain.Revision;
 using Retravion.Domain.TestCase;
 using Retravion.Infrastructure.Product;
@@ -16,6 +17,7 @@ public sealed partial class PostgresRevisionStore
         RevisionEntityKind.UserNeed => "retravion_need.need_version",
         RevisionEntityKind.Requirement => "retravion_requirement.requirement_version",
         RevisionEntityKind.TestCase => "retravion_test_case.test_case_version",
+        RevisionEntityKind.Feature => "retravion_feature.feature_version",
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };
 
@@ -33,9 +35,15 @@ public sealed partial class PostgresRevisionStore
     {
         var table = Table(kind);
         if (!await Exists(c, t, table, token)) return Result.Failure<RevisionBaselineMember>("Exact version not available in this Product.");
-        var identifier = kind == RevisionEntityKind.TestCase ? "'TC-' || lpad(number::text,greatest(3,length(number::text)),'0')" : "id";
-        var status = kind == RevisionEntityKind.TestCase ? "status" : "CASE status WHEN 0 THEN 'Draft' WHEN 1 THEN 'InReview' WHEN 2 THEN 'Approved' ELSE 'Invalid' END";
-        var areaColumn = kind == RevisionEntityKind.UserNeed ? "NULL::uuid" : "area_id";
+        var identifier = kind switch
+        {
+            RevisionEntityKind.TestCase => "'TC-' || lpad(number::text,greatest(3,length(number::text)),'0')",
+            RevisionEntityKind.Feature => "'F-' || lpad(number::text,greatest(3,length(number::text)),'0')",
+            _ => "id"
+        };
+        var status = kind is RevisionEntityKind.TestCase or RevisionEntityKind.Feature ? "status" : "CASE status WHEN 0 THEN 'Draft' WHEN 1 THEN 'InReview' WHEN 2 THEN 'Approved' ELSE 'Invalid' END";
+        var hasArea = kind is RevisionEntityKind.Requirement or RevisionEntityKind.TestCase;
+        var areaColumn = hasArea ? "area_id" : "NULL::uuid";
         await using var command = new NpgsqlCommand($"SELECT {identifier},title,{status},version_number,{areaColumn} FROM {table} WHERE product_internal_id=$1 AND internal_id=$2 AND version_id=$3", c, t);
         command.Parameters.AddWithValue(product); command.Parameters.AddWithValue(id); command.Parameters.AddWithValue(version);
         await using var reader = await command.ExecuteReaderAsync(token);
@@ -48,7 +56,7 @@ public sealed partial class PostgresRevisionStore
         var title = reader.GetString(1);
         var areaId = reader.IsDBNull(4) ? (Guid?)null : reader.GetGuid(4);
         await reader.DisposeAsync();
-        var area = kind == RevisionEntityKind.UserNeed ? null : await PostgresProductAreaStore.Evidence(c, t, product, areaId, token);
+        var area = hasArea ? await PostgresProductAreaStore.Evidence(c, t, product, areaId, token) : null;
         return new RevisionBaselineMember(endpoint, manualId, title, state, false, area);
     }
 
@@ -140,6 +148,15 @@ public sealed partial class PostgresRevisionStore
             command.Parameters.AddWithValue(owner.InternalId); command.Parameters.AddWithValue(owner.VersionId);
             var json = (string)(await command.ExecuteScalarAsync(token))!;
             var links = JsonSerializer.Deserialize<TestCaseRequirementLink[]>(json);
+            if (links is null || links.Any(l => l is null)) return Result.Failure<IReadOnlyList<RevisionSelection>>("Invalid persisted outgoing links.");
+            targets.AddRange(links.Select(l => (RevisionEntityKind.Requirement, l.RequirementInternalId, l.RequirementVersionId)));
+        }
+        else if (owner.Kind == RevisionEntityKind.Feature)
+        {
+            await using var command = new NpgsqlCommand("SELECT links FROM retravion_feature.feature_version WHERE internal_id=$1 AND version_id=$2", c, t);
+            command.Parameters.AddWithValue(owner.InternalId); command.Parameters.AddWithValue(owner.VersionId);
+            var json = (string)(await command.ExecuteScalarAsync(token))!;
+            var links = JsonSerializer.Deserialize<FeatureRequirementLink[]>(json);
             if (links is null || links.Any(l => l is null)) return Result.Failure<IReadOnlyList<RevisionSelection>>("Invalid persisted outgoing links.");
             targets.AddRange(links.Select(l => (RevisionEntityKind.Requirement, l.RequirementInternalId, l.RequirementVersionId)));
         }
