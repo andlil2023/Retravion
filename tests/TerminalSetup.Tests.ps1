@@ -64,6 +64,38 @@ try {
     Assert-Throws { & $setup -Directory $broken -CertificateFile $cer -Fingerprint $fingerprint } 'Nothing was changed'
     Assert-True (-not (Test-Path (Join-Path $broken '.retravion-terminal'))) 'Nothing installed beside unreadable configuration'
 
+    # Explicit upgrade from stale installed guidance/bridge for each client. Merely staging
+    # the new package changes nothing; only invoking its setup replaces Retravion files.
+    foreach ($client in @('pi', 'claude')) {
+        $upgrade = Join-Path $temp "upgrade-$client"
+        $skillPath = Join-Path $upgrade ".$client/skills/retravion/SKILL.md"
+        $configPath = Join-Path $upgrade $(if ($client -eq 'pi') { '.pi/mcp.json' } else { '.mcp.json' })
+        $otherSkill = Join-Path $upgrade $(if ($client -eq 'pi') { '.claude/skills/retravion/SKILL.md' } else { '.pi/skills/retravion/SKILL.md' })
+        New-Item (Split-Path $skillPath) -ItemType Directory -Force | Out-Null
+        New-Item (Split-Path $otherSkill) -ItemType Directory -Force | Out-Null
+        New-Item (Join-Path $upgrade '.retravion-terminal/bridge') -ItemType Directory -Force | Out-Null
+        Set-Content $skillPath '# integration 2.1.0 - Test Cases unsupported' -NoNewline
+        Set-Content $otherSkill 'other client skill' -NoNewline
+        Set-Content $configPath $existing -NoNewline
+        foreach ($file in @('server.mjs', 'tools.json')) {
+            Set-Content (Join-Path $upgrade ".retravion-terminal/bridge/$file") 'old bridge' -NoNewline
+        }
+        Assert-True ((Get-Content $skillPath -Raw).Contains('2.1.0')) 'Staging package does not update installed skill'
+        Assert-Throws { & $setup -Client $client -Directory $upgrade -CertificateFile $cer -Fingerprint ('00:' * 31 + '00') } 'does not match'
+        Assert-True ((Get-Content $skillPath -Raw).Contains('2.1.0')) 'Refused upgrade keeps old skill'
+        Assert-True ((Get-Content (Join-Path $upgrade '.retravion-terminal/bridge/server.mjs') -Raw) -ceq 'old bridge') 'Refused upgrade keeps old bridge'
+        & $setup -Client $client -Directory $upgrade -CertificateFile $cer -Fingerprint $fingerprint -Endpoint 'https://localhost:9443/mcp' 6>$null
+        Assert-True ((Get-Content $skillPath -Raw) -ceq (Get-Content (Join-Path $source 'SKILL.md') -Raw)) 'Explicit upgrade installs current skill'
+        foreach ($file in @('server.mjs', 'tools.json')) {
+            Assert-True ((Get-FileHash (Join-Path $upgrade ".retravion-terminal/bridge/$file")).Hash -eq (Get-FileHash (Join-Path $source "bridge/$file")).Hash) 'Explicit upgrade installs current bridge'
+        }
+        $upgradedConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+        Assert-True ($upgradedConfig.mcpServers.other.url -eq 'https://example.invalid/mcp' -and $upgradedConfig.mcpServers.other.headers.'X-Keep' -eq '1') 'Upgrade preserves unrelated server'
+        Assert-True (($upgradedConfig.unrelated -join ',') -eq '1,2') 'Upgrade preserves unrelated settings'
+        Assert-True ((Get-Content $otherSkill -Raw) -ceq 'other client skill') 'Upgrade does not silently replace other client skill'
+        Assert-True ((Get-Content (Join-Path $upgrade '.retravion-terminal/endpoint.json') -Raw | ConvertFrom-Json).endpoint -eq 'https://localhost:9443/mcp') 'Upgrade uses explicit custom endpoint'
+    }
+
     # Fresh install, then an identical rerun.
     foreach ($run in 1..2) {
         & $setup -Directory $project -CertificateFile $cer -Fingerprint $fingerprint -Endpoint 'https://localhost:9443/mcp' 6>$null
@@ -83,6 +115,11 @@ try {
     $skillSource = Get-Content (Join-Path $source 'SKILL.md') -Raw
     Assert-True ((Get-Content (Join-Path $project '.pi/skills/retravion/SKILL.md') -Raw) -ceq $skillSource) 'Current skill installed unchanged for Pi'
     Assert-True ($skillSource.Contains('`create_draft_requirement`') -and $skillSource.Contains('`edit_draft_requirement`')) 'Installed skill supports Requirement Draft writes'
+    foreach ($tool in @('list_test_cases', 'read_test_case', 'create_draft_test_case', 'edit_draft_test_case')) {
+        Assert-True ($skillSource.Contains('`' + $tool + '`')) "Installed skill supports $tool"
+    }
+    Assert-True ($skillSource.Contains('AI review is read-only') -and $skillSource.Contains('A review request never authorizes a save')) 'Review cannot authorize writes'
+    Assert-True ($skillSource.Contains('release, retire/reactivate, delete or mutate Product data') -and $skillSource.Contains('Relationship/link writes, classification changes and lifecycle operations are not supported')) 'Lifecycle and unsupported writes remain excluded'
     Assert-True (-not (Test-Path (Join-Path $project '.mcp.json'))) 'Other client untouched'
     Assert-True (-not (Get-ChildItem $project -Recurse -Force -File | Select-String -SimpleMatch 'RETRAVION_MCP_TOKEN')) 'No token variable anywhere'
 

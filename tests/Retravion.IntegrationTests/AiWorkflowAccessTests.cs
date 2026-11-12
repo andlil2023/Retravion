@@ -266,7 +266,7 @@ public sealed partial class AccountManagementTests
             Assert.Contains("Omitted/null rationale clears it", skill);
             Assert.Contains("preserve the current rationale unless the user explicitly approves", skill);
             Assert.Contains("Do not edit a historical version", skill);
-            Assert.Contains("Do not submit for review, approve, return to Draft, create versions, delete or mutate Product data", skill);
+            Assert.Contains("Do not submit for review, approve, reject, reopen, return to Draft, create successor versions, release, retire/reactivate, delete or mutate Product data", skill);
             Assert.Contains("Relationship/link writes, classification changes and lifecycle operations are not supported", skill);
             Assert.Contains("Optional `title`, `description`, `preconditions` and `steps` default to empty", skill);
             Assert.Contains("server generates the Product-scoped manual `id`", skill);
