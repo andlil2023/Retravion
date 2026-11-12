@@ -60,6 +60,43 @@ public sealed partial class PostgresProductTests
             Assert.Equal(reopening ? 3 : 1, (await store.History(expected.Feature.InternalId)).Value.Count);
         }
     }
+    [PostgresFact]
+    public async Task FeatureDetailsRendersVersionNumbersInSummaryNavigationAndHistory()
+    {
+        await using var database = await Database.Create();
+        var products = new PostgresProductStore(database.ConnectionString);
+        var product = (await new CreateProduct(products).Execute("P", "Product", ProductKind.System, "")).Value;
+        var store = new PostgresFeatureStore(database.ConnectionString);
+        var draft = (await store.Create(product.InternalId, FeatureContent.Create("Feature", "## Context\n\nParagraph.\n\n- First\n  - Nested\n\n1. Ordered"), FeatureActor, FeatureTime)).Value;
+        var review = (await store.Review(draft, "InReview", null, FeatureActor, FeatureTime)).Value;
+        var approved = (await store.Review(review, "Approved", null, FeatureActor, FeatureTime)).Value;
+        var successor = (await store.CreateSuccessor(approved, "Improve", FeatureActor, FeatureTime)).Value;
+        await using var host = new McpTestHost(services =>
+        {
+            services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
+            services.AddSingleton<IFeatureStore>(store);
+            services.AddSingleton<IFeatureChangeTransaction>(store);
+        });
+        await host.Login(); await host.Replace();
+        foreach (var version in new[] { approved, successor })
+        {
+            using var response = await host.Browser.GetAsync($"/features/details?id={draft.Feature.InternalId}&version={version.Feature.VersionId}");
+            var html = await response.Content.ReadAsStringAsync();
+            Assert.True(response.IsSuccessStatusCode);
+            Assert.DoesNotContain("v@", html);
+            Assert.Contains($">v{version.Feature.VersionNumber} · {(version.Feature.Status == "InReview" ? "In Review" : version.Feature.Status)}</p>", html);
+            var navigation = html[html.IndexOf("<nav aria-label=\"Feature versions\"", StringComparison.Ordinal)..];
+            navigation = navigation[..navigation.IndexOf("</nav>", StringComparison.Ordinal)];
+            Assert.Contains("v1 · Approved</a>", navigation);
+            Assert.Contains("v2 · Draft</a>", navigation);
+            Assert.Contains("· v1 ·", html);
+            Assert.Contains("· v2 ·", html);
+            Assert.Contains("class=\"product-markdown\"", html);
+            Assert.Contains("<ul>", html);
+            Assert.Contains("<ol>", html);
+        }
+    }
+
     private sealed class FeatureClock : TimeProvider { internal DateTimeOffset Now = DateTimeOffset.UtcNow; public override DateTimeOffset GetUtcNow() => Now; }
 
     [PostgresFact]
