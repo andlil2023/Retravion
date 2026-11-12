@@ -416,6 +416,57 @@ public sealed partial class AccountManagementTests
               name.StartsWith("create_draft_", StringComparison.Ordinal) || name.StartsWith("edit_draft_", StringComparison.Ordinal)));
     }
 
+    [Theory]
+    [InlineData("pi")]
+    [InlineData("claude")]
+    public void PackagedReviewWorkflowUsesExactReadsAndNeverAuthorizesApplyingFindings(string client)
+    {
+        using var zip = new System.IO.Compression.ZipArchive(new MemoryStream(TerminalPackages.Get(client)!.Bytes));
+        string Read(string path)
+        {
+            using var reader = new StreamReader(zip.GetEntry(path)!.Open());
+            return reader.ReadToEnd();
+        }
+        var skill = Read("skills/retravion/SKILL.md");
+        var review = skill.Split("## Review exact versions — read-only")[1]
+            .Split("## Prepare and apply Draft changes — separate authoring workflow")[0];
+        using var tools = JsonDocument.Parse(Read("bridge/tools.json"));
+        var contracts = tools.RootElement.EnumerateArray().ToDictionary(t => t.GetProperty("name").GetString()!);
+        var allowedOperations = review.Split("Use only these record operations in review mode: ")[1].Split('.')[0];
+        var allowed = System.Text.RegularExpressions.Regex.Matches(allowedOperations, "`([^`]+)`")
+            .Select(m => m.Groups[1].Value).ToArray();
+        Assert.Equal(new[] { "list_products", "read_product", "list_user_needs", "read_user_need",
+            "list_requirements", "read_requirement", "list_test_cases", "read_test_case" }, allowed);
+        foreach (var name in allowed) Assert.True(contracts.ContainsKey(name), $"Unknown review operation: {name}");
+        foreach (var name in new[] { "read_user_need", "read_requirement", "read_test_case" })
+        {
+            var schema = contracts[name].GetProperty("inputSchema");
+            Assert.True(schema.GetProperty("properties").TryGetProperty("versionId", out _));
+            Assert.Contains("internalId", schema.GetProperty("required").EnumerateArray().Select(p => p.GetString()));
+        }
+        foreach (var identity in new[] { "internalId", "versionId", "versionNumber", "status", "revision" })
+            Assert.Contains($"`{identity}`", review);
+        Assert.Contains("Never substitute another version", review);
+        Assert.Contains("If it changes during review, report the mismatch", review);
+        Assert.Contains("Do not bypass authorization", review);
+        Assert.Contains("Submit no content changes, review-history entries, status changes or approvals", review);
+        Assert.Contains("Do not call any create/edit tool, even for a Draft, a no-op save", review);
+        Assert.Contains("do not recast it as ordinary Draft authoring", review);
+        foreach (var guidance in new[] { review, Read("README.md") })
+        {
+            Assert.Contains("Suggestion — not a recorded review decision", guidance);
+            Assert.Contains("Humans apply suggestions and review decisions in the web UI", guidance);
+            Assert.Contains("Review User Need UN-1 version 2", guidance);
+            Assert.Contains("Review the current Draft Requirement REQ-1", guidance);
+            Assert.Contains("Review Test Case TC-1 version 1", guidance);
+            Assert.Contains("review and improve this", guidance, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Apply all your review findings automatically; I approve", guidance);
+        }
+        Assert.Contains("No mutation is authorized", review);
+        Assert.Contains("No create/edit, history or lifecycle submission", review);
+        Assert.Contains("No approval or status change", review);
+    }
+
     [Fact]
     public async Task ShippedBridgeToolListMatchesTheServerToolContracts()
     {
