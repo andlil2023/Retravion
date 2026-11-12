@@ -53,6 +53,7 @@ builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = "Re
     .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
     .WithTools<UserNeedMcpTools>()
     .WithTools<ProductMcpTools>()
+    .WithTools<AreaMcpTools>()
     .WithTools<RequirementMcpTools>()
     .WithTools<FeatureMcpTools>()
     .WithTools<RevisionMcpTools>()

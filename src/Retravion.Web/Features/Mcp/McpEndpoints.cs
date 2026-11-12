@@ -29,6 +29,9 @@ internal static class McpEndpoints
         ["read_test_case"] = ["internalId", "versionId"],
         ["create_draft_test_case"] = ["productId", "title", "description", "preconditions", "steps"],
         ["edit_draft_test_case"] = ["internalId", "versionId", "expectedRevision", "title", "description", "preconditions", "steps"],
+        ["list_product_areas"] = ["productId"],
+        ["edit_draft_requirement_classification"] = ["internalId", "versionId", "expectedRevision", "areaId", "confirmed"],
+        ["edit_draft_test_case_classification"] = ["internalId", "versionId", "expectedRevision", "areaId", "confirmed"],
         ["list_products"] = [],
         ["read_product"] = ["productId"],
         ["list_user_needs"] = ["productId"],
@@ -40,6 +43,17 @@ internal static class McpEndpoints
         ["create_draft_requirement"] = ["productId", "id", "title", "statement", "type", "rationale"],
         ["edit_draft_requirement"] = ["internalId", "expectedRevision", "id", "title", "statement", "type", "rationale"]
     };
+
+    private static bool ValidClassificationArguments(JsonElement arguments) =>
+        arguments.ValueKind == JsonValueKind.Object &&
+        arguments.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() == arguments.EnumerateObject().Count() &&
+        new[] { "internalId", "versionId" }.All(key => arguments.TryGetProperty(key, out var value) &&
+            value.ValueKind == JsonValueKind.String && value.TryGetGuid(out var id) && id != Guid.Empty) &&
+        arguments.TryGetProperty("expectedRevision", out var revision) && revision.ValueKind == JsonValueKind.Number &&
+        revision.TryGetInt64(out var number) && number > 0 &&
+        arguments.TryGetProperty("confirmed", out var confirmed) && confirmed.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+        arguments.TryGetProperty("areaId", out var area) && (area.ValueKind == JsonValueKind.Null ||
+            area.ValueKind == JsonValueKind.String && area.TryGetGuid(out var areaId) && areaId != Guid.Empty);
 
     private static bool ValidTestCaseArguments(string tool, JsonElement arguments)
     {
@@ -236,13 +250,13 @@ internal static class McpEndpoints
                 if (tool is "create_draft_user_need" or "edit_draft_user_need")
                     await context.RequestServices.GetRequiredService<UserNeedOperations>().DeniedMcpMutation(context.User,
                         tool == "create_draft_user_need" ? "need.create" : "need.edit", context.RequestAborted);
-                if (tool is "create_draft_requirement" or "edit_draft_requirement")
+                if (tool is "create_draft_requirement" or "edit_draft_requirement" or "edit_draft_requirement_classification")
                     await context.RequestServices.GetRequiredService<RequirementOperations>().DeniedMcpMutation(context.User,
                         tool == "create_draft_requirement" ? "requirement.create" : "requirement.edit", context.RequestAborted);
                 if (tool is "create_draft_feature" or "edit_draft_feature")
                     await context.RequestServices.GetRequiredService<Retravion.Web.Features.Feature.FeatureOperations>().DeniedMcpMutation(context.User,
                         tool == "create_draft_feature" ? "feature.create" : "feature.edit", context.RequestAborted);
-                if (tool is "create_draft_test_case" or "edit_draft_test_case")
+                if (tool is "create_draft_test_case" or "edit_draft_test_case" or "edit_draft_test_case_classification")
                     await context.RequestServices.GetRequiredService<TestCaseOperations>().DeniedMcpMutation(context.User,
                         tool == "create_draft_test_case" ? "test-case.create" : "test-case.edit", context.RequestAborted);
                 context.Response.StatusCode = transportAllowed ? 401 : 403;
@@ -253,6 +267,13 @@ internal static class McpEndpoints
                 (arguments.ValueKind != JsonValueKind.Object || arguments.EnumerateObject().Any(p => !accepted.Contains(p.Name, StringComparer.Ordinal))))
             {
                 // Reject lifecycle/actor injection rather than silently ignoring extra fields.
+                context.Response.StatusCode = 400;
+                return;
+            }
+            if (tool is "edit_draft_requirement_classification" or "edit_draft_test_case_classification" &&
+                (!parameters.TryGetProperty("arguments", out var classificationArguments) ||
+                 !ValidClassificationArguments(classificationArguments)))
+            {
                 context.Response.StatusCode = 400;
                 return;
             }

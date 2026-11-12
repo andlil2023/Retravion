@@ -3,7 +3,7 @@ name: retravion
 description: Read Retravion Products, Revisions/baselines, User Needs, Requirements, Test Cases and Features, and prepare or apply supported Draft changes through authenticated MCP. Use when the user asks to work with these records from an AI terminal.
 ---
 
-# Retravion workflow — integration 2.7.0
+# Retravion workflow — integration 2.8.0
 
 ## Connect safely
 
@@ -76,13 +76,21 @@ AI review is read-only, including review of a Draft. A review request never auth
 - Requirement edits replace content: send `internalId`, `expectedRevision`, `id`, `title`, `statement`, `type` and optional `rationale`. Omitted/null rationale clears it; preserve the current rationale unless the user explicitly approves clearing or replacing it.
 - For a Test Case edit, read its current working Draft first. Send its immutable `internalId`, exact working `versionId`, positive returned `revision` as `expectedRevision`, and all of `title`, `description`, `preconditions` and `steps`. This fully replaces content: preserve every field and step not explicitly approved for change. Do not edit a historical version. Existing identities, classification and links are preserved.
 - Show the proposed initial values or old/new content in the terminal and obtain explicit human approval before calling a mutation tool. Approval to discuss or draft is not approval to save.
-- Use only `create_draft_user_need`, `edit_draft_user_need`, `create_draft_requirement`, `edit_draft_requirement`, `create_draft_test_case`, `edit_draft_test_case`, `create_draft_feature`, `edit_draft_feature` and the bounded `change_draft_link` workflow below for writes. Creation produces a Draft under an active Product; edits require an active Product and a Draft working version.
+- Use only `create_draft_user_need`, `edit_draft_user_need`, `create_draft_requirement`, `edit_draft_requirement`, `create_draft_test_case`, `edit_draft_test_case`, `create_draft_feature`, `edit_draft_feature` and the bounded `change_draft_link` and Draft classification workflows below for writes. Creation produces a Draft under an active Product; edits require an active Product and a Draft working version.
 - Do not submit for review, approve, reject, reopen, return to Draft, create successor versions, release, retire/reactivate, delete or mutate Product data. These operations are not provided by this integration.
 - AI review is read-only. A review request never authorizes a save or automatic application of findings. Humans apply suggestions and review decisions in the web UI; ordinary Draft authoring is a separate, explicitly approved workflow.
 - Never supply an actor identity or status to a write. Retravion authenticates the actor and enforces its own authorization, validation, concurrency and audit rules.
 - On a stale write, do not automatically retry. Retrieve again, show the changed context, revise the proposal and obtain fresh approval before a human-directed save. Never silently overwrite newer content.
 - Do not automatically retry any mutation. An uncertain commit, timeout or lost response does not prove rollback. List/read the affected User Need, Requirement, Test Case or Feature to establish what persisted before the user decides whether to retry manually; creating again without checking may duplicate work. After uncertain Test Case or Feature creation, list/read candidate records; if the result remains ambiguous, do not blindly recreate.
 - After confirmed success, summarize the resulting manual ID and values. Conversation approval is not lifecycle approval or an electronic signature.
+
+## Draft classification — never in review mode
+
+Use `list_product_areas` with the selected Product's manual `productId` to inspect active and retired areas. Requirement and Test Case reads return the exact version's `areaId` or explicit null. Resolve current code/label through the area list; never replace frozen release-time evidence with current labels.
+
+Use `edit_draft_requirement_classification` or `edit_draft_test_case_classification` only for separate ordinary Draft authoring after reading the exact owner. Show the immutable entity/version identity, revision and old/new area identities, codes and labels (or Unclassified), and obtain explicit human approval. Supply `internalId`, exact `versionId`, positive returned `revision` as `expectedRevision`, required `areaId` (active same-Product area identity, or explicit `null` to clear), and `confirmed=true` only for that proposal. Omission is not clearing. These tools change classification only, preserving content, links and earlier versions. Existing inherited retired classifications can remain during unrelated content edits; after clearing/changing, a retired area cannot be newly selected. Only eligible Drafts under active Products may change.
+
+Area creation, renaming, retirement/reactivation and lifecycle operations remain web-only. Review requests never authorize classification saves or application of findings. After a stale/failed/uncertain outcome, never automatically retry: retrieve authorized exact current state, show what persisted and obtain fresh approval before a human-directed retry. Update and reload older integrations before using these tools.
 
 ## Ordinary Draft link authoring — never in review mode
 
@@ -94,6 +102,6 @@ Only current eligible Draft owners in active Products can change links. Same-Pro
 
 ## Capabilities and evolution
 
-This version supports read-only Products, Revision reads/bounded Draft preparation, exact-version relationship exploration, and User Need, Requirement, Test Case and Feature reads/Draft writes. Provenance writes, classification changes and lifecycle operations are not supported by this skill, even if the bridge lists other tools. It grants no permissions and does not add tools to the server.
+This version supports read-only Products, Revision reads/bounded Draft preparation, exact-version relationship exploration, and User Need, Requirement, Test Case and Feature reads/Draft writes. Area reads and explicitly approved eligible Draft classification changes are supported. Provenance writes, area administration and lifecycle operations are not supported by this skill, even if the bridge lists other tools. It grants no permissions and does not add tools to the server.
 Future entities require a new explicitly supported integration version; do not invent tool names or infer capability from a roadmap.
 Manual updates and removal are described in the bundled README.

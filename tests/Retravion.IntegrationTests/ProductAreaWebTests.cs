@@ -159,7 +159,7 @@ public sealed partial class PostgresProductTests
     }
 
     [PostgresFact]
-    public async Task ExistingMcpEditsPreserveAreaWithoutNewToolArgumentsOrResponseFields()
+    public async Task ExistingMcpContentEditsPreserveAreaAndExposeItsIdentity()
     {
         await using var db = await Database.Create(); var p = await AreaProduct(db.ConnectionString);
         var area = await AreaCreate(new PostgresProductAreaStore(db.ConnectionString), p.InternalId);
@@ -170,13 +170,14 @@ public sealed partial class PostgresProductTests
         var tools = await host.Rpc("tools/list");
         foreach (var tool in tools.GetProperty("tools").EnumerateArray())
         {
-            // Revision reads now describe frozen area evidence, but no tool accepts area authoring.
-            Assert.DoesNotContain("area", tool.GetProperty("inputSchema").GetRawText(), StringComparison.OrdinalIgnoreCase);
-            if (tool.GetProperty("name").GetString() != "read_revision")
-                Assert.DoesNotContain("area", tool.GetRawText(), StringComparison.OrdinalIgnoreCase);
+            var name = tool.GetProperty("name").GetString()!;
+            if (name.EndsWith("_classification", StringComparison.Ordinal))
+                Assert.True(tool.GetProperty("inputSchema").GetProperty("properties").TryGetProperty("areaId", out _));
+            else
+                Assert.DoesNotContain("areaId", tool.GetProperty("inputSchema").GetRawText(), StringComparison.OrdinalIgnoreCase);
         }
         var result = await host.Call("edit_draft_requirement", new { internalId = original.Requirement.InternalId, expectedRevision = original.Revision, id = "R", title = "Changed", statement = "Statement", type = "System" });
-        Assert.DoesNotContain("areaId", result.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(area.Area.InternalId, result.GetProperty("areaId").GetGuid());
         Assert.Equal(area.Area.InternalId, (await requirements.Find(original.Requirement.InternalId)).Value.Value.Requirement.AreaId);
         var edit = (await new PostgresAuditQuery(db.ConnectionString).FindAsync(new())).Single(e => e.Action == "requirement.edit");
         Assert.Equal(area.Area.InternalId, edit.RequirementChange!.Before!.Area!.Area!.InternalId);

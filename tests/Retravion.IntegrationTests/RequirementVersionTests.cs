@@ -304,6 +304,6 @@ public sealed partial class PostgresProductTests
         await host.Call("edit_draft_requirement", new { internalId = first.Requirement.InternalId, expectedRevision = first.Revision, id = "ID", title = "Stale", statement = "Stale", type = "Hardware" }, true);
         await host.Call("edit_draft_requirement", new { internalId = first.Requirement.InternalId, expectedRevision = current.GetProperty("revision").GetInt64(), id = "Renamed", title = "Changed", statement = "Changed", type = "Hardware" }, true);
         var tools = (await host.Rpc("tools/list")).GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToArray();
-        Assert.Equal(new[] { "create_draft_requirement", "edit_draft_requirement", "list_requirements", "read_requirement" }, tools.Where(n => n!.Contains("requirement")).Order().ToArray());
+        Assert.Equal(new[] { "create_draft_requirement", "edit_draft_requirement", "edit_draft_requirement_classification", "list_requirements", "read_requirement" }, tools.Where(n => n!.Contains("requirement")).Order().ToArray());
     }
 }

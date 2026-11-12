@@ -43,6 +43,23 @@ internal sealed class TestCaseOperations(IAuthorizationService authorization, Se
                     authorized: () => LiveAuthority(principal));
         }, token);
 
+    internal Task<Result<TestCaseSnapshot>> ClassifyMcp(ClaimsPrincipal principal, Guid internalId, Guid versionId,
+        long expectedRevision, Guid? areaId, bool confirmed, CancellationToken token) =>
+        Change(principal, "test-case.edit", async (actor, now) =>
+        {
+            if (!confirmed) return Result.Failure<TestCaseSnapshot>("Explicit human confirmation of old/new classification is required.");
+            if (internalId == Guid.Empty || versionId == Guid.Empty || expectedRevision <= 0 || areaId == Guid.Empty)
+                return Result.Failure<TestCaseSnapshot>("Exact identities and a positive expectedRevision are required.");
+            var found = await store.Find(internalId, versionId, token);
+            if (found.IsFailure) return Result.Failure<TestCaseSnapshot>(found.Error);
+            if (found.Value.HasNoValue) return Result.Failure<TestCaseSnapshot>("Test Case not found.");
+            var expected = found.Value.Value;
+            if (expected.Revision != expectedRevision)
+                return Result.Failure<TestCaseSnapshot>("The version changed. Retrieve it again before editing.");
+            return await changes.Update(expected, expected.TestCase.Content, actor, now, token,
+                changeArea: true, areaId: areaId, authorized: () => LiveAuthority(principal));
+        }, token);
+
     private async Task<bool> Allowed(ClaimsPrincipal principal) =>
         sessions.IsActive(principal.FindFirstValue(SessionTicketStore.SessionClaim)) &&
         (!principal.HasClaim(c => c.Type == McpCredentials.CredentialClaim) || await mcpCredentials.IsAllowed(principal)) &&

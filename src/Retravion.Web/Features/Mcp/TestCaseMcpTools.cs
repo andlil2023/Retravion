@@ -77,13 +77,22 @@ internal sealed class TestCaseMcpTools(TestCaseOperations operations, IProductSt
         return result.IsFailure ? Error(result.Error) : Success(Values(result.Value));
     }
 
+    [McpServerTool(Name = "edit_draft_test_case_classification", Destructive = true, Idempotent = false, OpenWorld = false)]
+    [Description("Change only the exact eligible Draft's classification after explicit human approval of old/new values. Supply internalId, versionId, positive expectedRevision, areaId (active same-Product area identity, or explicit null to clear), and confirmed=true. Preserves content and links. Never automatically retry; after uncertainty retrieve authorized current state before a human-directed retry.")]
+    public async Task<CallToolResult> Classify(Guid internalId, Guid versionId, long expectedRevision, Guid? areaId,
+        bool confirmed, CancellationToken cancellationToken)
+    {
+        var result = await operations.ClassifyMcp(Principal, internalId, versionId, expectedRevision, areaId, confirmed, cancellationToken);
+        return result.IsFailure ? Error(result.Error) : Success(Values(result.Value));
+    }
+
     private static object Values(TestCaseSnapshot snapshot) => new
     {
         snapshot.TestCase.InternalId, snapshot.TestCase.ProductInternalId, snapshot.TestCase.Id,
         snapshot.TestCase.VersionId, snapshot.TestCase.VersionNumber, status = snapshot.TestCase.Status.ToString(),
         snapshot.TestCase.Content.Title, snapshot.TestCase.Content.Description, snapshot.TestCase.Content.Preconditions,
         steps = Steps(snapshot.TestCase.Content.Steps), links = Links(snapshot.TestCase.Links), snapshot.Revision,
-        snapshot.TestCase.CreationReason, snapshot.TestCase.SourceVersionId, snapshot.LatestApprovedVersionNumber
+        snapshot.TestCase.CreationReason, snapshot.TestCase.SourceVersionId, snapshot.LatestApprovedVersionNumber, snapshot.TestCase.AreaId
     };
     private static object? AuditValues(TestCaseAuditValues? value) => value is null ? null : new
     {

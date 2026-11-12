@@ -71,13 +71,22 @@ internal sealed class RequirementMcpTools(RequirementOperations operations, IPro
     private static RequirementType? ParseType(string type) => Enum.GetValues<RequirementType>()
         .Where(value => value.ToString().Equals(type, StringComparison.OrdinalIgnoreCase))
         .Select(value => (RequirementType?)value).FirstOrDefault();
+    [McpServerTool(Name = "edit_draft_requirement_classification", Destructive = true, Idempotent = false, OpenWorld = false)]
+    [Description("Change only the exact eligible Draft's classification after explicit human approval of old/new values. Supply internalId, versionId, positive expectedRevision, areaId (active same-Product area identity, or explicit null to clear), and confirmed=true. Preserves content and links. Never automatically retry; after uncertainty retrieve authorized current state before a human-directed retry.")]
+    public async Task<CallToolResult> Classify(Guid internalId, Guid versionId, long expectedRevision, Guid? areaId,
+        bool confirmed, CancellationToken cancellationToken)
+    {
+        var result = await operations.ClassifyMcp(Principal, internalId, versionId, expectedRevision, areaId, confirmed, cancellationToken);
+        return result.IsFailure ? Error(result.Error) : Success(Values(result.Value));
+    }
+
     private static object Values(RequirementSnapshot snapshot) => new
     {
         snapshot.Requirement.InternalId, snapshot.Requirement.ProductInternalId, snapshot.Requirement.Id, snapshot.Requirement.Title,
         snapshot.Requirement.Statement, type = snapshot.Requirement.Type.ToString(), snapshot.Requirement.Rationale,
         status = snapshot.Requirement.Status.ToString(), snapshot.Revision,
         snapshot.Requirement.VersionId, snapshot.Requirement.VersionNumber, snapshot.Requirement.CreationReason,
-        snapshot.Requirement.SourceVersionId, snapshot.LatestApprovedVersionNumber
+        snapshot.Requirement.SourceVersionId, snapshot.LatestApprovedVersionNumber, snapshot.Requirement.AreaId
     };
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static CallToolResult Success(object value) => new() { Content = [new TextContentBlock { Text = JsonSerializer.Serialize(value, Json) }] };

@@ -794,4 +794,94 @@
       ]
     }
   }
+,
+  {
+    "name": "list_product_areas",
+    "description": "List active and retired areas for a Product manual productId, including retired Products. Returns immutable area identity, Product identity, stable code, current label and status. Area administration remains web-only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "productId"
+      ]
+    }
+  },
+  {
+    "name": "edit_draft_requirement_classification",
+    "description": "Change only the exact eligible Draft's classification after explicit human approval of old/new values. Supply internalId, versionId, positive expectedRevision, areaId (active same-Product area identity, or explicit null to clear), and confirmed=true. Preserves content and links. Never automatically retry; after uncertainty retrieve authorized current state before a human-directed retry.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer"
+        },
+        "areaId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "confirmed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "internalId",
+        "versionId",
+        "expectedRevision",
+        "areaId",
+        "confirmed"
+      ]
+    }
+  },
+  {
+    "name": "edit_draft_test_case_classification",
+    "description": "Change only the exact eligible Draft's classification after explicit human approval of old/new values. Supply internalId, versionId, positive expectedRevision, areaId (active same-Product area identity, or explicit null to clear), and confirmed=true. Preserves content and links. Never automatically retry; after uncertainty retrieve authorized current state before a human-directed retry.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer"
+        },
+        "areaId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "confirmed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "internalId",
+        "versionId",
+        "expectedRevision",
+        "areaId",
+        "confirmed"
+      ]
+    }
+  }
 ]
