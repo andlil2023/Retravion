@@ -10,7 +10,7 @@ using FeatureRecord = Retravion.Domain.Feature.Feature;
 
 namespace Retravion.Infrastructure.Feature;
 
-public sealed class PostgresFeatureStore(string connectionString, Func<NpgsqlTransaction, CancellationToken, Task>? commit = null)
+public sealed partial class PostgresFeatureStore(string connectionString, Func<NpgsqlTransaction, CancellationToken, Task>? commit = null)
     : IFeatureStore, IFeatureChangeTransaction
 {
     private const string Setup = """
@@ -28,13 +28,15 @@ public sealed class PostgresFeatureStore(string connectionString, Func<NpgsqlTra
             number bigint NOT NULL, version_id uuid PRIMARY KEY, version_number integer NOT NULL, status text NOT NULL,
             title text NOT NULL, description text NOT NULL, revision bigint NOT NULL, creation_reason text, source_version_id uuid,
             release_protected boolean NOT NULL DEFAULT false, UNIQUE(internal_id,version_number));
+        ALTER TABLE retravion_feature.feature ADD COLUMN IF NOT EXISTS links jsonb NOT NULL DEFAULT '[]';
+        ALTER TABLE retravion_feature.feature_version ADD COLUMN IF NOT EXISTS links jsonb NOT NULL DEFAULT '[]';
         CREATE UNIQUE INDEX IF NOT EXISTS feature_one_working_version ON retravion_feature.feature_version(internal_id) WHERE status <> 'Approved';
         CREATE TABLE IF NOT EXISTS retravion_feature.history (
             id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, internal_id uuid NOT NULL REFERENCES retravion_feature.feature(internal_id),
             actor_identifier text NOT NULL, occurred_at_utc_ticks bigint NOT NULL, action text NOT NULL, change jsonb NOT NULL, operation_id uuid UNIQUE);
         """;
-    private const string Columns = "r.internal_id,r.product_internal_id,r.number,r.version_id,r.version_number,r.status,r.title,r.description,r.revision,r.creation_reason,r.source_version_id,(SELECT max(v.version_number) FROM retravion_feature.feature_version v WHERE v.internal_id=r.internal_id AND v.status='Approved')";
-    private const string StoredColumns = "internal_id,product_internal_id,number,version_id,version_number,status,title,description,revision,creation_reason,source_version_id";
+    private const string Columns = "r.internal_id,r.product_internal_id,r.number,r.version_id,r.version_number,r.status,r.title,r.description,r.revision,r.creation_reason,r.source_version_id,r.links,(SELECT max(v.version_number) FROM retravion_feature.feature_version v WHERE v.internal_id=r.internal_id AND v.status='Approved')";
+    private const string StoredColumns = "internal_id,product_internal_id,number,version_id,version_number,status,title,description,revision,creation_reason,source_version_id,links";
 
     public Task<Result<IReadOnlyList<FeatureSnapshot>>> List(Guid productInternalId, CancellationToken cancellationToken = default) =>
         Rows($"SELECT {Columns} FROM retravion_feature.feature r WHERE product_internal_id=$1 ORDER BY number", productInternalId, cancellationToken);
@@ -98,15 +100,15 @@ public sealed class PostgresFeatureStore(string connectionString, Func<NpgsqlTra
         }, cancellationToken, authorized);
     }
     public Task<Result<FeatureSnapshot>> Update(FeatureSnapshot expected, FeatureContent content, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) =>
-        Mutate(expected, f => f.Edit(content), actor, occurredAt, "feature.edit", null, null, cancellationToken, operationId, authorized);
+        Mutate(expected, (f, _, _) => Task.FromResult(f.Edit(content)), actor, occurredAt, "feature.edit", null, null, cancellationToken, operationId, authorized);
     public Task<Result<FeatureSnapshot>> Review(FeatureSnapshot expected, string decision, string? comment, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null) =>
-        Mutate(expected, f => decision switch { "InReview" => f.SubmitForReview(), "Approved" => f.Approve(), "Draft" => f.ReturnToDraft(), _ => Result.Failure<FeatureRecord>("Invalid review decision.") }, actor, occurredAt, "feature.review." + decision, decision, comment, cancellationToken, authorized: authorized);
+        Mutate(expected, async (f, c, t) => decision switch { "InReview" => f.SubmitForReview(), "Approved" => await TargetsApproved(c, t, f, cancellationToken) ? f.Approve() : Result.Failure<FeatureRecord>("Every linked Requirement version must be Approved."), "Draft" => f.ReturnToDraft(), _ => Result.Failure<FeatureRecord>("Invalid review decision.") }, actor, occurredAt, "feature.review." + decision, decision, comment, cancellationToken, authorized: authorized);
     public Task<Result<FeatureSnapshot>> Reopen(FeatureSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null) =>
-        Mutate(expected, f => f.Reopen(reason), actor, occurredAt, "feature.reopen", "Reopened", reason, cancellationToken, authorized: authorized);
+        Mutate(expected, (f, _, _) => Task.FromResult(f.Reopen(reason)), actor, occurredAt, "feature.reopen", "Reopened", reason, cancellationToken, authorized: authorized);
     public Task<Result<FeatureSnapshot>> CreateSuccessor(FeatureSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null) =>
-        Mutate(expected, f => f.CreateSuccessor(reason), actor, occurredAt, "feature.version.create", "Successor", reason, cancellationToken, operationId, authorized);
+        Mutate(expected, (f, _, _) => Task.FromResult(f.CreateSuccessor(reason)), actor, occurredAt, "feature.version.create", "Successor", reason, cancellationToken, operationId, authorized);
 
-    private Task<Result<FeatureSnapshot>> Mutate(FeatureSnapshot expected, Func<FeatureRecord, Result<FeatureRecord>> change, AuditActor actor,
+    private Task<Result<FeatureSnapshot>> Mutate(FeatureSnapshot expected, Func<FeatureRecord, NpgsqlConnection, NpgsqlTransaction, Task<Result<FeatureRecord>>> change, AuditActor actor,
         DateTimeOffset occurredAt, string action, string? decision, string? comment, CancellationToken token, Guid? operationId = null, Func<Task<bool>>? authorized = null)
     {
         if (expected is null || expected.Feature is null || expected.Revision <= 0 || actor is not AuditActor.Identified || operationId == Guid.Empty)
@@ -122,18 +124,18 @@ public sealed class PostgresFeatureStore(string connectionString, Func<NpgsqlTra
                 if (!await reader.ReadAsync(token)) return Stale();
                 var restored = Read(reader); if (restored.IsFailure) return Result.Failure<FeatureSnapshot>(restored.Error); current = restored.Value;
             }
-            if (current.Revision != expected.Revision || current.Feature != before) return Stale();
-            var replacement = change(current.Feature); if (replacement.IsFailure) return Result.Failure<FeatureSnapshot>(replacement.Error);
-            var after = replacement.Value; if (after == before) return current;
+            if (current.Revision != expected.Revision || !current.Feature.SameState(before)) return Stale();
+            var replacement = await change(current.Feature, c, t); if (replacement.IsFailure) return Result.Failure<FeatureSnapshot>(replacement.Error);
+            var after = replacement.Value; if (after.SameState(before)) return current;
             if (after.VersionId == before.VersionId)
             {
                 await using var protectedVersion = new NpgsqlCommand("SELECT release_protected FROM retravion_feature.feature_version WHERE internal_id=$1 AND version_id=$2", c, t);
                 protectedVersion.Parameters.AddWithValue(before.InternalId); protectedVersion.Parameters.AddWithValue(before.VersionId);
                 if (await protectedVersion.ExecuteScalarAsync(token) is true) return Result.Failure<FeatureSnapshot>("This version is protected by a Released revision. Create a successor for changes.");
             }
-            await using var update = new NpgsqlCommand("UPDATE retravion_feature.feature SET title=$1,description=$2,status=$3,version_id=$4,version_number=$5,creation_reason=$6,source_version_id=$7,revision=revision+1 WHERE internal_id=$8 RETURNING revision", c, t);
+            await using var update = new NpgsqlCommand("UPDATE retravion_feature.feature SET title=$1,description=$2,status=$3,version_id=$4,version_number=$5,creation_reason=$6,source_version_id=$7,links=$9,revision=revision+1 WHERE internal_id=$8 RETURNING revision", c, t);
             update.Parameters.AddWithValue(after.Content.Title); update.Parameters.AddWithValue(after.Content.Description); update.Parameters.AddWithValue(after.Status); update.Parameters.AddWithValue(after.VersionId); update.Parameters.AddWithValue(after.VersionNumber);
-            update.Parameters.AddWithValue(NpgsqlDbType.Text, (object?)after.CreationReason ?? DBNull.Value); update.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)after.SourceVersionId ?? DBNull.Value); update.Parameters.AddWithValue(before.InternalId);
+            update.Parameters.AddWithValue(NpgsqlDbType.Text, (object?)after.CreationReason ?? DBNull.Value); update.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)after.SourceVersionId ?? DBNull.Value); update.Parameters.AddWithValue(before.InternalId); update.Parameters.AddWithValue(NpgsqlDbType.Jsonb, JsonSerializer.Serialize(after.Links));
             var revision = (long)(await update.ExecuteScalarAsync(token))!;
             await SaveVersion(c, t, before.InternalId, token); await Evidence(c, t, actor, occurredAt, action, before, after, decision, comment, operationId, token);
             await using var latest = new NpgsqlCommand("SELECT max(version_number) FROM retravion_feature.feature_version WHERE internal_id=$1 AND status='Approved'", c, t);
@@ -143,14 +145,20 @@ public sealed class PostgresFeatureStore(string connectionString, Func<NpgsqlTra
     }
     private static async Task SaveVersion(NpgsqlConnection c, NpgsqlTransaction t, Guid id, CancellationToken token)
     {
-        await using var cmd = new NpgsqlCommand($"INSERT INTO retravion_feature.feature_version ({StoredColumns}) SELECT {StoredColumns} FROM retravion_feature.feature WHERE internal_id=$1 ON CONFLICT(version_id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,status=EXCLUDED.status,revision=EXCLUDED.revision", c, t);
+        await using var cmd = new NpgsqlCommand($"INSERT INTO retravion_feature.feature_version ({StoredColumns}) SELECT {StoredColumns} FROM retravion_feature.feature WHERE internal_id=$1 ON CONFLICT(version_id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,status=EXCLUDED.status,revision=EXCLUDED.revision,links=EXCLUDED.links", c, t);
         cmd.Parameters.AddWithValue(id); await cmd.ExecuteNonQueryAsync(token);
     }
     private static Result<FeatureSnapshot> Read(NpgsqlDataReader r)
     {
         if (r.GetInt64(8) <= 0) return Result.Failure<FeatureSnapshot>("Invalid persisted Feature revision.");
-        return FeatureRecord.Restore(r.GetGuid(0), r.GetGuid(1), r.GetGuid(3), r.GetInt64(2), r.GetInt32(4), r.IsDBNull(9) ? null : r.GetString(9), r.IsDBNull(10) ? null : r.GetGuid(10), FeatureContent.Create(r.GetString(6), r.GetString(7)), r.GetString(5))
-            .Map(f => new FeatureSnapshot(f, r.GetInt64(8), r.IsDBNull(11) ? null : r.GetInt32(11)));
+        try
+        {
+            var links = JsonSerializer.Deserialize<FeatureRequirementLink[]>(r.GetString(11));
+            if (links is null) return Result.Failure<FeatureSnapshot>("Invalid persisted Feature links.");
+            return FeatureRecord.Restore(r.GetGuid(0), r.GetGuid(1), r.GetGuid(3), r.GetInt64(2), r.GetInt32(4), r.IsDBNull(9) ? null : r.GetString(9), r.IsDBNull(10) ? null : r.GetGuid(10), FeatureContent.Create(r.GetString(6), r.GetString(7)), r.GetString(5), links)
+                .Map(f => new FeatureSnapshot(f, r.GetInt64(8), r.IsDBNull(12) ? null : r.GetInt32(12)));
+        }
+        catch (JsonException) { return Result.Failure<FeatureSnapshot>("Invalid persisted Feature links."); }
     }
     private static Result<FeatureSnapshot> Stale() => Result.Failure<FeatureSnapshot>("The Feature changed or a newer version exists. Retrieve it again before editing.");
     private static Result<FeatureSnapshot> Inactive() => Result.Failure<FeatureSnapshot>("The responsible Product is retired or no longer exists.");
@@ -162,7 +170,7 @@ public sealed class PostgresFeatureStore(string connectionString, Func<NpgsqlTra
     private static async Task Evidence(NpgsqlConnection c, NpgsqlTransaction t, AuditActor actor, DateTimeOffset occurredAt, string action,
         FeatureRecord? before, FeatureRecord after, string? decision, string? comment, Guid? operationId, CancellationToken token)
     {
-        static FeatureAuditValues Values(FeatureRecord f) => new(f.ProductInternalId, f.Id, f.Content.Title, f.Content.Description, f.Status);
+        static FeatureAuditValues Values(FeatureRecord f) => new(f.ProductInternalId, f.Id, f.Content.Title, f.Content.Description, f.Status, f.Links.ToArray());
         var details = new FeatureAuditDetails(after.InternalId, after.VersionId, after.VersionNumber, before is null || decision == "Successor" ? null : Values(before), Values(after), decision,
             decision == "Successor" ? null : comment, after.SourceVersionId, decision == "Reopened" ? comment : after.CreationReason, operationId);
         await using var history = new NpgsqlCommand("INSERT INTO retravion_feature.history(internal_id,actor_identifier,occurred_at_utc_ticks,action,change,operation_id) VALUES($1,$2,$3,$4,$5,$6)", c, t);
@@ -176,6 +184,7 @@ public sealed class PostgresFeatureStore(string connectionString, Func<NpgsqlTra
         try
         {
             await using var c = new NpgsqlConnection(connectionString); await c.OpenAsync(token); await using var t = await c.BeginTransactionAsync(token);
+            await using (var targets = new NpgsqlCommand("SELECT pg_advisory_xact_lock(821749620111); SELECT pg_advisory_xact_lock(821749620112)", c, t)) await targets.ExecuteNonQueryAsync(token);
             await using (var setup = new NpgsqlCommand(Setup, c, t)) await setup.ExecuteNonQueryAsync(token);
             if (authorized is not null && !await authorized()) return Result.Failure<T>("Access denied.");
             var result = await operation(c, t);

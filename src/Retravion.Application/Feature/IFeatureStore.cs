@@ -29,4 +29,7 @@ public interface IFeatureChangeTransaction
         DateTimeOffset occurredAt, CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null);
     Task<Result<FeatureSnapshot>> CreateSuccessor(FeatureSnapshot expected, string? reason, AuditActor actor, DateTimeOffset occurredAt,
         CancellationToken cancellationToken = default, Guid? operationId = null, Func<Task<bool>>? authorized = null);
+    Task<Result<FeatureSnapshot>> ChangeLink(FeatureSnapshot expected, string operation, FeatureRequirementLink target,
+        FeatureRequirementLink? replacement, AuditActor actor, DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default, Func<Task<bool>>? authorized = null);
 }

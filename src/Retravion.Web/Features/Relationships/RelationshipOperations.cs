@@ -1,6 +1,9 @@
 using System.Security.Claims;
 using CSharpFunctionalExtensions;
 using Retravion.Application.Requirement;
+using Retravion.Application.Feature;
+using Retravion.Domain.Feature;
+using Retravion.Web.Features.Feature;
 using Retravion.Application.TestCase;
 using Retravion.Domain.TestCase;
 using Retravion.Web.Features.Product;
@@ -16,10 +19,11 @@ internal sealed record RelationshipNode(string Kind, Guid InternalId, Guid Versi
     // Retain the displayed owner's concurrency token; never refresh it silently when saving.
     internal RequirementSnapshot? Snapshot { get; init; }
     internal TestCaseSnapshot? TestCaseSnapshot { get; init; }
-    public bool Editable => Kind is "requirement" or "test-case" && Status == "Draft" && !HasNewerVersion;
+    internal FeatureSnapshot? FeatureSnapshot { get; init; }
+    public bool Editable => Kind is "requirement" or "test-case" or "feature" && Status == "Draft" && !HasNewerVersion;
     public string LinksPath => $"/products/links?kind={Kind}&id={InternalId}&version={VersionId}";
-    public string DetailsPath => $"/{(Kind == "requirement" ? "requirements" : Kind == "test-case" ? "test-cases" : "user-needs")}/details?id={InternalId}&version={VersionId}";
-    public string Label => $"{(Kind == "requirement" ? "Requirement" : Kind == "test-case" ? "Test Case" : "User Need")} {Id} · v{VersionNumber}";
+    public string DetailsPath => $"/{(Kind == "requirement" ? "requirements" : Kind == "test-case" ? "test-cases" : Kind == "feature" ? "features" : "user-needs")}/details?id={InternalId}&version={VersionId}";
+    public string Label => $"{(Kind == "requirement" ? "Requirement" : Kind == "test-case" ? "Test Case" : Kind == "feature" ? "Feature" : "User Need")} {Id} · v{VersionNumber}";
 }
 
 internal sealed record RelationshipEdge(RelationshipNode Owner, RelationshipNode Target, string Relationship)
@@ -51,18 +55,25 @@ internal sealed record RelationshipExploration(RelationshipView Root, IReadOnlyL
 
 // Web-only composition of existing authorized feature contracts; no new public or MCP surface.
 internal sealed class RelationshipOperations(RequirementOperations requirements, UserNeedOperations needs, ProductOperations products,
-    TestCaseOperations testCases)
+    TestCaseOperations testCases, FeatureOperations features)
 {
     internal const string NeedRelationship = "Addresses User Need";
     internal const string ParentRelationship = "Child → parent Requirement";
     internal const string TestCaseRelationship = "Verifies Requirement";
+    internal const string FeatureRelationship = "Addresses Requirement";
     internal const string ProvenanceRelationship = "Derived from / Source for";
 
     internal async Task<Result> Change(ClaimsPrincipal actor, RelationshipNode owner, RelationshipNode target,
         string relationship, string operation, RelationshipNode? replacement = null, CancellationToken token = default)
     {
-        if (relationship is not (NeedRelationship or ParentRelationship or TestCaseRelationship))
+        if (relationship is not (NeedRelationship or ParentRelationship or TestCaseRelationship or FeatureRelationship))
             return Result.Failure("Unsupported relationship change.");
+        if (owner.Kind == "feature" && owner.FeatureSnapshot is { } feature && relationship == FeatureRelationship)
+        {
+            var result = await features.ChangeLink(actor, feature, operation, new FeatureRequirementLink(target.InternalId, target.VersionId),
+                replacement is null ? null : new FeatureRequirementLink(replacement.InternalId, replacement.VersionId), token);
+            return result.IsSuccess ? Result.Success() : Result.Failure(result.Error);
+        }
         if (owner.Kind == "test-case" && owner.TestCaseSnapshot is { } testCase && relationship == TestCaseRelationship)
         {
             var result = await testCases.ChangeLink(actor, testCase, operation,
@@ -100,7 +111,23 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
         string kind, bool ownersOnly, CancellationToken token = default)
     {
         var nodes = new List<RelationshipNode>();
-        if (kind == "test-case")
+        if (kind == "feature")
+        {
+            var records = await features.List(actor, product, token);
+            if (records.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(records.Error);
+            foreach (var record in records.Value)
+            {
+                var versions = await features.Versions(actor, record.Feature.InternalId, token);
+                if (versions.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(versions.Error);
+                foreach (var version in versions.Value)
+                {
+                    var node = await Node(actor, kind, version.Feature.InternalId, version.Feature.VersionId, token);
+                    if (node.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(node.Error);
+                    if (!ownersOnly || node.Value.Editable) nodes.Add(node.Value);
+                }
+            }
+        }
+        else if (kind == "test-case")
         {
             var records = await testCases.List(actor, product, token);
             if (records.IsFailure) return Result.Failure<IReadOnlyList<RelationshipNode>>(records.Error);
@@ -154,7 +181,7 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
     internal async Task<Result<RelationshipView>> Load(ClaimsPrincipal actor, string? kind, Guid id, Guid? version,
         CancellationToken token = default)
     {
-        if (kind is not ("requirement" or "user-need" or "test-case") || id == Guid.Empty || version is null || version == Guid.Empty)
+        if (kind is not ("requirement" or "user-need" or "test-case" or "feature") || id == Guid.Empty || version is null || version == Guid.Empty)
             return Result.Failure<RelationshipView>("Select an exact Requirement, User Need, or Test Case version.");
         var center = await Node(actor, kind, id, version.Value, token);
         if (center.IsFailure) return Result.Failure<RelationshipView>(center.Error);
@@ -178,6 +205,15 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
                 edges.Add(new(center.Value, target.Value, "Child → parent Requirement"));
             }
         }
+        if (kind == "feature")
+        {
+            foreach (var link in center.Value.FeatureSnapshot!.Feature.Links)
+            {
+                var target = await Node(actor, "requirement", link.RequirementInternalId, link.RequirementVersionId, token);
+                if (target.IsFailure) return Result.Failure<RelationshipView>(target.Error);
+                edges.Add(new(center.Value, target.Value, FeatureRelationship));
+            }
+        }
         if (kind == "test-case")
         {
             foreach (var link in center.Value.TestCaseSnapshot!.TestCase.Links)
@@ -189,13 +225,18 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
         }
         if (kind == "requirement")
         {
+            var featureOwners = await Candidates(actor, center.Value.ProductInternalId, "feature", false, token);
+            if (featureOwners.IsFailure) return Result.Failure<RelationshipView>(featureOwners.Error);
+            foreach (var owner in featureOwners.Value.Where(n => n.FeatureSnapshot!.Feature.Links.Any(l =>
+                l.RequirementInternalId == id && l.RequirementVersionId == version.Value)))
+                edges.Add(new(owner, center.Value, FeatureRelationship));
             var owners = await Candidates(actor, center.Value.ProductInternalId, "test-case", false, token);
             if (owners.IsFailure) return Result.Failure<RelationshipView>(owners.Error);
             foreach (var owner in owners.Value.Where(n => n.TestCaseSnapshot!.TestCase.Links.Any(l =>
                 l.RequirementInternalId == id && l.RequirementVersionId == version.Value)))
                 edges.Add(new(owner, center.Value, TestCaseRelationship));
         }
-        if (kind != "test-case")
+        if (kind is "requirement" or "user-need")
         {
             var incoming = kind == "requirement"
                 ? await requirements.Children(actor, id, version.Value, token)
@@ -215,7 +256,7 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
         if (product is null || edges.Any(e => e.Owner.ProductInternalId != product.InternalId || e.Target.ProductInternalId != product.InternalId))
             return Result.Failure<RelationshipView>("Relationship Product not available.");
         var unavailable = new List<UnavailableOrigin>();
-        if (kind != "test-case")
+        if (kind is "requirement" or "user-need")
         {
             var origins = await Origins(actor, center.Value, availableProducts.Value, token);
             if (origins.IsFailure) return Result.Failure<RelationshipView>(origins.Error);
@@ -317,6 +358,18 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
 
     private async Task<Result<RelationshipNode>> Node(ClaimsPrincipal actor, string kind, Guid id, Guid version, CancellationToken token)
     {
+        if (kind == "feature")
+        {
+            var found = await features.Find(actor, id, version, token);
+            if (found.IsFailure) return Result.Failure<RelationshipNode>(found.Error);
+            if (found.Value.HasNoValue) return Result.Failure<RelationshipNode>("Feature version not found.");
+            var versions = await features.Versions(actor, id, token);
+            if (versions.IsFailure) return Result.Failure<RelationshipNode>(versions.Error);
+            var f = found.Value.Value.Feature;
+            return new RelationshipNode(kind, f.InternalId, f.VersionId, f.ProductInternalId, f.Id, f.Content.Title,
+                f.VersionNumber, f.Status == "InReview" ? "In Review" : f.Status,
+                versions.Value.Any(v => v.Feature.VersionNumber > f.VersionNumber)) { FeatureSnapshot = found.Value.Value };
+        }
         if (kind == "requirement")
         {
             var found = await requirements.Find(actor, id, token, version);

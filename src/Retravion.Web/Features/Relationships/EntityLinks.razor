@@ -130,7 +130,7 @@ else
                     <p>v@(node.VersionNumber) · @node.Status</p><p class="muted">@ProductOf(node).Id · @ProductOf(node).Name</p>
                     @if (node.HasNewerVersion) { <p class="muted">Newer version available; showing this exact version.</p> }
                     @if (!ProductOf(node).IsActive) { <p>Read-only: Product retired.</p> }
-                    @if (node.Kind is "requirement" or "test-case" && !node.Editable)
+                    @if (node.Kind is "requirement" or "test-case" or "feature" && !node.Editable)
                     { <p>Outgoing links locked: @(node.HasNewerVersion ? "a newer owner version exists" : $"owner is {node.Status}"). Incoming links may still be owned by editable Draft records.</p> }
                     <div class="record-navigation"><MudLink Href="@node.DetailsPath">Inspect exact version</MudLink>@if (node.VersionId != _view.Center.VersionId) { <MudLink Href="@node.LinksPath">Focus here</MudLink> }</div>
                 </MudPaper>
@@ -188,9 +188,10 @@ else
     private sealed record LinkChoice(string Key, string Label, string Relationship, bool Incoming);
     private static LinkChoice[] Choices(RelationshipNode node) => node.Kind switch
     {
+        "feature" => [new("requirement", "Addresses a Requirement", RelationshipOperations.FeatureRelationship, false)],
         "test-case" => [new("requirement", "Verifies a Requirement", RelationshipOperations.TestCaseRelationship, false)],
         "user-need" => [new("addressed-by", "Addressed by a Requirement", RelationshipOperations.NeedRelationship, true)],
-        _ => [new("need", "Addresses a User Need", RelationshipOperations.NeedRelationship, false), new("parent", "Has parent Requirement", RelationshipOperations.ParentRelationship, false), new("child", "Has child Requirement", RelationshipOperations.ParentRelationship, true), new("test-case", "Verified by a Test Case", RelationshipOperations.TestCaseRelationship, true)]
+        _ => [new("need", "Addresses a User Need", RelationshipOperations.NeedRelationship, false), new("parent", "Has parent Requirement", RelationshipOperations.ParentRelationship, false), new("child", "Has child Requirement", RelationshipOperations.ParentRelationship, true), new("test-case", "Verified by a Test Case", RelationshipOperations.TestCaseRelationship, true), new("feature", "Addressed by a Feature", RelationshipOperations.FeatureRelationship, true)]
     };
     private bool ChoiceAllowed(RelationshipNode node, LinkChoice choice) => ProductOf(node).IsActive && (choice.Incoming || node.Editable);
     protected override Task OnParametersSetAsync()
@@ -229,6 +230,7 @@ else
         {
             var actor = (await Authentication.GetAuthenticationStateAsync()).User;
             var result = await Operations.Candidates(actor, anchor.ProductInternalId,
+                _relationship == RelationshipOperations.FeatureRelationship ? (_incoming ? "feature" : "requirement") :
                 _relationship == RelationshipOperations.TestCaseRelationship ? (_incoming ? "test-case" : "requirement")
                     : _incoming || _relationship == RelationshipOperations.ParentRelationship ? "requirement" : "user-need", _incoming);
             if (load != _load || _anchor != anchor) return;
@@ -304,7 +306,7 @@ else
     }
     private string Direction(RelationshipEdge edge) => edge.Owner.VersionId == _view!.Center.VersionId ? "Outgoing" : edge.Target.VersionId == _view.Center.VersionId ? "Incoming" : "Indirect";
     private Retravion.Domain.Product.Product ProductOf(RelationshipNode node) => _exploration!.Products.Single(p => p.InternalId == node.ProductInternalId);
-    private static string KindLabel(RelationshipNode node) => node.Kind == "requirement" ? "Requirement" : node.Kind == "test-case" ? "Test Case" : "User Need";
+    private static string KindLabel(RelationshipNode node) => node.Kind == "requirement" ? "Requirement" : node.Kind == "test-case" ? "Test Case" : node.Kind == "feature" ? "Feature" : "User Need";
     private static string RelationshipLabel(RelationshipEdge edge) => edge.IsProvenance ? "Derived from" : edge.Relationship;
     private RenderFragment CompactNode(RelationshipNode node) => @<div class="list-node"><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => Inspect(node))" Disabled="_busy" aria-label="@($"Inspect {node.Label}")" aria-pressed="@(Inspected.VersionId == node.VersionId)">@node.Label</MudButton><p>@node.Title</p><span class="muted">@node.Status · @ProductOf(node).Id · @ProductOf(node).Name @(node.HasNewerVersion ? "· Newer version available" : "")</span>@ExpandControl(node)</div>;
     private RenderFragment ExpandControl(RelationshipNode node) => @<div class="node-expansion">

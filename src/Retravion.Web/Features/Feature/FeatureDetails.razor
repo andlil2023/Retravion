@@ -15,6 +15,7 @@
     <p>@_product.Id – @_product.Name</p><h2>@value.Id – @value.Content.Title</h2><p>v@value.VersionNumber · @Status(value.Status)</p>
     @if (!_product.IsActive) { <p>This Feature is read-only because its Product is retired.</p> }
     @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
+    <p><MudLink Href="@($"/products/links?kind=feature&id={value.InternalId}&version={value.VersionId}")">Manage links</MudLink> · Links indicate addressed Requirements, not implementation or verification.</p>
     <nav aria-label="Feature versions">@foreach (var version in _versions) { <MudLink Href="@($"/features/details?id={Id}&version={version.Feature.VersionId}")">v@version.Feature.VersionNumber · @Status(version.Feature.Status)</MudLink><span> </span> }</nav>
     <MudPaper Class="product-card pa-4" Elevation="0">
         @if (value.CreationReason is { } reason) { <p style="white-space:pre-wrap">Successor creation reason: @reason</p> }
@@ -39,6 +40,8 @@
                 <p>@snapshot.Id · @Status(snapshot.Status)</p><p style="white-space:pre-wrap">Comment: @(change.Comment ?? "None")</p>
                 @if (change.Reason is not null) { <p style="white-space:pre-wrap">Change reason: @change.Reason</p> }
                 @if (change.SourceVersionId is { } source) { <MudLink Href="@($"/features/details?id={change.InternalId}&version={source}")">Exact source Feature version</MudLink> }
+                @if (change.Before?.Links is { } beforeLinks) { <h4>Previous exact Requirement endpoints</h4>@foreach (var link in beforeLinks) { <p>@link.RequirementInternalId · @link.RequirementVersionId</p> } }
+                @if (snapshot.Links is { } afterLinks) { <h4>Exact Requirement endpoints at event</h4>@foreach (var link in afterLinks) { <p>@link.RequirementInternalId · @link.RequirementVersionId</p> } }
                 <h4>Title at event</h4><p style="white-space:pre-wrap">@snapshot.Title</p><h4>Description at event</h4><ProductMarkdownView Markdown="@snapshot.Description" />
             </details>
         }
