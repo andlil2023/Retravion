@@ -42,7 +42,7 @@ public sealed partial class AccountManagementTests
     }
 
     [Fact]
-    public async Task McpRevisionContractsAreReadOnlyAndRejectMalformedOrInjectedArguments()
+    public async Task McpRevisionReadContractsRemainReadOnlyAndRejectMalformedOrInjectedArguments()
     {
         await using var host = new McpTestHost();
         foreach (var name in new[] { "list_revisions", "read_revision" })
@@ -52,7 +52,7 @@ public sealed partial class AccountManagementTests
         }
         await host.Login(); await host.Replace(); await host.Authenticate();
         var tools = (await host.Rpc("tools/list")).GetProperty("tools").EnumerateArray()
-            .Where(t => t.GetProperty("name").GetString()!.Contains("revision", StringComparison.Ordinal)).ToArray();
+            .Where(t => t.GetProperty("name").GetString() is "list_revisions" or "read_revision").ToArray();
         Assert.Equal(new[] { "list_revisions", "read_revision" }, tools.Select(t => t.GetProperty("name").GetString()).Order());
         Assert.All(tools, t => Assert.True(t.GetProperty("annotations").GetProperty("readOnlyHint").GetBoolean()));
         foreach (var name in new[] { "list_revisions", "read_revision" })

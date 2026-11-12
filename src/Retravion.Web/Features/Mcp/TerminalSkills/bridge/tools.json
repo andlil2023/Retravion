@@ -1,5 +1,176 @@
 [
   {
+    "name": "create_draft_revision",
+    "description": "Create an empty Draft Revision under an active Product. Never use in review mode. Requires explicit human approval of identifier, description and empty selections, then confirmed=true. No copy or lifecycle changes. Never automatically retry. After uncertain creation inspect authorized list/read candidates; if ambiguous, do not blindly recreate.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "confirmed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "productId",
+        "identifier",
+        "description",
+        "confirmed"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "edit_draft_revision",
+    "description": "Replace Draft Revision identifier and description only, preserving exact selections. Never use in review mode. Requires explicit human approval of old/new metadata, confirmed=true and positive expectedRevision from a prior read. No copy, deletion, release or entity lifecycle changes. Never automatically retry; retrieve authorized current state before a human-directed retry after uncertainty.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "confirmed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "productId",
+        "internalId",
+        "expectedRevision",
+        "identifier",
+        "description",
+        "confirmed"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "change_draft_revision_selection",
+    "description": "Add, remove or replace one exact explicit Draft Revision selection. Never use in review mode. Requires explicit human approval of exact old/new endpoints, confirmed=true and positive expectedRevision from a prior read. target (old endpoint for replace) and replacement contain kind (UserNeed, Requirement, TestCase or Feature), internalId, versionId and positive versionNumber. Only replace accepts replacement; replacement is one atomic operation. Never silently advance versions or modify referenced entities/links. No copy, deletion or release. Never automatically retry; retrieve authorized current state before a human-directed retry after uncertainty.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "productId": {
+          "type": "string"
+        },
+        "internalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "internalId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "versionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "versionNumber": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "internalId",
+            "versionId",
+            "versionNumber"
+          ]
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "replacement": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "kind": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "internalId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "versionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "versionNumber": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "internalId",
+            "versionId",
+            "versionNumber"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "productId",
+        "internalId",
+        "expectedRevision",
+        "operation",
+        "target",
+        "confirmed"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
     "name": "list_revisions",
     "description": "List Draft and Released Revisions for a Product manual ID, including retired Products. Returns immutable identities and exact explicit selections. Read-only; no preparation, selection or lifecycle changes.",
     "inputSchema": {
