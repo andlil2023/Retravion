@@ -28,7 +28,7 @@
                         <ul>
                             @foreach (var endpoint in values.Selections)
                             {
-                                var feature = endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.UserNeed ? "user-needs" : endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.Requirement ? "requirements" : "test-cases";
+                                var feature = endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.UserNeed ? "user-needs" : endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.Requirement ? "requirements" : endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.Feature ? "features" : "test-cases";
                                 <li><a href="@($"/{feature}/details?id={endpoint.InternalId}&version={endpoint.VersionId}")">@endpoint.Kind · v@endpoint.VersionNumber · @endpoint.InternalId / @endpoint.VersionId</a></li>
                             }
                         </ul>
@@ -39,7 +39,7 @@
                             <p>@release.Actor · @release.OccurredAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)</p>
                             <ul aria-label="Protected release members">
                                 @foreach (var member in release.Members)
-                                { <li>@member.Endpoint.Kind @member.Identifier · v@member.Endpoint.VersionNumber · @member.Endpoint.InternalId / @member.Endpoint.VersionId · @(member.Explicit ? "Explicit" : "Indirect") · Approved and permanently protected · Area: @(member.Endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.UserNeed ? "Not applicable" : member.Area?.Display ?? "Not recorded")</li> }
+                                { <li>@member.Endpoint.Kind @member.Identifier · v@member.Endpoint.VersionNumber · @member.Endpoint.InternalId / @member.Endpoint.VersionId · @(member.Explicit ? "Explicit" : "Indirect") · Approved and permanently protected · Area: @(member.Endpoint.Kind is Retravion.Domain.Revision.RevisionEntityKind.UserNeed or Retravion.Domain.Revision.RevisionEntityKind.Feature ? "Not applicable" : member.Area?.Display ?? "Not recorded")</li> }
                             </ul>
                         }
                     }

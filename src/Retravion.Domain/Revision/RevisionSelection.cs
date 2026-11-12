@@ -2,7 +2,7 @@ using CSharpFunctionalExtensions;
 
 namespace Retravion.Domain.Revision;
 
-public enum RevisionEntityKind { UserNeed, Requirement, TestCase }
+public enum RevisionEntityKind { UserNeed, Requirement, TestCase, Feature }
 
 /// <summary>An exact endpoint; versions of the same record remain distinct.</summary>
 public sealed record RevisionSelection(RevisionEntityKind Kind, Guid InternalId, Guid VersionId, int VersionNumber)

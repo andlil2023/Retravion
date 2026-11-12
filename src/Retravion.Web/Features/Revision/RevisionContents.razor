@@ -13,7 +13,7 @@
         </MudTd>
         <MudTd DataLabel="Title">@context.Title</MudTd>
         <MudTd DataLabel="State">@RevisionPresentation.State(context.Status)</MudTd>
-        <MudTd DataLabel="Area">@(context.Endpoint.Kind == RevisionEntityKind.UserNeed ? "Not applicable" : context.Area?.Display ?? "Not recorded")</MudTd>
+        <MudTd DataLabel="Area">@(context.Endpoint.Kind is RevisionEntityKind.UserNeed or RevisionEntityKind.Feature ? "Not applicable" : context.Area?.Display ?? "Not recorded")</MudTd>
         <MudTd DataLabel="Membership">@(context.Explicit ? "Selected" : "Included through links")</MudTd>
     </RowTemplate>
     <NoRecordsContent><MudText>@(Members.Count == 0 ? "Empty baseline." : "No matching contents.")</MudText></NoRecordsContent>
