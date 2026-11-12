@@ -3,6 +3,7 @@
 @using Retravion.Web.Features.Revision
 @using Retravion.Web.Features.Product
 @inject RevisionOperations Operations
+@inject RelationshipOperations Relationships
 @inject ProductOperations Products
 @inject AuthenticationStateProvider Authentication
 
@@ -15,7 +16,7 @@
 @if (_row is not null && _product is not null)
 {
     <div class="focus-heading"><div><span class="eyebrow">Revision in focus · @_row.Value.State</span><h2>@_row.Value.Identifier</h2></div><span class="muted">@_product.Id · @_product.Name</span></div>
-    <p class="scope-note">@(_row.Value is ReleasedRevision ? "Frozen release evidence — read-only. No current relationship traversal." : "Revision membership only. Selecting records does not change their content or ordinary links.") This diagram shows selected and derived membership, not inter-record link topology. The complete baseline contains @Members.Count exact versions.</p>
+    <p class="scope-note">@(_row.Value is ReleasedRevision ? "Frozen release evidence — read-only. No current relationship traversal." : "Revision membership only. Selecting records does not change their content or ordinary links.") @(_row.Value is ReleasedRevision ? "This diagram shows selected and derived membership, not inter-record link topology." : "Expand selected records to explore their exact outgoing relationships.") The complete baseline contains @Members.Count exact versions.</p>
     @if (!_product.IsActive) { <MudAlert Severity="Severity.Info">Product retired: read-only.</MudAlert> }
     @if (_row.Deleted) { <p>Deleted Draft — retained evidence. Open revision history for prior selections.</p> }
     <div class="revision-workspace" aria-busy="@_busy">
@@ -26,9 +27,24 @@
             </div>
             <div class="membership-search"><MudTextField T="string" Value="@_memberSearch" ValueChanged="SearchMembers" Label="Search baseline ID or title" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" /></div>
             @if (_table) { <RevisionContents Members="PageMembers" Searchable="false" Inspect="Inspect" /> }
-            else { <WorkspaceGraph @bind-ZoomPercent="_zoom" @bind-Tall="_tall" Nodes="GraphNodes" Edges="GraphEdges" Focus="Id" Selected="@(_inspected?.Endpoint.VersionId ?? Id)" Busy="_busy" Select="InspectKey" /> }
-            <div class="diagram-footer"><span role="status">@FilteredMembers.Count matching of @Members.Count baseline records · Page @(_page + 1) of @PageCount</span>
-                @if (PageCount > 1) { <MudButton Size="Size.Small" Disabled="@(_busy || _page == 0)" OnClick="@(() => ChangePage(-1))">Previous records</MudButton><MudButton Size="Size.Small" Disabled="@(_busy || _page + 1 >= PageCount)" OnClick="@(() => ChangePage(1))">Next records</MudButton> }
+            else
+            {
+                @if (_row.Value is DraftRevision && !_row.Deleted)
+                {
+                    <MudSelect T="string" Value="_requirementFilter" ValueChanged="FilterRequirements" Label="Requirement visibility" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                        <MudSelectItem Value="@string.Empty">Selected roots / manual expansion</MudSelectItem>
+                        @foreach (var option in new[] { "Directly selected", "Indirectly connected", "All connected" }) { <MudSelectItem Value="@option">@option</MudSelectItem> }
+                    </MudSelect>
+                }
+                <WorkspaceGraph @bind-ZoomPercent="_zoom" @bind-Tall="_tall" Nodes="GraphNodes" Edges="GraphEdges" Focus="Id" Selected="@(_inspected?.Endpoint.VersionId ?? Id)" Busy="_busy" Select="InspectKey">
+                    <NodeActions Context="key">
+                        @if (_row.Value is DraftRevision && _paths.Any(e => e.Owner == key))
+                        { <MudButton Size="Size.Small" Disabled="_busy" OnClick="@(() => ToggleExpansion(key))" aria-expanded="@_expanded.Contains(key)" aria-label="@($"{(_expanded.Contains(key) ? "Collapse" : "Expand")} {RevisionPresentation.Label(Members.Single(m => m.Endpoint.VersionId == key))}")">@(_expanded.Contains(key) ? "Collapse" : "Expand")</MudButton> }
+                    </NodeActions>
+                </WorkspaceGraph>
+            }
+            <div class="diagram-footer"><span role="status">@FilteredMembers.Count matching of @Members.Count baseline records @(_table || _row.Value is ReleasedRevision ? $"· Page {_page + 1} of {PageCount}" : $"· {GraphMembers.Count} visible")</span>
+                @if ((_table || _row.Value is ReleasedRevision) && PageCount > 1) { <MudButton Size="Size.Small" Disabled="@(_busy || _page == 0)" OnClick="@(() => ChangePage(-1))">Previous records</MudButton><MudButton Size="Size.Small" Disabled="@(_busy || _page + 1 >= PageCount)" OnClick="@(() => ChangePage(1))">Next records</MudButton> }
                 <p class="muted">Other pages or filtered records remain in the baseline. This view never determines release readiness.</p>
             </div>
         </section>
@@ -98,6 +114,19 @@ else if (_error is null) { <p role="status">Loading revision membership…</p> }
     private bool _busy, _mustRetrieve, _uncertain, _review, _table, _tall;
     private int _page, _epoch, _read, _zoom = 100;
     private Guid _operation;
+    private string _requirementFilter = "";
+    private readonly HashSet<Guid> _expanded = [];
+    private IReadOnlyList<(Guid Owner, Guid Target, string Label, bool Dashed)> _paths = [];
+    private IReadOnlySet<Guid> Visible => RevisionGraph.Visible(Members, _paths, _expanded, _requirementFilter, _memberSearch.Trim());
+    private IReadOnlyList<RevisionBaselineMember> GraphMembers
+    {
+        get
+        {
+            if (_row?.Value is ReleasedRevision) return PageMembers;
+            var visible = Visible;
+            return Members.Where(m => visible.Contains(m.Endpoint.VersionId)).ToArray();
+        }
+    }
     private bool CanChange => _product?.IsActive == true && _row is { Deleted: false, Value: DraftRevision };
     private bool Locked => _busy || _mustRetrieve;
     private IReadOnlyList<RevisionBaselineMember> Members => _baseline?.Members ?? [];
@@ -105,11 +134,22 @@ else if (_error is null) { <p role="status">Loading revision membership…</p> }
     private IReadOnlyList<RevisionBaselineMember> PageMembers => FilteredMembers.Skip(_page * 20).Take(20).ToArray();
     private int PageCount => Math.Max(1, (FilteredMembers.Count + 19) / 20);
     private IReadOnlyList<RevisionBaselineMember> MatchingCandidates => _candidates.Where(m => (_kind is null || m.Endpoint.Kind == _kind) && (m.Identifier.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) || m.Title.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase))).ToArray();
-    private IReadOnlyList<(Guid Key, string Kind, string Identifier, string Title, string VersionState, string Product, string Label)> GraphNodes => new[] { (Id, "Revision", _row!.Value.Identifier, _row.Value.Description, _row.Value.State, $"{_product!.Id} · {_product.Name}", $"Revision {_row.Value.Identifier}") }.Concat(PageMembers.Select(m => (m.Endpoint.VersionId, RevisionPresentation.KindLabel(m.Endpoint.Kind), m.Identifier, m.Title, $"v{m.Endpoint.VersionNumber} · {RevisionPresentation.State(m.Status)} · {(m.Explicit ? "Selected" : "Included through links")}", $"{_product.Id} · {_product.Name}", RevisionPresentation.Label(m)))).ToArray();
-    private IReadOnlyList<(Guid Owner, Guid Target, string Label, bool Dashed)> GraphEdges => PageMembers.Select(m => (Id, m.Endpoint.VersionId, m.Explicit ? "Selected" : "Included through links", !m.Explicit)).ToArray();
+    private IReadOnlyList<(Guid Key, string Kind, string Identifier, string Title, string VersionState, string Product, string Label)> GraphNodes => new[] { (Id, "Revision", _row!.Value.Identifier, _row.Value.Description, _row.Value.State, $"{_product!.Id} · {_product.Name}", $"Revision {_row.Value.Identifier}") }.Concat(GraphMembers.Select(m => (m.Endpoint.VersionId, RevisionPresentation.KindLabel(m.Endpoint.Kind), m.Identifier, m.Title, $"v{m.Endpoint.VersionNumber} · {RevisionPresentation.State(m.Status)} · {(m.Explicit ? (_paths.Any(e => e.Target == m.Endpoint.VersionId) ? "Selected · Also connected through links" : "Selected") : "Included through links")}", $"{_product.Id} · {_product.Name}", RevisionPresentation.Label(m)))).ToArray();
+    private IReadOnlyList<(Guid Owner, Guid Target, string Label, bool Dashed)> GraphEdges
+    {
+        get
+        {
+            if (_row?.Value is ReleasedRevision)
+                return PageMembers.Select(m => (Id, m.Endpoint.VersionId, m.Explicit ? "Selected" : "Included through links", !m.Explicit)).ToArray();
+            var visible = Visible;
+            return Members.Where(m => m.Explicit && visible.Contains(m.Endpoint.VersionId)).Select(m => (Id, m.Endpoint.VersionId, "Selected", false))
+                .Concat(_paths.Where(e => visible.Contains(e.Owner) && visible.Contains(e.Target))).ToArray();
+        }
+    }
     private static string EntityWorkspace(RevisionBaselineMember m) => $"/products/links?kind={(m.Endpoint.Kind == RevisionEntityKind.UserNeed ? "user-need" : m.Endpoint.Kind == RevisionEntityKind.Requirement ? "requirement" : m.Endpoint.Kind == RevisionEntityKind.Feature ? "feature" : "test-case")}&id={m.Endpoint.InternalId}&version={m.Endpoint.VersionId}";
     protected override async Task OnParametersSetAsync()
     {
+        _expanded.Clear(); _requirementFilter = ""; _paths = [];
         ++_epoch; _error = _message = null; _row = null; _baseline = null; _inspected = null; _mustRetrieve = _uncertain = false; _operation = OperationId ?? Guid.Empty; _page = 0; _memberSearch = ""; Cancel();
         var epoch = _epoch; var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         var product = await Products.Retrieve(actor, ProductId);
@@ -135,16 +175,43 @@ else if (_error is null) { <p role="status">Loading revision membership…</p> }
             if (result.IsFailure) { _error = result.Error; return; }
             baseline = result.Value; row = baseline.Revision;
         }
+        IReadOnlyList<(Guid Owner, Guid Target, string Label, bool Dashed)> paths = [];
+        if (row.Value is DraftRevision && baseline is not null)
+        {
+            var topology = await Relationships.RevisionEdges(actor, baseline);
+            if (epoch != _epoch || read != _read) return;
+            if (topology.IsFailure) { _error = topology.Error; return; }
+            // Reject a baseline changed during the separately authorized relationship reads.
+            var current = await Operations.Baseline(actor, product.InternalId, id);
+            if (epoch != _epoch || read != _read) return;
+            if (current.IsFailure) { _error = current.Error; return; }
+            if (current.Value.Token != baseline.Token) { _error = "Revision relationships changed. Retrieve the revision again."; return; }
+            paths = topology.Value;
+        }
+        _paths = paths;
         _row = row; _baseline = baseline; _page = Math.Clamp(_page, 0, PageCount - 1);
         _inspected = Members.FirstOrDefault(m => m.Endpoint == _inspected?.Endpoint);
         if (operation is not null) _message = found.Value.Operation is null ? "The attempted operation did not commit. Current state retrieved." : "The attempted operation committed. Current state retrieved.";
     }
-    private void InspectKey(Guid key) { if (key == Id) InspectRevision(); else if (PageMembers.FirstOrDefault(m => m.Endpoint.VersionId == key) is { } member) Inspect(member.Endpoint); }
+    private void InspectKey(Guid key) { if (key == Id) InspectRevision(); else if (GraphMembers.FirstOrDefault(m => m.Endpoint.VersionId == key) is { } member) Inspect(member.Endpoint); }
     private void InspectRevision() { if (!_busy) { Cancel(); _inspected = null; } }
     private void Inspect(RevisionSelection endpoint) { if (!_busy) { Cancel(); _inspected = Members.FirstOrDefault(m => m.Endpoint == endpoint); } }
     private void SearchMembers(string value) { if (!_busy) { _memberSearch = value; _page = 0; _inspected = null; } }
     private async Task ChangeView(bool table) { if (_busy) return; Cancel(); _table = table; await Load(); }
     private async Task ChangePage(int delta) { if (_busy) return; Cancel(); _page += delta; _inspected = null; await Load(); }
+    private async Task ToggleExpansion(Guid key)
+    {
+        if (_busy) return;
+        if (!_expanded.Remove(key)) _expanded.Add(key);
+        _busy = true;
+        try { await Load(); } finally { _busy = false; }
+    }
+    private async Task FilterRequirements(string value)
+    {
+        if (_busy) return;
+        _requirementFilter = value; _inspected = null; _busy = true;
+        try { await Load(); } finally { _busy = false; }
+    }
     private void Choose(RevisionBaselineMember member) { if (!Locked) { _candidate = member; _review = false; } }
     private void Cancel() { _pending = null; _target = _candidate = null; _expected = null; _candidates = []; _kind = null; _search = ""; _review = false; }
     private async Task Begin(string action, RevisionBaselineMember? target = null)

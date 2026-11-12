@@ -63,6 +63,44 @@ internal sealed class RelationshipOperations(RequirementOperations requirements,
     internal const string FeatureRelationship = "Addresses Requirement";
     internal const string ProvenanceRelationship = "Derived from / Source for";
 
+    // Draft Revision topology only: exact outgoing references, never incoming links or provenance.
+    internal async Task<Result<IReadOnlyList<(Guid Owner, Guid Target, string Label, bool Dashed)>>> RevisionEdges(
+        ClaimsPrincipal actor, Retravion.Application.Revision.RevisionBaseline baseline, CancellationToken token = default)
+    {
+        var edges = new List<(Guid Owner, Guid Target, string Label, bool Dashed)>();
+        foreach (var member in baseline.Members)
+        {
+            var endpoint = member.Endpoint;
+            if (endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.UserNeed) continue;
+            var kind = endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.Feature ? "feature" :
+                endpoint.Kind == Retravion.Domain.Revision.RevisionEntityKind.TestCase ? "test-case" : "requirement";
+            var owner = await Node(actor, kind, endpoint.InternalId, endpoint.VersionId, token);
+            if (owner.IsFailure) return Result.Failure<IReadOnlyList<(Guid, Guid, string, bool)>>(owner.Error);
+            if (owner.Value.ProductInternalId != baseline.Revision.Value.ProductInternalId)
+                return Result.Failure<IReadOnlyList<(Guid, Guid, string, bool)>>("Relationship Product not available.");
+            if (kind == "requirement")
+            {
+                var links = await requirements.Links(actor, endpoint.InternalId, endpoint.VersionId, token);
+                if (links.IsFailure) return Result.Failure<IReadOnlyList<(Guid, Guid, string, bool)>>(links.Error);
+                edges.AddRange(links.Value.Select(l => (endpoint.VersionId, l.UserNeedVersionId, NeedRelationship, false)));
+                var parent = await requirements.Parent(actor, endpoint.InternalId, endpoint.VersionId, token);
+                if (parent.IsFailure) return Result.Failure<IReadOnlyList<(Guid, Guid, string, bool)>>(parent.Error);
+                if (parent.Value.HasValue) edges.Add((endpoint.VersionId, parent.Value.Value.VersionId, ParentRelationship, false));
+            }
+            else if (kind == "feature")
+                edges.AddRange(owner.Value.FeatureSnapshot!.Feature.Links.Select(l => (endpoint.VersionId, l.RequirementVersionId, FeatureRelationship, false)));
+            else
+                edges.AddRange(owner.Value.TestCaseSnapshot!.TestCase.Links.Select(l => (endpoint.VersionId, l.RequirementVersionId, TestCaseRelationship, false)));
+        }
+        if (edges.Any(e => baseline.Members.All(m => m.Endpoint.VersionId != e.Target)))
+            return Result.Failure<IReadOnlyList<(Guid, Guid, string, bool)>>("Revision relationships changed. Retrieve the revision again.");
+        var access = await products.List(actor, token);
+        if (access.IsFailure) return Result.Failure<IReadOnlyList<(Guid, Guid, string, bool)>>(access.Error);
+        if (access.Value.All(p => p.InternalId != baseline.Revision.Value.ProductInternalId))
+            return Result.Failure<IReadOnlyList<(Guid, Guid, string, bool)>>("Relationship Product not available.");
+        return edges.Distinct().ToArray();
+    }
+
     internal async Task<Result> Change(ClaimsPrincipal actor, RelationshipNode owner, RelationshipNode target,
         string relationship, string operation, RelationshipNode? replacement = null, CancellationToken token = default)
     {

@@ -16,6 +16,17 @@ namespace Retravion.IntegrationTests;
 #pragma warning disable BL0006 // Native details attributes through the existing component renderer.
 public sealed partial class PostgresProductTests
 {
+    private static void RegisterRevisionGraphReads(IServiceCollection services, string connection)
+    {
+        RegisterRelationshipCases(services, connection);
+        var requirements = new Retravion.Infrastructure.Requirement.PostgresRequirementStore(connection);
+        services.AddSingleton<Retravion.Application.Requirement.IRequirementStore>(requirements);
+        services.AddSingleton<Retravion.Application.Requirement.IRequirementChangeTransaction>(requirements);
+        services.AddSingleton<Retravion.Application.Requirement.IRequirementLinkStore>(requirements);
+        var needs = new Retravion.Infrastructure.UserNeed.PostgresUserNeedStore(connection);
+        services.AddSingleton<Retravion.Application.UserNeed.IUserNeedStore>(needs);
+        services.AddSingleton<Retravion.Application.UserNeed.IUserNeedChangeTransaction>(needs);
+    }
     private static async Task MountMembership(CaseRenderer renderer, string product, Guid id, bool table = true)
     {
         await renderer.Mount(typeof(RevisionLinks), new() { [nameof(RevisionLinks.ProductId)] = product, [nameof(RevisionLinks.Id)] = id });
@@ -44,6 +55,7 @@ public sealed partial class PostgresProductTests
         var store = new PostgresRevisionStore(db.ConnectionString);
         await using var host = new McpTestHost(s =>
         {
+            RegisterRevisionGraphReads(s, db.ConnectionString);
             s.AddSingleton<Retravion.Application.Product.IProductStore>(new Retravion.Infrastructure.Product.PostgresProductStore(db.ConnectionString));
             s.AddSingleton<IRevisionStore>(store); s.AddSingleton<IRevisionChangeTransaction>(store);
         });
@@ -51,6 +63,7 @@ public sealed partial class PostgresProductTests
         var actor = host.Factory.Services.GetRequiredService<Retravion.Web.Features.Mcp.McpCredentials>().Resolve(token);
         using var scope = host.Factory.Services.CreateScope();
         await using var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<RelationshipOperations>())
             .AddSingleton<Microsoft.JSInterop.IJSRuntime, CaseJS>().AddSingleton<Microsoft.AspNetCore.Components.NavigationManager>(new CaseNavigation())
             .AddSingleton<Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider>(new CaseAuthentication(actor))
             .AddSingleton(scope.ServiceProvider.GetRequiredService<RevisionOperations>())
@@ -76,13 +89,46 @@ public sealed partial class PostgresProductTests
             Assert.Contains("Revision history", renderer.Text());
             Assert.All(renderer.Elements("details"), attrs => Assert.DoesNotContain(attrs, a => a.AttributeName == "open"));
             await MountMembership(renderer, graph.Product.Id, graph.Row.Value.InternalId, false);
-            Assert.Contains("not inter-record link topology", renderer.Text());
-            var indirect = (await store.Baseline(graph.Product.InternalId, graph.Row.Value.InternalId)).Value.Members.First(m => !m.Explicit);
+            Assert.Contains("exact outgoing relationships", renderer.Text());
+            var workspace = Assert.Single(renderer.Components<WorkspaceGraph>());
+            Assert.Equal(1 + graph.Row.Value.Selections.Length, workspace.Nodes.Count);
+            Assert.All(workspace.Edges, e => Assert.Equal(graph.Row.Value.InternalId, e.Owner));
+            var indirect = (await store.Baseline(graph.Product.InternalId, graph.Row.Value.InternalId)).Value.Members.Single(m => m.Endpoint.VersionId == graph.Child.Requirement.VersionId);
+            await renderer.Components<MudButton>().Single(b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString() == "Expand Feature F-001 · v1").OnClick.InvokeAsync(new MouseEventArgs());
+            workspace = Assert.Single(renderer.Components<WorkspaceGraph>());
+            Assert.Contains(workspace.Edges, e => e.Owner == feature.Endpoint.VersionId && e.Target == indirect.Endpoint.VersionId);
+            Assert.DoesNotContain(workspace.Edges, e => e.Owner == graph.Row.Value.InternalId && e.Target == indirect.Endpoint.VersionId);
             await InspectMembership(renderer, RevisionPresentation.Label(indirect));
             Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString()?.StartsWith("Remove") == true);
             Assert.DoesNotContain("Remove selection", renderer.Text());
             Assert.DoesNotContain("Replace selection", renderer.Text());
             Assert.Contains("cannot be removed", renderer.Text());
+            async Task Toggle(string label) => await renderer.Components<MudButton>().Single(b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString() == label).OnClick.InvokeAsync(new MouseEventArgs());
+            await Toggle("Expand Test Case TC-001 · v1");
+            await Toggle("Expand Requirement Child · v1");
+            workspace = Assert.Single(renderer.Components<WorkspaceGraph>());
+            Assert.Contains(workspace.Edges, e => e.Owner == indirect.Endpoint.VersionId && e.Target == graph.Need2.Need.VersionId);
+            Assert.DoesNotContain(workspace.Edges, e => e.Owner == graph.Row.Value.InternalId && e.Target == graph.Need2.Need.VersionId);
+            Assert.Equal(1, workspace.Nodes.Count(n => n.Key == indirect.Endpoint.VersionId));
+            await Toggle("Collapse Feature F-001 · v1");
+            Assert.Contains(Assert.Single(renderer.Components<WorkspaceGraph>()).Nodes, n => n.Key == indirect.Endpoint.VersionId);
+            await Toggle("Collapse Test Case TC-001 · v1");
+            Assert.DoesNotContain(Assert.Single(renderer.Components<WorkspaceGraph>()).Nodes, n => n.Key == indirect.Endpoint.VersionId);
+            foreach (var filter in new[] { "Directly selected", "Indirectly connected", "All connected" })
+            {
+                await renderer.Components<MudSelect<string>>().Single().ValueChanged.InvokeAsync(filter);
+                workspace = Assert.Single(renderer.Components<WorkspaceGraph>());
+                Assert.Equal(filter != "Directly selected", workspace.Nodes.Any(n => n.Key == indirect.Endpoint.VersionId));
+                Assert.Equal(filter != "Indirectly connected", workspace.Nodes.Any(n => n.Key == graph.Parent2.Requirement.VersionId));
+                if (filter != "Directly selected")
+                {
+                    Assert.Contains(workspace.Edges, e => e.Owner == feature.Endpoint.VersionId && e.Target == indirect.Endpoint.VersionId);
+                    await Toggle("Expand Feature F-001 · v1");
+                    await Toggle("Collapse Feature F-001 · v1");
+                    Assert.Contains(Assert.Single(renderer.Components<WorkspaceGraph>()).Nodes, n => n.Key == indirect.Endpoint.VersionId);
+                }
+            }
+            Assert.Equal(graph.Row.Value.Selections.ToArray(), (await store.Retrieve(graph.Product.InternalId, graph.Row.Value.InternalId)).Value.Record!.Value.Selections.ToArray());
             Assert.Equal(before, (await audit.FindAsync(new())).Count);
         });
         Assert.Empty(renderer.Errors);
@@ -120,6 +166,15 @@ public sealed partial class PostgresProductTests
             Assert.DoesNotContain("Ready for release review", renderer.Text());
             Assert.DoesNotContain("0 records need approval", renderer.Text());
             Assert.False(renderer.HasButton("Review release"));
+            await MountMembership(renderer, graph.Product.Id, retiredDraft.Value.InternalId, false);
+            var expand = renderer.Components<MudButton>().Single(b => b.UserAttributes?.GetValueOrDefault("aria-label")?.ToString() == "Expand Feature F-001 · v1").OnClick;
+            var ticket = actor.FindFirst(Retravion.Web.Features.Identity.Logout.SessionTicketStore.SessionClaim)!.Value;
+            await host.Factory.Services.GetRequiredService<Retravion.Web.Features.Identity.Logout.SessionTicketStore>().RemoveAsync(ticket);
+            var auditCount = (await audit.FindAsync(new())).Count;
+            await expand.InvokeAsync(new MouseEventArgs());
+            Assert.Contains("Access denied", renderer.Text());
+            Assert.Empty(renderer.Components<WorkspaceGraph>());
+            Assert.Equal(auditCount, (await audit.FindAsync(new())).Count);
         });
         Assert.Empty(renderer.Errors);
     }
@@ -135,6 +190,7 @@ public sealed partial class PostgresProductTests
         var products = new Retravion.Infrastructure.Product.PostgresProductStore(db.ConnectionString);
         await using var host = new McpTestHost(s =>
         {
+            RegisterRevisionGraphReads(s, db.ConnectionString);
             s.AddSingleton<Retravion.Application.Product.IProductStore>(products);
             s.AddSingleton<IRevisionStore>(store); s.AddSingleton<IRevisionChangeTransaction>(store);
             s.AddSingleton<Retravion.Application.AuditTrail.IAuditSubmission>(new PostgresAuditSubmission(db.ConnectionString));
@@ -143,6 +199,7 @@ public sealed partial class PostgresProductTests
         var actor = host.Factory.Services.GetRequiredService<Retravion.Web.Features.Mcp.McpCredentials>().Resolve(token);
         using var scope = host.Factory.Services.CreateScope();
         await using var services = new ServiceCollection().AddLogging().AddMudServices()
+            .AddSingleton(scope.ServiceProvider.GetRequiredService<RelationshipOperations>())
             .AddSingleton<Microsoft.JSInterop.IJSRuntime, CaseJS>().AddSingleton<Microsoft.AspNetCore.Components.NavigationManager>(new CaseNavigation())
             .AddSingleton<Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider>(new CaseAuthentication(actor))
             .AddSingleton(scope.ServiceProvider.GetRequiredService<RevisionOperations>())
