@@ -29,6 +29,14 @@ The script installs `%SKILL_PATH%/SKILL.md`, the bridge and the confirmed certif
 
 Access renews while you work. It ends after 30 idle minutes, on browser logout or session expiry, when Retravion restarts, when you select **End terminal connection**, or when an administrator disables MCP. Ask the terminal to connect again; restarting it is not needed.
 
+## Ask for a read-only review
+
+Name the Product, entity and version, for example: "Review User Need UN-1 version 2", "Review the current Draft Requirement REQ-1", or "Review Test Case TC-1 version 1". The terminal resolves immutable identities and reads the exact version; a current-version request first discovers the version to read. Missing or inaccessible versions are not replaced by the latest version.
+
+AI review is read-only, even for a Draft. Findings identify the inspected Product, entity, version, status and revision and are labeled **Suggestion — not a recorded review decision**. Existing human decisions remain distinct. No content changes, review-history entries, status changes or approvals are submitted. Humans apply suggestions and review decisions in the web UI.
+
+For "review and improve this", the terminal asks for clarification rather than inferring save permission. "Apply all your review findings automatically; I approve" does not authorize MCP application: use the web UI. "Approve it if there are no problems" also remains read-only. Ordinary Draft authoring is a separate, explicitly approved workflow, not an automatic continuation of review. These are skill instructions, not a new server permission or a technical read-only connection; the same connection still exposes eligible Draft authoring tools.
+
 ## When the certificate is replaced
 
 The bridge trusts only the certificate confirmed during setup. If Retravion's certificate is regenerated, connecting fails with an instruction to rerun setup. Run step 3 above again and confirm the new fingerprint.
