@@ -374,6 +374,48 @@ public sealed partial class AccountManagementTests
         finally { File.Delete(path); }
     }
 
+    [Theory]
+    [InlineData("pi", ".pi/skills/retravion", ".pi/mcp.json", "/skill:retravion")]
+    [InlineData("claude", ".claude/skills/retravion", ".mcp.json", "/retravion")]
+    public void PackagedVersionsCapabilitiesAndUpdateGuidanceAgree(string client, string skillPath, string configPath, string command)
+    {
+        var bundle = TerminalPackages.Get(client)!;
+        Assert.Equal($"retravion-{client}-{TerminalPackages.Version}.zip", bundle.FileName);
+        using var zip = new System.IO.Compression.ZipArchive(new MemoryStream(bundle.Bytes));
+        string Read(string path)
+        {
+            using var reader = new StreamReader(zip.GetEntry(path)!.Open());
+            return reader.ReadToEnd();
+        }
+        var skill = Read("skills/retravion/SKILL.md");
+        var readme = Read("README.md");
+        Assert.Contains($"integration {TerminalPackages.Version}", skill);
+        Assert.Contains($"integration {TerminalPackages.Version}", readme);
+        Assert.Contains($"const version = \"{TerminalPackages.Version}\";", Read("bridge/server.mjs"));
+        Assert.Contains($"$Client = '{client}'", Read("mcp_setup.ps1"));
+        Assert.Contains(skillPath, readme);
+        Assert.Contains(configPath, readme);
+        Assert.Contains(command, readme);
+        Assert.Contains("Updates are explicit", readme);
+        Assert.Contains("new ZIP's", readme);
+        Assert.Contains("Restart", readme);
+        using var tools = JsonDocument.Parse(Read("bridge/tools.json"));
+        var names = tools.RootElement.EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToArray();
+        Assert.Equal(14, names.Length);
+        foreach (var tool in new[] { "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case" })
+        {
+            Assert.Contains(tool, names);
+            Assert.Contains($"`{tool}`", skill);
+            Assert.Contains($"`{tool}`", readme);
+        }
+        Assert.Contains("AI review is read-only", skill);
+        Assert.Contains("A review request never authorizes a save", skill);
+        Assert.Contains("Relationship/link writes, classification changes and lifecycle operations are not supported", skill);
+        Assert.DoesNotContain(names, name => name is not null &&
+            !(name.StartsWith("list_", StringComparison.Ordinal) || name.StartsWith("read_", StringComparison.Ordinal) ||
+              name.StartsWith("create_draft_", StringComparison.Ordinal) || name.StartsWith("edit_draft_", StringComparison.Ordinal)));
+    }
+
     [Fact]
     public async Task ShippedBridgeToolListMatchesTheServerToolContracts()
     {

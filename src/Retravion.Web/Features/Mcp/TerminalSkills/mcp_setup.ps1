@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-One-time Retravion terminal setup for a project directory. Rerun only when the HTTPS certificate is replaced.
+Explicit Retravion terminal install/update for a project directory. Rerun from a new ZIP to update, or when the HTTPS certificate is replaced.
 
 .DESCRIPTION
 Installs the Retravion skill and local bridge into the project, registers the bridge in the terminal's
@@ -133,5 +133,5 @@ if (-not $config.PSObject.Properties['mcpServers']) { $config | Add-Member -Note
 $config.mcpServers | Add-Member -NotePropertyName retravion -NotePropertyValue $entry -Force
 Write-RetravionText $configPath ($config | ConvertTo-Json -Depth 32)
 
-Write-Host "Retravion $Client integration installed in $root."
+Write-Host "Retravion $Client integration installed in $root. Restart the terminal to load the installed skill and bridge."
 Write-Host "Start $Client there, accept its project and MCP prompts, then run $(if ($Client -eq 'pi') { '/skill:retravion' } else { '/retravion' }) and ask it to connect."

@@ -270,8 +270,8 @@ no credential to copy and no environment variable to set.
 3. The script shows the SHA-256 fingerprint of the application's HTTPS certificate.
    Compare it with the fingerprint on the AI Workflow page and type `TRUST` only if they
    match. The bridge then trusts exactly that certificate. Nothing is added to the Windows
-   certificate store and certificate verification is never disabled. Rerun the script only
-   when the certificate is replaced.
+   certificate store and certificate verification is never disabled. Rerun the script from
+   a new ZIP to update the integration, or when the certificate is replaced.
 
 The script installs the skill, the bridge under `.retravion-terminal/`, and a `retravion`
 stdio entry in `.pi/mcp.json` or `.mcp.json`; unrelated entries are preserved.
@@ -341,13 +341,28 @@ integration version and SHA-256. These fixed packages contain only
 (`bridge/server.mjs`, `bridge/tools.json`); no credentials, user records or terminal client.
 A hash checks file integrity, not publisher identity. Downloading grants no access.
 
-Integration 2.1.0 guides Product, User Need and Requirement reads and requires explicit
-conversation approval before User Need or Requirement Draft writes. It preserves revision
-checks and prohibits automatic retries, including stale or uncertain writes. Test Case
-workflows, relationship/link writes and lifecycle operations remain unsupported by the
-skill; it does not confer lifecycle approval or new permissions.
+Integration 2.2.0 guides Product, User Need, Requirement and Test Case reads and requires
+explicit conversation approval before User Need, Requirement or Test Case Draft writes.
+Test Case tools are `list_test_cases`, `read_test_case`, `create_draft_test_case` and
+`edit_draft_test_case`. Creation generates the ID and permits empty content; edits replace
+the exact working Draft version's full content and ordered steps. Revision checks and
+no automatic retries (including stale or uncertain writes) remain required. Relationship/link
+writes, classification changes and lifecycle operations remain unsupported by the skill;
+it does not confer lifecycle approval or new permissions. AI review is read-only and never
+authorizes saving; humans apply suggestions and review decisions in the web UI.
 
-To update, run the new ZIP's `mcp_setup.ps1` again. To remove, run it with `-Remove`:
+Updates are explicit: upgrading the app or downloading a ZIP does not update installed
+skills or a running bridge. Close the terminal, download and verify the current client ZIP,
+extract it and run the **new ZIP's** `mcp_setup.ps1 -Directory C:\work\MyApp` for the same
+project. Include the existing `-Endpoint` if not using port 8443 and confirm the certificate
+fingerprint again. This replaces only the selected Retravion skill, shared bridge and
+Retravion configuration; unrelated MCP entries and settings are preserved. For both clients,
+run each client's setup so both skills are current. Check the installed `SKILL.md` heading
+for `integration 2.2.0`, restart the terminal, reload the skill and connect again. Use a new
+session if old instructions still report 2.1.0 or exclude Test Cases; do not bypass the old
+skill by calling tools directly.
+
+To remove, run setup with `-Remove`:
 it deletes only Retravion's skill and server entry, and the shared bridge folder once no
 other Retravion terminal integration remains in the project.
 
