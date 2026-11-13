@@ -12,7 +12,7 @@ internal static class TerminalPackages
     private static readonly (string Resource, string Entry)[] Files =
     [
         ("SKILL.md", "skills/retravion/SKILL.md"), ("README.md", "README.md"), ("mcp_setup.ps1", "mcp_setup.ps1"),
-        ("bridge.server.mjs", "bridge/server.mjs"), ("bridge.tools.json", "bridge/tools.json")
+        ("bridge.import-plan.mjs", "bridge/import-plan.mjs"), ("bridge.server.mjs", "bridge/server.mjs"), ("bridge.tools.json", "bridge/tools.json")
     ];
 
     internal static TerminalBundle? Get(string client)

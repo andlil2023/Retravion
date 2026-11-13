@@ -247,7 +247,7 @@ public sealed partial class AccountManagementTests
             var bytes = await response.Content.ReadAsByteArrayAsync();
             Assert.Equal(bundle.Bytes, bytes);
             using var zip = new ZipArchive(new MemoryStream(bytes));
-            Assert.Equal(new[] { "README.md", "bridge/server.mjs", "bridge/tools.json", "mcp_setup.ps1", "skills/retravion/SKILL.md" }, zip.Entries.Select(e => e.FullName).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal(new[] { "README.md", "bridge/import-plan.mjs", "bridge/server.mjs", "bridge/tools.json", "mcp_setup.ps1", "skills/retravion/SKILL.md" }, zip.Entries.Select(e => e.FullName).Order(StringComparer.Ordinal).ToArray());
             string Read(string name) { using var r = new StreamReader(zip.GetEntry(name)!.Open()); return r.ReadToEnd(); }
             var skill = Read("skills/retravion/SKILL.md");
             Assert.StartsWith("---\nname: retravion\ndescription:", skill.Replace("\r\n", "\n"));
