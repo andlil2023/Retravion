@@ -9,17 +9,36 @@
 @if (_error is not null) { <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert> }
 @if (_need is not null && _product is not null)
 {
-    <MudPaper Class="pa-4" Elevation="0">
-        <h2>@_need.Need.Id – @_need.Need.Title</h2>
-        <p>Product: @_product.Id – @_product.Name</p>
-        <p>@($"v{_need.Need.VersionNumber}") · Status: @_need.Need.Status @(!_product.IsActive ? "(Product retired)" : "")</p>
-        @if (_need.Need.CreationReason is { } reason) { <p>Successor creation reason: @reason</p> }
-        <nav aria-label="User Need versions">
-            @foreach (var version in _versions ?? [])
-            { <MudLink Href="@($"/user-needs/details?id={Id}&version={version.Need.VersionId}")">@($"v{version.Need.VersionNumber}") · @version.Need.Status</MudLink><span> </span> }
-        </nav>
-        @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
-        <h3>Statement</h3><ProductMarkdownView Markdown="@_need.Need.Statement" />
+    <div class="need-details">
+    <p class="need-context" aria-label="Product context">@_product.Id · @_product.Name <span aria-hidden="true">/</span> User Needs</p>
+    <MudPaper Class="pa-4 need-card" Elevation="0">
+        <div class="need-heading">
+            <div class="need-identity">
+                <p class="need-id">@_need.Need.Id</p>
+                <h2>@_need.Need.Title</h2>
+            </div>
+            <div class="need-metadata">
+                <div class="need-badges">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Version @_need.Need.VersionNumber</MudChip>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Class="need-status">@(_need.Need.Status == UserNeedStatus.InReview ? "In Review" : _need.Need.Status.ToString())</MudChip>
+                </div>
+                <details class="need-versions">
+                    <summary>Versions</summary>
+                    <nav aria-label="User Need versions">
+                        @foreach (var version in _versions ?? [])
+                        {
+                            <MudLink Href="@($"/user-needs/details?id={Id}&version={version.Need.VersionId}")" aria-current="@(version.Need.VersionId == _need.Need.VersionId ? "page" : null)">@($"v{version.Need.VersionNumber}") · @(version.Need.Status == UserNeedStatus.InReview ? "In Review" : version.Need.Status.ToString())</MudLink>
+                        }
+                    </nav>
+                </details>
+            </div>
+        </div>
+        @if (!_product.IsActive) { <p class="mt-4">Product retired</p> }
+        @if (_need.Need.CreationReason is { } reason) { <p class="mt-4">Successor creation reason: @reason</p> }
+        @if (!IsLatest) { <p class="mt-4">This earlier version is read-only because a newer version exists.</p> }
+        <section class="need-statement" aria-labelledby="need-statement-heading">
+            <h3 id="need-statement-heading">Statement</h3><ProductMarkdownView Markdown="@_need.Need.Statement" />
+        </section>
         @if (_provenance is { } origin)
         {
             <h3>Derived from</h3>
@@ -30,7 +49,49 @@
             <p>Title: @origin.SourceTitle</p>
             <h4>Source statement at copy time</h4><ProductMarkdownView Markdown="@origin.SourceStatement" />
         }
-        <h3>Review history</h3>
+    </MudPaper>
+    <div class="need-actions mt-4" role="group" aria-label="User Need actions">
+        @if (_product.IsActive && IsLatest && _need.Need.Status == UserNeedStatus.Draft)
+        {
+            <MudButton Href="@($"/user-needs/edit?id={_need.Need.InternalId}")" Variant="Variant.Filled" Color="Color.Primary">Edit</MudButton>
+        }
+        <MudButton Href="@($"/products/links?kind=user-need&id={_need.Need.InternalId}&version={_need.Need.VersionId}")">Manage links</MudButton>
+        <MudButton Href="@($"/user-needs/derive?id={_need.Need.InternalId}&version={_need.Need.VersionId}")">Copy to another Product</MudButton>
+    </div>
+    @if (_product.IsActive && IsLatest)
+    {
+        <section class="need-review mt-6" aria-labelledby="need-review-heading">
+            <MudPaper Class="pa-4 need-card" Elevation="0">
+                <h3 id="need-review-heading">@(_need.Need.Status == UserNeedStatus.Draft ? "Submit for review" : _need.Need.Status == UserNeedStatus.InReview ? "Review decision" : "Change approved User Need")</h3>
+                @if (_need.Need.Status == UserNeedStatus.Approved)
+                {
+                    <MudTextField @bind-Value="_reason" Label="Change or reopening reason" Required="true" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Variant="Variant.Outlined" Lines="2" Class="mt-4" />
+                }
+            </MudPaper>
+            <div class="need-actions mt-4">
+                @if (_need.Need.Status == UserNeedStatus.Draft)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("InReview"))'>Submit for review</MudButton>
+                }
+                else if (_need.Need.Status == UserNeedStatus.InReview)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton>
+                    <MudButton Disabled="_busy" OnClick='@(() => Review("Draft"))'>Return to Draft</MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="CreateSuccessor">Create successor Draft</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Reopen">Reopen to Draft</MudButton>
+                }
+            </div>
+        </section>
+    }
+    <section class="need-history mt-8" aria-labelledby="need-history-heading">
+        <h3 id="need-history-heading">Review history</h3>
         @if (_history is null) { <p role="status">Loading review history…</p> }
         else if (_history.Count == 0) { <p>No review decisions yet.</p> }
         else
@@ -44,34 +105,8 @@
                 </details>
             }
         }
-    </MudPaper>
-    <div class="mt-4">
-        <MudButton Href="@($"/products/links?kind=user-need&id={_need.Need.InternalId}&version={_need.Need.VersionId}")">Manage links</MudButton>
-        <MudButton Href="@($"/user-needs/derive?id={_need.Need.InternalId}&version={_need.Need.VersionId}")">Copy to another Product</MudButton>
+    </section>
     </div>
-    @if (_product.IsActive && IsLatest)
-    {
-        <div class="mt-4">
-            @if (_need.Need.Status == UserNeedStatus.Draft)
-            {
-                <MudButton Href="@($"/user-needs/edit?id={_need.Need.InternalId}")">Edit</MudButton>
-                <MudTextField @bind-Value="_comment" Label="Review comment (optional)" />
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("InReview"))'>Submit for review</MudButton>
-            }
-            else if (_need.Need.Status == UserNeedStatus.InReview)
-            {
-                <MudTextField @bind-Value="_comment" Label="Review comment (optional)" />
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton>
-                <MudButton Disabled="_busy" OnClick='@(() => Review("Draft"))'>Return to Draft</MudButton>
-            }
-            else
-            {
-                <MudTextField @bind-Value="_reason" Label="Change or reopening reason" Required="true" />
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="CreateSuccessor">Create successor Draft</MudButton>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Reopen">Reopen to Draft</MudButton>
-            }
-        </div>
-    }
 }
 @code {
     [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }
