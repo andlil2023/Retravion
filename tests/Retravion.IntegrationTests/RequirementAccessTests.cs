@@ -56,6 +56,8 @@ public sealed partial class AccountManagementTests
             foreach (var decision in new[] { "InReview", "Approved", "Draft", "secret-decision" })
                 Assert.True((await operations.Review(principal, expected, decision, "secret-comment")).IsFailure);
             Assert.True((await operations.List(principal, r.ProductInternalId)).IsFailure);
+            Assert.False(await operations.CanRead(principal));
+            Assert.Equal("Access denied.", (await operations.Hierarchy(principal, r.ProductInternalId)).Error);
             Assert.True((await operations.Find(principal, r.InternalId)).IsFailure);
             Assert.True((await operations.History(principal, r.InternalId)).IsFailure);
             Assert.True((await operations.Versions(principal, r.InternalId)).IsFailure);
@@ -114,7 +116,7 @@ public sealed partial class AccountManagementTests
             services.AddSingleton<Retravion.Application.Product.IProductStore>(products);
             services.AddSingleton<Retravion.Application.Product.IProductAreaStore>(new EmptyAreaReadDouble());
             services.AddSingleton<IRequirementStore>(store); services.AddSingleton<IRequirementChangeTransaction>(new RequirementStoreDouble());
-            services.AddSingleton<IRequirementLinkStore>(new RequirementStoreDouble());
+            services.AddSingleton<IRequirementLinkStore>(new RequirementStoreDouble { AllowEmptyParentReads = true });
         }));
         using var client = Client(factory);
         var paths = new[] { "/requirements?product=Owner", $"/requirements/details?id={r.InternalId}", "/requirements/create?product=Owner", $"/requirements/edit?id={r.InternalId}",
@@ -208,13 +210,19 @@ public sealed partial class AccountManagementTests
     private sealed class RequirementStoreDouble : IRequirementStore, IRequirementChangeTransaction, IRequirementLinkStore
     {
         public int Calls;
+        public bool AllowEmptyParentReads;
         public Task<Result<Maybe<RequirementAuditDetails>>> Outcome(Guid product, Guid operation, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementSnapshot>>> CopiesOf(Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<Maybe<RequirementProvenance>>> Provenance(Guid id, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> Derive(RequirementSnapshot source, RequirementState destination, AuditActor actor, DateTimeOffset time, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementVersionReference>>> IncomingUserNeed(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<IReadOnlyList<RequirementVersionReference>>> Children(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
-        public Task<Result<Maybe<RequirementParentLink>>> Parent(Guid id, Guid version, CancellationToken token = default) { Calls++; throw new InvalidOperationException(); }
+        public Task<Result<Maybe<RequirementParentLink>>> Parent(Guid id, Guid version, CancellationToken token = default)
+        {
+            Calls++;
+            if (AllowEmptyParentReads) return Task.FromResult(Result.Success(Maybe<RequirementParentLink>.None));
+            throw new InvalidOperationException();
+        }
         public Task<Result<RequirementSnapshot>> AddParent(RequirementSnapshot expected, RequirementParentLink target, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Func<Task<bool>>? authorized = null) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> RemoveParent(RequirementSnapshot expected, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Func<Task<bool>>? authorized = null) { Calls++; throw new InvalidOperationException(); }
         public Task<Result<RequirementSnapshot>> ReplaceParent(RequirementSnapshot expected, RequirementParentLink target, AuditActor actor, DateTimeOffset time, CancellationToken token = default, Func<Task<bool>>? authorized = null) { Calls++; throw new InvalidOperationException(); }

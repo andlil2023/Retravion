@@ -222,6 +222,42 @@ internal sealed class RequirementOperations(IAuthorizationService authorization,
     public async Task<Result<Maybe<RequirementAuditDetails>>> Outcome(ClaimsPrincipal principal, Guid product, Guid operationId, CancellationToken token = default) =>
         await Allowed(principal) ? await store.Outcome(product, operationId, token) : Result.Failure<Maybe<RequirementAuditDetails>>("Access denied.");
 
+    internal Task<bool> CanRead(ClaimsPrincipal principal) => Allowed(principal);
+
+    internal async Task<Result<RequirementHierarchy>> Hierarchy(ClaimsPrincipal principal, Guid product, CancellationToken token = default)
+    {
+        var selected = await List(principal, product, token);
+        if (selected.IsFailure) return Result.Failure<RequirementHierarchy>(selected.Error);
+        var byId = selected.Value.ToDictionary(row => row.Requirement.InternalId);
+        var exactParents = new Dictionary<Guid, RequirementSnapshot>();
+        var items = new List<RequirementHierarchyItem>();
+        foreach (var row in selected.Value)
+        {
+            var parent = await Parent(principal, row.Requirement.InternalId, row.Requirement.VersionId, token);
+            if (parent.IsFailure) return Result.Failure<RequirementHierarchy>(parent.Error);
+            RequirementSnapshot? reference = null;
+            if (parent.Value.HasValue)
+            {
+                var endpoint = parent.Value.Value;
+                if (!byId.TryGetValue(endpoint.RequirementInternalId, out var displayed))
+                    return Result.Failure<RequirementHierarchy>("The Requirement hierarchy is incomplete. Reload the list.");
+                if (displayed.Requirement.VersionId == endpoint.VersionId) reference = displayed;
+                else if (!exactParents.TryGetValue(endpoint.VersionId, out reference))
+                {
+                    var found = await Find(principal, endpoint.RequirementInternalId, token, endpoint.VersionId);
+                    if (found.IsFailure) return Result.Failure<RequirementHierarchy>(found.Error);
+                    if (found.Value.HasNoValue)
+                        return Result.Failure<RequirementHierarchy>("A linked parent Requirement version is unavailable. Reload the list.");
+                    reference = found.Value.Value;
+                    exactParents.Add(endpoint.VersionId, reference);
+                }
+            }
+            items.Add(new(row, reference));
+        }
+        // Do not publish a partially read hierarchy or data fetched after session revocation.
+        return await Allowed(principal) ? RequirementHierarchy.Create(items) : Result.Failure<RequirementHierarchy>("Access denied.");
+    }
+
     public async Task<Result<IReadOnlyList<RequirementSnapshot>>> List(ClaimsPrincipal principal, Guid product, CancellationToken token = default) =>
         await Allowed(principal) ? await store.List(product, token) : Result.Failure<IReadOnlyList<RequirementSnapshot>>("Access denied.");
     public async Task<Result<Maybe<RequirementSnapshot>>> Find(ClaimsPrincipal principal, Guid id, CancellationToken token = default, Guid? versionId = null) =>

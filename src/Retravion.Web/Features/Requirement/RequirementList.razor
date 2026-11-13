@@ -16,27 +16,48 @@ else
     <p>@_product!.Id – @_product.Name @(!_product.IsActive ? "(Retired)" : "")</p>
     @if (!_product.IsActive) { <p>Requirements are read-only while this Product is retired.</p> }
     <MudGrid Class="mb-4">
-        <MudItem xs="12" sm="4"><MudTextField @bind-Value="_search" Label="Search ID or title" Immediate="true" Clearable="true" /></MudItem>
+        <MudItem xs="12" sm="4"><MudTextField T="string" Value="_search" ValueChanged="SearchChanged" Label="Search ID or title" Immediate="true" Clearable="true" /></MudItem>
         <MudItem xs="12" sm="4">
-            <MudSelect T="RequirementType?" @bind-Value="_type" Label="Type" Clearable="true" Placeholder="All types">
+            <MudSelect T="RequirementType?" Value="_type" ValueChanged="TypeChanged" Label="Type" Clearable="true" Placeholder="All types">
                 @foreach (var type in Enum.GetValues<RequirementType>()) { <MudSelectItem T="RequirementType?" Value="@((RequirementType?)type)">@type</MudSelectItem> }
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="4">
-            <MudSelect T="RequirementStatus?" @bind-Value="_status" Label="Status" Clearable="true" Placeholder="All statuses">
+            <MudSelect T="RequirementStatus?" Value="_status" ValueChanged="StatusChanged" Label="Status" Clearable="true" Placeholder="All statuses">
                 @foreach (var status in Enum.GetValues<RequirementStatus>()) { <MudSelectItem T="RequirementStatus?" Value="@((RequirementStatus?)status)">@(status == RequirementStatus.InReview ? "In Review" : status.ToString())</MudSelectItem> }
             </MudSelect>
         </MudItem>
     </MudGrid>
-    <AreaSelect Product="_product.InternalId" @bind-Value="_area" Filter="true" />
-    <MudTable Items="Filtered" Dense="true" Hover="true" Elevation="0" aria-label="Requirements">
+    <AreaSelect Product="_product.InternalId" Value="_area" ValueChanged="AreaChanged" Filter="true" />
+    @if (IsFiltered)
+    { <p role="status">Matching branches are expanded automatically. Clear filters to expand or collapse branches.</p> }
+    <MudTable Items="Visible" Dense="true" Hover="true" Elevation="0" aria-label="Requirements">
         <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Type</MudTh><MudTh>Status</MudTh></HeaderContent>
         <RowTemplate>
-            <MudTd DataLabel="ID"><MudLink Href="@($"/requirements/details?id={context.Requirement.InternalId}")">@context.Requirement.Id</MudLink></MudTd>
-            <MudTd DataLabel="Title">@context.Requirement.Title</MudTd>
-            <MudTd DataLabel="Type">@context.Requirement.Type</MudTd>
-            <MudTd DataLabel="Status">@($"v{context.Requirement.VersionNumber}") · @(context.Requirement.Status == RequirementStatus.InReview ? "In Review" : context.Requirement.Status.ToString())
-                @if (context.LatestApprovedVersionNumber is { } approved && context.Requirement.Status != RequirementStatus.Approved)
+            <MudTd DataLabel="ID">
+                <div style="@($"margin-inline-start: {context.Depth * 16}px")">
+                    @if (context.HasChildren)
+                    {
+                        <MudIconButton Icon="@(context.IsExpanded ? Icons.Material.Outlined.ExpandMore : Icons.Material.Outlined.ChevronRight)"
+                                       Size="Size.Small" Disabled="IsFiltered" OnClick="@(() => ToggleBranch(context.Item.Snapshot.Requirement.InternalId))"
+                                       aria-label="@($"{(context.IsExpanded ? "Collapse" : "Expand")} {context.Item.Snapshot.Requirement.Id} branch")"
+                                       aria-expanded="@(context.IsExpanded ? "true" : "false")" />
+                    }
+                    <MudLink Href="@($"/requirements/details?id={context.Item.Snapshot.Requirement.InternalId}")">@context.Item.Snapshot.Requirement.Id</MudLink>
+                    @if (context.IsContext) { <span> (Ancestor context — not a match)</span> }
+                    <div>
+                        @if (context.Item.Parent is { } parent)
+                        {
+                            <span>Child of </span><MudLink Href="@($"/requirements/details?id={parent.Requirement.InternalId}&version={parent.Requirement.VersionId}")">@parent.Requirement.Id · @($"v{parent.Requirement.VersionNumber}")</MudLink>
+                        }
+                        else { <span>Root Requirement</span> }
+                    </div>
+                </div>
+            </MudTd>
+            <MudTd DataLabel="Title">@context.Item.Snapshot.Requirement.Title</MudTd>
+            <MudTd DataLabel="Type">@context.Item.Snapshot.Requirement.Type</MudTd>
+            <MudTd DataLabel="Status">@($"v{context.Item.Snapshot.Requirement.VersionNumber}") · @(context.Item.Snapshot.Requirement.Status == RequirementStatus.InReview ? "In Review" : context.Item.Snapshot.Requirement.Status.ToString())
+                @if (context.Item.Snapshot.LatestApprovedVersionNumber is { } approved && context.Item.Snapshot.Requirement.Status != RequirementStatus.Approved)
                 { <span> · @($"v{approved}") Approved</span> }
             </MudTd>
         </RowTemplate>
@@ -47,22 +68,43 @@ else
     [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
     private Retravion.Domain.Product.Product? _product;
     private IReadOnlyList<RequirementSnapshot>? _requirements;
+    private RequirementHierarchy? _hierarchy;
+    private readonly HashSet<Guid> _expanded = [];
     private string? _error, _search;
     private Guid? _area;
     private RequirementType? _type;
     private RequirementStatus? _status;
     private IReadOnlyList<RequirementSnapshot> Filtered => Retravion.Application.Requirement.RequirementList.Filter((_requirements ?? []).Where(row => _area is null ||
         (_area == Guid.Empty ? row.Requirement.AreaId is null : row.Requirement.AreaId == _area)), _type, _status, _search);
+    private bool IsFiltered => _area is not null || _type is not null || _status is not null || !string.IsNullOrWhiteSpace(_search);
+    private IReadOnlyList<RequirementHierarchyRow> Visible => _hierarchy?.Visible(
+        IsFiltered ? Filtered.Select(row => row.Requirement.InternalId).ToHashSet() : null, _expanded) ?? [];
+    private async Task<bool> CheckAccess()
+    {
+        if (await Operations.CanRead((await Authentication.GetAuthenticationStateAsync()).User)) return true;
+        _error = "Access denied."; _requirements = null; _hierarchy = null; _expanded.Clear();
+        return false;
+    }
+    private async Task ToggleBranch(Guid id)
+    {
+        if (!await CheckAccess() || IsFiltered) return;
+        if (!_expanded.Add(id)) _expanded.Remove(id);
+    }
+    private async Task SearchChanged(string? value) { if (await CheckAccess()) _search = value; }
+    private async Task TypeChanged(RequirementType? value) { if (await CheckAccess()) _type = value; }
+    private async Task StatusChanged(RequirementStatus? value) { if (await CheckAccess()) _status = value; }
+    private async Task AreaChanged(Guid? value) { if (await CheckAccess()) _area = value; }
     private string ProductPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
     private string CreatePath => $"/requirements/create?product={Uri.EscapeDataString(ProductId ?? "")}";
     protected override async Task OnParametersSetAsync()
     {
-        _requirements = null; _product = null; _error = null; _search = null; _type = null; _status = null; _area = null;
+        _requirements = null; _hierarchy = null; _expanded.Clear(); _product = null; _error = null; _search = null; _type = null; _status = null; _area = null;
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         var product = await Products.Retrieve(actor, ProductId);
         if (product.IsFailure) { _error = product.Error; return; }
         _product = product.Value;
-        var result = await Operations.List(actor, _product.InternalId);
-        if (result.IsFailure) _error = result.Error; else _requirements = result.Value;
+        var result = await Operations.Hierarchy(actor, _product.InternalId);
+        if (result.IsFailure) _error = result.Error;
+        else { _hierarchy = result.Value; _requirements = result.Value.Snapshots.ToArray(); }
     }
 }
