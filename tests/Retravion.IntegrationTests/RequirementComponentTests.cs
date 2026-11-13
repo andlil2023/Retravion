@@ -161,6 +161,14 @@ public sealed partial class PostgresProductTests
                     (name != "oninput" || a.Any(f => f.AttributeName == "id" && Equals(f.AttributeValue, "product-markdown"))));
             return DispatchEventAsync(attributes.Single(f => f.AttributeName == name).AttributeEventHandlerId, null, args);
         }
+        internal Task ActivateBranch(string label)
+        {
+            var frames = Frames(root).ToArray();
+            var attributes = Enumerable.Range(0, frames.Length).Where(i => frames[i].FrameType == RenderTreeFrameType.Element && frames[i].ElementName == "button")
+                .Select(i => frames.Skip(i + 1).TakeWhile(f => f.FrameType == RenderTreeFrameType.Attribute).ToArray())
+                .Single(a => a.Any(f => f.AttributeName == "aria-label" && Equals(f.AttributeValue, label)));
+            return DispatchEventAsync(attributes.Single(f => f.AttributeName == "onclick").AttributeEventHandlerId, null, new MouseEventArgs());
+        }
         internal Task Click(string label) => Components<MudButton>().Single(b => ButtonText(b) == label).OnClick.InvokeAsync(new MouseEventArgs());
         private string ButtonText(MudButton button)
         {
