@@ -1,5 +1,6 @@
 // No packages: run the TestCasePagesCreateIncompleteDraftEditMarkdownStepsFilterAndPreserveFailedDrafts
-// integration test in Release first, then node tests/TestCaseSteps.Browser.Tests.mjs.
+// and TestCaseDetailsCallbacksReviewConfirmLinksCreateVersionsAndRetainExactHistoricalEvidence
+// integration tests in Release first, then node tests/TestCaseSteps.Browser.Tests.mjs.
 // Layout and native keyboard checks use actual server-rendered pages, not hand-written table fixtures.
 // Interactive mutation and auto-sizing configuration are covered by the component test.
 import assert from 'node:assert/strict';
@@ -26,7 +27,7 @@ const darkThemeMarkup = await readFile(new URL('Retravion.IntegrationTests/bin/R
 const darkThemeCss = [...darkThemeMarkup.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map(match => match[1]).join('\n');
 assert.ok(darkThemeCss.includes('--mud-palette-surface:'), 'Render the production dark theme with the component test first.');
 const fixtures = new Map();
-for (const name of ['details', 'editor', 'empty-editor']) {
+for (const name of ['details', 'editor', 'empty-editor', 'linked-details']) {
     const html = await readFile(new URL(`Retravion.IntegrationTests/bin/Release/net10.0/test-case-fixtures/${name}.html`, import.meta.url), 'utf8');
     // No app connection or remote resources: these are authenticated SSR snapshots from the test host.
     fixtures.set('/' + name, html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -75,6 +76,23 @@ try {
         for (let i = 0; i < 100 && !await evaluate(`location.pathname === '/${name}' && Boolean(document.querySelector('.test-case-steps table'))`); i++) await delay(50);
         assert.equal(await evaluate("document.querySelectorAll('.test-case-steps tbody > tr').length"), name === 'empty-editor' ? 1 : 2);
         if (name === 'details') {
+            const structure = await evaluate(`(() => {
+                const actions = document.querySelector('[aria-label="Test Case actions"]');
+                const content = document.querySelector('[aria-label="Steps"]');
+                const links = document.querySelector('[aria-label="Requirement links"]');
+                return {
+                    actions: [...actions.querySelectorAll('a, button')].map(button => button.textContent.trim()),
+                    afterContent: Boolean(content.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING),
+                    linksAfterActions: Boolean(actions.compareDocumentPosition(links) & Node.DOCUMENT_POSITION_FOLLOWING),
+                    noSelector: !document.querySelector('.mud-select'),
+                    headings: [...document.querySelectorAll('.test-case-section > h3')].map(h => h.textContent.trim()),
+                    emptyLinks: links.querySelector('tbody').textContent.trim()
+                };
+            })()`);
+            assert.deepEqual(structure.actions, ['Edit Draft', 'Manage links']);
+            assert.equal(structure.afterContent && structure.linksAfterActions && structure.noSelector, true);
+            assert.deepEqual(structure.headings, ['Description', 'Preconditions', 'Steps']);
+            assert.equal(structure.emptyLinks, 'No Requirement links yet.');
             assert.equal(await evaluate("document.querySelector('.test-case-steps strong').textContent"), 'Second');
             // Stress wrapping with long prose, an unbroken identifier and preformatted Markdown content.
             await evaluate(`(() => {
@@ -118,6 +136,17 @@ try {
                 assert.equal(layout.overflow, false, `${name}: no page overflow at ${width}px, dark=${dark}`);
                 assert.equal(layout.tableOverflow, false, `${name}: no table overflow at ${width}px`);
                 assert.equal(layout.clipped, false, `${name}: no clipped content`);
+                if (name === 'details') {
+                    const sections = await evaluate(`(() => {
+                        const heading = document.querySelector('.test-case-section > h3');
+                        const content = document.querySelector('[aria-label="Description"] .product-markdown-content');
+                        const style = getComputedStyle(heading);
+                        return { border: parseFloat(style.borderBottomWidth), transform: style.textTransform,
+                            separation: content.getBoundingClientRect().top >= heading.getBoundingClientRect().bottom };
+                    })()`);
+                    assert.ok(sections.border > 0 && sections.separation, 'Section label is separated from Markdown content.');
+                    assert.equal(sections.transform, 'uppercase');
+                }
                 if (name === 'empty-editor') {
                     assert.equal(layout.emptyText, 'No steps yet.');
                     assert.equal(layout.emptySpansTable, true, 'Empty message spans the table.');
@@ -148,6 +177,39 @@ try {
             assert.equal(await evaluate("document.activeElement.getAttribute('aria-label')"), 'Insert step above step 2');
             assert.equal(await evaluate("document.querySelectorAll('.test-case-steps tbody > tr').length"), 2);
             console.log('PASS: native Tab reaches row controls without creating a step (interactive handler also verified by component test)');
+        }
+    }
+    await command('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/linked-details` });
+    for (let i = 0; i < 100 && !await evaluate(`location.pathname === '/linked-details' && Boolean(document.querySelector('[aria-label="Linked Requirements"] tbody td[data-label]'))`); i++) await delay(50);
+    // Stress the actual linked-Requirement row without substituting a hand-written table fixture.
+    await evaluate(`document.querySelector('[data-label="Title"]').textContent = 'Long Requirement title '.repeat(20) + 'X'.repeat(150)`);
+    for (const dark of [false, true]) {
+        await evaluate(`(() => {
+            document.querySelector('#test-palette')?.remove();
+            if (${dark}) { const style = document.createElement('style'); style.id = 'test-palette'; style.textContent = ${JSON.stringify(darkThemeCss)}; document.body.append(style); }
+        })()`);
+        for (const width of [1280, 961, 960, 768, 390, 320]) {
+            await command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+            const links = await evaluate(`(() => {
+                const table = document.querySelector('[aria-label="Linked Requirements"]');
+                const cells = [...table.querySelector('tbody tr').children];
+                const bounds = cells.map(cell => cell.getBoundingClientRect());
+                return {
+                    labels: cells.map(cell => cell.dataset.label),
+                    headers: [...table.querySelectorAll('thead th')].map(cell => cell.textContent.trim()),
+                    version: cells[2].textContent.trim(),
+                    href: cells[0].querySelector('a').getAttribute('href'),
+                    stacked: bounds[2].top > bounds[1].top,
+                    overflow: document.documentElement.scrollWidth > innerWidth || table.scrollWidth > table.clientWidth + 1
+                };
+            })()`);
+            assert.deepEqual(links.labels, ['Requirement ID', 'Title', 'Version']);
+            assert.deepEqual(links.headers, ['Requirement ID', 'Title', 'Version']);
+            assert.equal(links.version, 'v2');
+            assert.match(links.href, /^\/requirements\/details\?id=[^&]+&version=/);
+            assert.equal(links.overflow, false, `Requirement links: no overflow at ${width}px, dark=${dark}`);
+            assert.equal(links.stacked, width <= 960, `Requirement links: responsive layout at ${width}px`);
+            console.log(`PASS: linked Requirements, ${width}px, ${dark ? 'dark' : 'light'}`);
         }
     }
 } finally {
