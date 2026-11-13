@@ -79,7 +79,7 @@ test('approved multi-file fields, dependency mapping, compact results and separa
     const preview = await f.runner.run(f.previewArgs);
     assert.equal(preview.proposal.operations.length, 3);
     assert.equal(writes(f.calls).length, 4, 'preview is read-only');
-    assert.ok(preview.proposal.operations.every(o => o.owner.versionId && o.target.versionId && o.owner.revision === 1));
+    assert.ok(preview.proposal.operations.every(o => o.operation === 'add' && o.owner.versionId && o.target.versionId && o.owner.revision === 1));
     const linked = await f.links();
     assert.equal(linked.counts['confirmed-success'], 3);
     assert.equal(writes(f.calls).length, 7);
@@ -185,6 +185,47 @@ test('multiple links refresh owner revisions after own changes', async t => {
     assert.equal(summary.counts['confirmed-success'], 4);
     const featureLinks = f.calls.filter(c => c.name === 'change_draft_link' && c.args.ownerKind === 'feature');
     assert.deepEqual(featureLinks.map(c => c.args.expectedRevision), [1, 2]);
+});
+
+test('fresh approval cannot authorize injected removal intent or unexpected proposal fields', async t => {
+    const f = await fixture(t); await f.runner.run(f.createArgs);
+    const preview = await f.runner.run(f.previewArgs);
+    for (const mutate of [
+        p => { p.operations[0].operation = 'remove'; },
+        p => { p.operations[0].operation = 'retarget'; },
+        p => { delete p.operations[0].operation; },
+        p => { p.actor = 'injected'; },
+        p => { p.operations[0].unexpected = true; },
+        p => { p.operations[0].owner.actor = 'injected'; },
+        p => { p.operations[0].target.newerVersion = id(444); },
+    ]) {
+        const changed = structuredClone(preview.proposal); mutate(changed);
+        await writeFile(f.previewArgs.proposalPath, JSON.stringify(changed));
+        // links() hashes the edited proposal: even a fresh digest approval must fail closed.
+        assert.ok((await f.links()).error);
+        assert.equal(f.calls.filter(c => c.name === 'change_draft_link').length, 0);
+    }
+    await writeFile(f.previewArgs.proposalPath, JSON.stringify(preview.proposal));
+    assert.equal((await f.links()).counts['confirmed-success'], 3);
+});
+
+test('cancellation with unread candidate pages always reports incomplete and ambiguous', async t => {
+    const controller = new AbortController();
+    const candidate = { kind: 'feature', id: 'F-70', title: '', description: '', internalId: id(70), versionId: id(71), versionNumber: 1, revision: 1, productInternalId: id(999), status: 'Draft' };
+    const f = await fixture(t, { intercept: (name, args, rows) => {
+        if (name === 'create_draft_feature') { rows.set(candidate.internalId, candidate); return error('The write outcome could not be confirmed.'); }
+        if (name === 'list_features') return result({ items: [candidate], nextOffset: 50 });
+        if (name === 'read_feature') { controller.abort(); return result({ feature: candidate }); }
+    } });
+    const created = await f.runner.run(f.createArgs);
+    assert.equal(created.counts.uncertain, 1);
+    const before = writes(f.calls).length;
+    const observed = await f.runner.run({ action: 'reconcile', runDirectory: f.createArgs.runDirectory, reportPath: join(f.directory, 'cancelled-pages.json') }, controller.signal);
+    const uncertainCreation = observed.observations.find(o => o.sourceKey === 'f');
+    assert.equal(uncertainCreation.candidates.length, 1);
+    assert.equal(uncertainCreation.incomplete, true); assert.equal(uncertainCreation.ambiguous, true);
+    assert.equal(f.calls.filter(c => c.name === 'list_features').length, 1);
+    assert.equal(writes(f.calls).length, before);
 });
 
 test('bridge import tool requires live connection and forwards whole import without model turns', async t => {

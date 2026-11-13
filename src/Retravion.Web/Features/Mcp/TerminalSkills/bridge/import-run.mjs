@@ -15,6 +15,9 @@ const hash = value => createHash('sha256').update(canonical(value)).digest('hex'
 const uuid = v => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) && !/^0{8}-0{4}-0{4}-0{4}-0{12}$/.test(v);
 const json = async path => JSON.parse(await readFile(path, 'utf8'));
 const positive = v => Number.isSafeInteger(v) && v > 0;
+const exactKeys = (value, keys) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== keys.length || keys.some(k => !Object.hasOwn(value, k))) stop('Unsupported proposal fields.');
+};
 const safeError = 'Local validation, approval or file operation failed. Inspect the local artifacts; no automatic retry. Reconcile any previously dispatched work.';
 const uncertain = /uncertain|unknown|could not be confirmed|did not answer|no response|do not retry|never retry/i;
 export const importTools = [{ name: 'rtv_import', description: 'Approved local import workflow. Load the skill first. action=create uses manifestPath, approvalPath, runDirectory, confirmedProduct and confirmed=true after explicit creation approval. preview-links uses manifestPath, creationRunDirectory and proposalPath (new file), reads exact endpoints only. links uses manifestPath, proposalPath, approvedSha256 from exact endpoint preview, runDirectory, confirmedProduct and confirmed=true after separate explicit endpoint approval. reconcile uses runDirectory and reportPath (new file), reads only; never retries. New run directories and single-use approval claims prevent resume/replay. No lifecycle, content edits, classification or review saves.', inputSchema: {
@@ -164,7 +167,7 @@ export class ImportRunner {
                             if (owner.status !== 'Draft' || owner.productInternalId !== target.productInternalId) stop('Ineligible owner or Product.');
                             name = 'change_draft_link';
                             parameters = { ownerKind: owner.kind, ownerId: owner.internalId, ownerVersionId: owner.versionId, expectedRevision: owner.revision,
-                                relationship: operation.relationship, operation: 'add', targetId: target.internalId, targetVersionId: target.versionId, confirmed: true };
+                                relationship: operation.relationship, operation: operation.operation, targetId: target.internalId, targetVersionId: target.versionId, confirmed: true };
                         }
                     } catch {
                         await save({ type: 'outcome', index, result: { outcome: 'rejected', reason: 'Exact state unavailable, stale or ineligible. Re-preview and obtain fresh approval.' } }); break;
@@ -215,6 +218,7 @@ export class ImportRunner {
         } catch { return { error: safeError, requests: this.requests }; }
     }
     async validateLinks(manifest, proposal) {
+        exactKeys(proposal, ['schemaVersion', 'scope', 'manifestSha256', 'creationRunDirectory', 'operations']);
         if (proposal.schemaVersion !== 1 || proposal.scope !== 'add-links-only' || proposal.manifestSha256 !== digest(manifest) || !Array.isArray(proposal.operations)) stop('Invalid link proposal.');
         const creation = report(await readJournal(proposal.creationRunDirectory));
         if (creation.phase !== 'create' || creation.manifestSha256 !== digest(manifest) || creation.counts['confirmed-success'] !== manifest.records.length) stop('Unconfirmed creation mappings.');
@@ -224,6 +228,12 @@ export class ImportRunner {
         if (planned.length !== proposal.operations.length) stop('Changed links.');
         for (let i = 0; i < planned.length; i++) {
             const p = planned[i], o = proposal.operations[i];
+            exactKeys(o, ['sourceKey', 'relationship', 'operation', 'owner', 'target']);
+            if (o.operation !== 'add') stop('Only separately approved additions are supported.');
+            for (const endpoint of [o.owner, o.target]) {
+                exactKeys(endpoint, ['kind', 'id', 'internalId', 'versionId', 'versionNumber', 'revision', 'productInternalId', 'status', 'title', 'contentSha256']);
+                if (!Object.hasOwn(spec, endpoint.kind) || typeof endpoint.contentSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(endpoint.contentSha256)) stop('Invalid exact endpoint.');
+            }
             if (o.sourceKey !== p.sourceKey || o.relationship !== p.relationship || o.owner.kind !== manifest.records.find(r => r.sourceKey === p.sourceKey).kind) stop('Changed link operation.');
             identity(o.owner, o.owner.kind); identity(o.target, o.target.kind);
             if (!matches(o.owner, mappings.get(p.sourceKey)) || (p.target.sourceKey && !matches(o.target, mappings.get(p.target.sourceKey)))) stop('Changed generated endpoint mapping.');
@@ -240,7 +250,7 @@ export class ImportRunner {
         for (const r of manifest.records) for (const link of r.relationships) {
             const owner = (await this.exact(mappings.get(r.sourceKey), signal)).current;
             const target = (await this.exact(link.target.sourceKey ? mappings.get(link.target.sourceKey) : link.target, signal)).current;
-            operations.push({ sourceKey: r.sourceKey, relationship: link.relationship, owner, target });
+            operations.push({ sourceKey: r.sourceKey, relationship: link.relationship, operation: 'add', owner, target });
         }
         const proposal = { schemaVersion: 1, scope: 'add-links-only', manifestSha256: digest(manifest), creationRunDirectory: resolve(args.creationRunDirectory), operations };
         await this.validateLinks(manifest, proposal);
@@ -268,6 +278,7 @@ export class ImportRunner {
             } else if (operation.outcome === 'uncertain') {
                 const candidates = []; let offset = 0, incomplete = false;
                 do {
+                    if (signal?.aborted) { incomplete = true; break; }
                     const response = await this.request(`list_${spec[operation.kind][1]}`, { productId: manifest.productId, search: operation.fields.id ?? operation.fields.title.slice(0, 200), offset, limit: 50 }, signal);
                     if (response.outcome !== 'confirmed-success' || !Array.isArray(response.value.items)) { incomplete = true; break; }
                     for (const value of response.value.items) {
@@ -276,10 +287,11 @@ export class ImportRunner {
                         }
                     }
                     const next = response.value.nextOffset;
+                    if (signal?.aborted) { incomplete = true; break; }
                     if (next === null) break;
                     if (!Number.isSafeInteger(next) || next <= offset || next >= 200) { incomplete = true; break; }
                     offset = next;
-                } while (!signal?.aborted);
+                } while (true);
                 observations.push({ sourceKey: operation.sourceKey, observation: 'candidates-only-not-proof', candidates, incomplete, ambiguous: candidates.length !== 1 || incomplete });
             }
         }
