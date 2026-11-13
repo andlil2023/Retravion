@@ -7,12 +7,12 @@ namespace Retravion.Web.Features.Mcp;
 
 internal static class TerminalPackages
 {
-    internal const string Version = "2.9.0";
+    internal const string Version = "2.10.0";
     // Fixed embedded resources, never a directory walk or any user/credential/record content.
     private static readonly (string Resource, string Entry)[] Files =
     [
         ("SKILL.md", "skills/retravion/SKILL.md"), ("README.md", "README.md"), ("mcp_setup.ps1", "mcp_setup.ps1"),
-        ("bridge.import-plan.mjs", "bridge/import-plan.mjs"), ("bridge.server.mjs", "bridge/server.mjs"), ("bridge.tools.json", "bridge/tools.json")
+        ("bridge.import-run.mjs", "bridge/import-run.mjs"), ("bridge.import-plan.mjs", "bridge/import-plan.mjs"), ("bridge.server.mjs", "bridge/server.mjs"), ("bridge.tools.json", "bridge/tools.json")
     ];
 
     internal static TerminalBundle? Get(string client)

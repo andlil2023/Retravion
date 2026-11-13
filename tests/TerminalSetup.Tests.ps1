@@ -77,7 +77,7 @@ try {
         Set-Content $skillPath '# integration 2.1.0 - Test Cases unsupported' -NoNewline
         Set-Content $otherSkill 'other client skill' -NoNewline
         Set-Content $configPath $existing -NoNewline
-        foreach ($file in @('import-plan.mjs', 'server.mjs', 'tools.json')) {
+        foreach ($file in @('import-run.mjs', 'import-plan.mjs', 'server.mjs', 'tools.json')) {
             Set-Content (Join-Path $upgrade ".retravion-terminal/bridge/$file") 'old bridge' -NoNewline
         }
         Assert-True ((Get-Content $skillPath -Raw).Contains('2.1.0')) 'Staging package does not update installed skill'
@@ -86,7 +86,7 @@ try {
         Assert-True ((Get-Content (Join-Path $upgrade '.retravion-terminal/bridge/server.mjs') -Raw) -ceq 'old bridge') 'Refused upgrade keeps old bridge'
         & $setup -Client $client -Directory $upgrade -CertificateFile $cer -Fingerprint $fingerprint -Endpoint 'https://localhost:9443/mcp' 6>$null
         Assert-True ((Get-Content $skillPath -Raw) -ceq (Get-Content (Join-Path $source 'SKILL.md') -Raw)) 'Explicit upgrade installs current skill'
-        foreach ($file in @('import-plan.mjs', 'server.mjs', 'tools.json')) {
+        foreach ($file in @('import-run.mjs', 'import-plan.mjs', 'server.mjs', 'tools.json')) {
             Assert-True ((Get-FileHash (Join-Path $upgrade ".retravion-terminal/bridge/$file")).Hash -eq (Get-FileHash (Join-Path $source "bridge/$file")).Hash) 'Explicit upgrade installs current bridge'
         }
         $upgradedConfig = Get-Content $configPath -Raw | ConvertFrom-Json
