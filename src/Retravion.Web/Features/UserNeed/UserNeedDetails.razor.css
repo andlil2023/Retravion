@@ -1,0 +1,146 @@
+.need-details {
+    min-width: 0;
+}
+
+.need-context {
+    margin: 0 0 1rem;
+    color: var(--mud-palette-text-secondary);
+    font-size: .875rem;
+    overflow-wrap: anywhere;
+}
+
+.need-context span {
+    margin: 0 .4rem;
+}
+
+.need-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: .75rem 1.5rem;
+}
+
+.need-identity {
+    flex: 1 1 26rem;
+    min-width: 0;
+    max-width: 48rem;
+}
+
+.need-id {
+    color: var(--mud-palette-text-secondary);
+    font-size: .875rem;
+    font-weight: 600;
+    margin: 0 0 .375rem;
+    overflow-wrap: anywhere;
+}
+
+.need-identity h2 {
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 600;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.need-metadata {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: .5rem;
+}
+
+.need-badges {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    min-height: 44px;
+}
+
+.need-metadata ::deep .mud-chip {
+    margin: 0;
+}
+
+.need-metadata ::deep .need-status {
+    background: var(--mud-palette-primary-hover);
+}
+
+.need-versions {
+    font-size: .875rem;
+    color: var(--mud-palette-primary);
+}
+
+.need-versions summary {
+    cursor: pointer;
+    min-height: 44px;
+    align-content: center;
+}
+
+.need-versions summary:focus-visible,
+.need-history summary:focus-visible {
+    outline: 2px solid var(--mud-palette-primary);
+    outline-offset: 3px;
+}
+
+.need-versions nav {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    padding: .5rem 0;
+}
+
+.need-statement {
+    margin-top: 1.25rem;
+    max-width: 85ch;
+}
+
+.need-details h3 {
+    font-size: 1rem;
+    margin: 0 0 .75rem;
+}
+
+.need-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+.need-actions ::deep .mud-button-root {
+    min-height: 44px;
+}
+
+.need-review {
+    max-width: 47.5rem;
+}
+
+.need-history {
+    border-top: 1px solid var(--mud-palette-divider);
+    padding-top: 1.5rem;
+}
+
+.need-history > p {
+    color: var(--mud-palette-text-secondary);
+    font-size: .875rem;
+}
+
+.need-history details {
+    border-bottom: 1px solid var(--mud-palette-divider);
+    padding: .75rem 0;
+    overflow-wrap: anywhere;
+}
+
+.need-history summary {
+    cursor: pointer;
+    min-height: 44px;
+    align-content: center;
+}
+
+@media (max-width: 540px) {
+    .need-metadata {
+        width: 100%;
+    }
+
+    .need-actions ::deep .mud-button-root {
+        flex: 1 1 auto;
+    }
+}
