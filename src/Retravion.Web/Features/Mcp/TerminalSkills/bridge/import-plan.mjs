@@ -14,8 +14,10 @@ const keys = (v, allowed, where) => {
     if (!object(v)) fail(`${where}: expected an object.`);
     if (Object.keys(v).some(k => !allowed.includes(k))) fail(`${where}: unsupported field; allowed: ${allowed.join(', ')}.`);
 };
+// Match .NET Char.IsWhiteSpace / String.Trim, not JavaScript trim (NEL/FEFF differ).
+const trimServer = value => value.replace(/^[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g, '');
 const text = (v, name, required = false) => {
-    if (typeof v !== 'string' || (required && !v.trim())) fail(`${name}: ${required ? 'nonempty ' : ''}string required.`);
+    if (typeof v !== 'string' || (required && !trimServer(v))) fail(`${name}: ${required ? 'nonempty ' : ''}string required.`);
     return v;
 };
 const key = (v, where) => {
@@ -79,7 +81,7 @@ function fields(kind, input, where) {
         } else {
             output[name] = text(!manual && v == null ? '' : v, `${where}.${name}`, manual);
             if (name === 'id') {
-                output.id = output.id.trim();
+                output.id = trimServer(output.id);
                 if ([...output.id].length > 100) fail(`${where}.id: maximum 100 Unicode characters.`);
             }
         }

@@ -84,6 +84,22 @@ test('duplicate keys/IDs, unresolved references, wrong relationships and cycles'
     assert.throws(() => single('feature', {}, [{ relationship: 'addresses', target }, { relationship: 'addresses', target }]), /duplicate relationship/);
 });
 
+test('.NET whitespace parity preserves exact initial values and duplicate-ID detection', () => {
+    const whitespace = '\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000';
+    for (const char of whitespace) {
+        for (const kind of ['user-need', 'requirement']) {
+            const fields = kind === 'requirement' ? requirement : need;
+            assert.equal(single(kind, { ...fields, id: char + 'ID' + char }).records[0].fields.id, 'ID');
+            assert.throws(() => single(kind, { ...fields, title: char }), /nonempty/);
+            assert.throws(() => single(kind, { ...fields, statement: char }), /nonempty/);
+            assert.throws(() => plan('P', [{ file: 'a.md', content: record('a', kind, { ...fields, id: 'ID' }) + record('b', kind, { ...fields, id: char + 'ID' + char }) }]), /duplicate manual ID/);
+        }
+    }
+    // JS removes FEFF; .NET preserves it, including for nonblank validation.
+    assert.equal(single('user-need', { ...need, id: '\uFEFFID\uFEFF', title: '\uFEFF' }).records[0].fields.id, '\uFEFFID\uFEFF');
+    assert.throws(() => plan('\u0085', sources()), /Product explicitly selected/);
+});
+
 test('approval binds every byte of canonical proposal, Product, defaults, steps and endpoints', () => {
     const m = plan('P', sources()), hash = digest(m), approval = approve(m, hash, 'P');
     assert.equal(verifyApproval(m, approval), true);
