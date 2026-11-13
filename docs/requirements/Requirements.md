@@ -10,6 +10,12 @@
 
 These requirements describe approved future behavior, not implemented or verified functionality. [PBI #124](https://github.com/andlil2023/Retravion/issues/124) and the versioning specification in [PBI #132](https://github.com/andlil2023/Retravion/issues/132) are documentation only. Requirement versioning implementation belongs to [#133](https://github.com/andlil2023/Retravion/issues/133) and requires separately approved work. Planned verification is specified in [Requirement Management — Test Specifications](../test-cases/Requirements.md). The explicitly approved scope extension in [#144](https://github.com/andlil2023/Retravion/issues/144) replaces #132's unconditional Approved-version immutability with eligible reopening and the shared future release-protection rule REQ-LINK-009 in [Relationship Management](Relationships.md); it does not implement revision functionality.
 
+### Expandable Requirements List — Documentation Scope
+
+The hierarchy extension to REQ-REQ-002 below specifies requested future behavior, not an implemented or verified feature. It extends UN-REQ-001 and is limited to read-only browsing of existing parent–child relationships in the Product Requirements list. Implementation requires a separately approved PBI. Planned verification is TC-REQ-038–043 in the companion test specifications. The complete-decomposition declaration ("Fully refined by children"), test-case coverage calculations, contextual child creation, and relationship editing are outside this extension.
+
+**Audit decision and verification plan:** N/A — this documentation change introduces or changes no application business-record write paths. The future list read, expansion/collapse, filtering and navigation must not mutate Requirements, relationships, lifecycle, history or audit records; reads require no change event under REQ-REQ-005 and REQ-LINK-006. Verification will compare business state/history/audit before and after these actions (TC-REQ-043). Mutation authorization, event payloads, transaction failure and uncertain-commit cases are inapplicable because no mutation is introduced; existing write policies are unchanged.
+
 ## Requirements
 
 ### REQ-REQ-001 — Identify and Maintain a Requirement
@@ -33,13 +39,19 @@ These requirements describe approved future behavior, not implemented or verifie
 
 **Parent need:** UN-REQ-001
 
-**Requirement:** The web application shall provide a Requirements entry under each Product, with a searchable, filterable list, creation action, and access to individual Requirement details.
+**Requirement:** The web application shall provide a Requirements entry under each Product, with a searchable, filterable list of independently expandable parent–child branches, a creation action, and access to individual Requirement details.
 
 **Acceptance criteria:**
 - Individual Requirements do not appear as navigation-tree entries.
 - The list includes all statuses and displays one row per Requirement entity, with ID, title, type, and status from its working version when present, otherwise its latest Approved version. When both exist, clearly distinguish them, for example v3 Draft · v2 Approved.
 - Users can filter by type and status and search by ID or title.
-- Search is case-insensitive; active filters and search apply together.
+- Search is case-insensitive; active filters and search apply together, including Product area filtering specified by REQ-AREA-003 in [Product Areas](Product%20Areas.md).
+- With no filters or search, initially show root Requirements with child branches collapsed. A parent row has an accessible expand/collapse control; expanding reveals its immediate children indented beneath it. Nested parents can be expanded independently to any existing depth. Collapsing a branch hides all its descendants without removing them or changing relationships. Leaf rows have no expansion control.
+- Preserve one row per Requirement entity and the working-otherwise-latest-Approved selection above. Determine each displayed child's parent from the link owned by that selected child version, grouping under the parent's stable Requirement identity. Do not combine parent links from historical child versions into the displayed hierarchy.
+- Grouping by identity does not retarget an exact-version link. If a child's parent link names an earlier version than the parent's displayed row, clearly identify the linked parent ID and version on the child row and provide navigation to that exact parent version. The parent row still shows its selected version and its ordinary details link uses the existing default selection. Do not claim this current list is an exact-version or Released-revision baseline tree.
+- When search or any filter is active, show matching Requirements and their ancestor paths, automatically revealing matching descendants even inside previously collapsed branches. Clearly distinguish nonmatching ancestors as context, not matches; omit unrelated rows. An empty match set displays the no-match message rather than unrelated context. Clearing search and filters restores the user's unfiltered expansion choices for the current page; filter-driven expansion must not overwrite those choices.
+- Keep existing ID, title, type, version/status information and details navigation for roots and children. Ordering within each sibling group is deterministic by manual ID. Expansion controls work with keyboard and pointer, identify the affected Requirement and expose their expanded/collapsed state to assistive technology; indentation is not the only indication of hierarchy.
+- Keep hierarchy browsing Product-scoped and subject to existing read authorization. Requirements in retired Products remain browsable, including expansion/collapse; no write action is introduced. Do not silently omit descendants or present a partially loaded branch as complete when retrieval fails or is bounded; show the failure or incomplete state explicitly.
 - Default details open the working version when present, otherwise the latest Approved version. Users can explicitly open any earlier version; an exact-version reference always opens that version without silently switching to a newer one.
 - Details show the responsible Product, ID, version number, title, statement, type, rationale, status, review history, and successor-creation reason where applicable.
 - Statements render as Markdown under REQ-CONTENT-001; rationale renders as plain text.
@@ -132,7 +144,7 @@ Specified by [#174](https://github.com/andlil2023/Retravion/issues/174); impleme
 
 PBI #187 separately specifies future version-specific Product area classification and filtering in [Product Areas](Product%20Areas.md), including successor inheritance and released evidence. It changes no runtime functionality or existing MCP contract. The following first-increment boundaries remain historical scope, not a claim that later increments were never implemented.
 
-The first increment excludes relationships, automatic ID suggestions, Test Cases, separate verification criteria, and Product revision integration. The test specifications linked above are repository verification plans, not an application Test Case feature. Requirements remain a flat Product-scoped list.
+The first increment excludes relationships, automatic ID suggestions, Test Cases, separate verification criteria, and Product revision integration. The test specifications linked above are repository verification plans, not an application Test Case feature. Its flat Product-scoped list is extended by the expandable hierarchy specified in REQ-REQ-002 above; that extension does not implement runtime hierarchy browsing.
 
 The approved [Relationship Management](Relationships.md) specification defines a separate follow-up for the shared graphical relationship page, Requirement–User Need links, and parent–child Requirement links. This versioning specification does not implement relationship storage or interfaces.
 
