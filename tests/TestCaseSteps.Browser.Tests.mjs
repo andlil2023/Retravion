@@ -26,7 +26,7 @@ const darkThemeMarkup = await readFile(new URL('Retravion.IntegrationTests/bin/R
 const darkThemeCss = [...darkThemeMarkup.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map(match => match[1]).join('\n');
 assert.ok(darkThemeCss.includes('--mud-palette-surface:'), 'Render the production dark theme with the component test first.');
 const fixtures = new Map();
-for (const name of ['details', 'editor']) {
+for (const name of ['details', 'editor', 'empty-editor']) {
     const html = await readFile(new URL(`Retravion.IntegrationTests/bin/Release/net10.0/test-case-fixtures/${name}.html`, import.meta.url), 'utf8');
     // No app connection or remote resources: these are authenticated SSR snapshots from the test host.
     fixtures.set('/' + name, html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -70,10 +70,10 @@ try {
         if (message.error) item.reject(new Error(JSON.stringify(message.error))); else item.resolve(message.result);
     });
     await once(socket, 'open');
-    for (const name of ['details', 'editor']) {
+    for (const name of ['details', 'editor', 'empty-editor']) {
         await command('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/${name}` });
         for (let i = 0; i < 100 && !await evaluate(`location.pathname === '/${name}' && Boolean(document.querySelector('.test-case-steps table'))`); i++) await delay(50);
-        assert.equal(await evaluate("document.querySelectorAll('.test-case-steps tbody > tr').length"), 2);
+        assert.equal(await evaluate("document.querySelectorAll('.test-case-steps tbody > tr').length"), name === 'empty-editor' ? 1 : 2);
         if (name === 'details') {
             assert.equal(await evaluate("document.querySelector('.test-case-steps strong').textContent"), 'Second');
             // Stress wrapping with long prose, an unbroken identifier and preformatted Markdown content.
@@ -102,9 +102,15 @@ try {
                     return {
                         overflow: document.documentElement.scrollWidth > innerWidth,
                         tableOverflow: table.scrollWidth > table.clientWidth + 1,
-                        stacked: bounds[2].top > bounds[1].top,
-                        sideBySide: Math.abs(bounds[2].top - bounds[1].top) < 1 && bounds[2].left > bounds[1].left,
+                        stacked: cells.length > 2 && bounds[2].top > bounds[1].top,
+                        sideBySide: cells.length > 2 && Math.abs(bounds[2].top - bounds[1].top) < 1 && bounds[2].left > bounds[1].left,
                         labels: cells.map(cell => cell.dataset.label),
+                        headers: [...table.querySelectorAll('thead th')].map(cell => {
+                            const rect = cell.getBoundingClientRect();
+                            return { text: cell.textContent.trim(), width: rect.width, height: rect.height, top: rect.top };
+                        }),
+                        emptyText: row.textContent.trim(),
+                        emptySpansTable: Math.abs(bounds[0].width - table.getBoundingClientRect().width) < 2,
                         editableWidths: [...table.querySelectorAll('textarea')].map(field => field.getBoundingClientRect().width),
                         clipped: [...table.querySelectorAll('.step-markdown')].some(content => content.scrollHeight > content.clientHeight + 1)
                     };
@@ -112,8 +118,21 @@ try {
                 assert.equal(layout.overflow, false, `${name}: no page overflow at ${width}px, dark=${dark}`);
                 assert.equal(layout.tableOverflow, false, `${name}: no table overflow at ${width}px`);
                 assert.equal(layout.clipped, false, `${name}: no clipped content`);
-                assert.deepEqual(layout.labels.slice(0, 3), ['Step', 'Action', 'Expected result']);
-                assert.equal(width <= 960 ? layout.stacked : layout.sideBySide, true, `${name}: responsive layout at ${width}px`);
+                if (name === 'empty-editor') {
+                    assert.equal(layout.emptyText, 'No steps yet.');
+                    assert.equal(layout.emptySpansTable, true, 'Empty message spans the table.');
+                    if (width > 960) {
+                        assert.deepEqual(layout.headers.map(header => header.text), ['Step', 'Action', 'Expected result', 'Step actions']);
+                        for (const header of layout.headers) {
+                            assert.ok(header.width > 60, `Readable empty heading ${header.text}: ${header.width}px at ${width}px`);
+                            assert.ok(header.height < 65, `Empty heading must not wrap vertically: ${header.text}`);
+                            assert.equal(header.top, layout.headers[0].top, 'Headings align.');
+                        }
+                    }
+                } else {
+                    assert.deepEqual(layout.labels.slice(0, 3), ['Step', 'Action', 'Expected result']);
+                    assert.equal(width <= 960 ? layout.stacked : layout.sideBySide, true, `${name}: responsive layout at ${width}px`);
+                }
                 for (const fieldWidth of layout.editableWidths) assert.ok(fieldWidth > 70, `Usable field width: ${fieldWidth}`);
                 if (process.env.RETRAVION_TEST_CASE_SCREENSHOT_DIR && [1280, 390].includes(width)) {
                     const { data } = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
