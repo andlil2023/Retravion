@@ -62,9 +62,15 @@ public sealed partial class PostgresProductTests
             Assert.Equal("Why", created.Requirement.Rationale); Assert.Equal("# UI statement", created.Requirement.Statement);
             Assert.Contains("/requirements/details?id=", navigation.Uri);
             await renderer.Mount(typeof(RequirementDetails), new() { [nameof(RequirementDetails.Id)] = created.Requirement.InternalId });
+            var editHref = $"/requirements/edit?id={created.Requirement.InternalId}";
+            var edit = renderer.Components<MudButton>().Single(b => b.Href == editHref);
+            Assert.Equal(Variant.Filled, edit.Variant); Assert.Equal(Color.Primary, edit.Color);
+            Assert.Equal(2, renderer.Field("Review comment (optional)").Lines);
             await renderer.Field("Review comment (optional)").ValueChanged.InvokeAsync("Ready");
             await renderer.Click("Submit for review");
-            Assert.Contains("In Review", renderer.Text()); await renderer.Click("Return to Draft");
+            Assert.Contains("In Review", renderer.Text());
+            Assert.DoesNotContain(renderer.Components<MudButton>(), b => b.Href == editHref);
+            await renderer.Click("Return to Draft");
             await renderer.Click("Submit for review"); await renderer.Click("Approve");
             Assert.Contains("Approved", renderer.Text());
             await renderer.Field("Change or reopening reason").ValueChanged.InvokeAsync("Correct wording");
