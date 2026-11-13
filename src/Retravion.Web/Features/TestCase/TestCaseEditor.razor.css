@@ -1,0 +1,23 @@
+.test-case-steps ::deep .mud-table-root {
+    table-layout: fixed;
+}
+
+.test-case-steps ::deep .mud-table-cell {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.step-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+@media (min-width: 960.02px) {
+    .test-case-steps ::deep .step-number { width: 5rem; }
+    .test-case-steps ::deep .step-controls { width: 12rem; }
+}
+
+@media (max-width: 960px) {
+    .test-case-steps ::deep .mud-table-cell { flex-wrap: wrap; gap: .5rem; }
+    .test-case-steps ::deep .mud-input-control { width: 100%; min-width: 0; }
+}

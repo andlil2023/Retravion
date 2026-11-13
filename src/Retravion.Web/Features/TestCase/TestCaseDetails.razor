@@ -36,16 +36,17 @@
         <section aria-label="Preconditions"><h3>Preconditions</h3><ProductMarkdownView Markdown="@value.Content.Preconditions" /></section>
         <section aria-label="Steps">
             <h3>Steps</h3>
-            @if (value.Content.Steps.IsEmpty) { <p>No steps yet.</p> }
-            @for (var i = 0; i < value.Content.Steps.Length; i++)
-            {
-                var step = value.Content.Steps[i];
-                <section aria-label="@($"Step {i + 1}")">
-                    <h4>Step @(i + 1)</h4>
-                    <h5>Action</h5><ProductMarkdownView Markdown="@step.Action" />
-                    <h5>Expected result</h5><ProductMarkdownView Markdown="@step.ExpectedResult" />
-                </section>
-            }
+            <div class="test-case-steps">
+                <MudTable Items="@(value.Content.Steps.Select((step, index) => (Step: step, Number: index + 1)))" Dense="true" Elevation="0" Breakpoint="Breakpoint.Sm" aria-label="Test Case steps">
+                    <HeaderContent><MudTh Class="step-number">Step</MudTh><MudTh>Action</MudTh><MudTh>Expected result</MudTh></HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Step" Class="step-number">@context.Number</MudTd>
+                        <MudTd DataLabel="Action"><div class="step-markdown"><ProductMarkdownView Markdown="@context.Step.Action" /></div></MudTd>
+                        <MudTd DataLabel="Expected result"><div class="step-markdown"><ProductMarkdownView Markdown="@context.Step.ExpectedResult" /></div></MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent><MudText>No steps yet.</MudText></NoRecordsContent>
+                </MudTable>
+            </div>
         </section>
         <section aria-label="Exact Requirement links">
             <h3>Exact Requirement links</h3>

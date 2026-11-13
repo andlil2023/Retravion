@@ -76,17 +76,50 @@ public sealed partial class PostgresProductTests
             await renderer.Input("test-case-description", "# Description\n\n| A |\n| --- |\n| B |\n\n<script>bad()</script>");
             await renderer.Input("test-case-preconditions", "* Prepare");
             await renderer.Click("Add step");
-            await renderer.Input(renderer.Editor("Step 1 action").InputId, "First action");
-            await renderer.Input(renderer.Editor("Step 1 expected result").InputId, "First result");
+            await renderer.Input(renderer.Field("Step 1 action").GetState(field => field.InputId)!, "First action");
+            await renderer.Input(renderer.Field("Step 1 expected result").GetState(field => field.InputId)!, "First result");
             await renderer.Click("Add step");
-            await renderer.Input(renderer.Editor("Step 2 action").InputId, "**Second** action");
-            await renderer.Input(renderer.Editor("Step 2 expected result").InputId, "Second result");
+            await renderer.Input(renderer.Field("Step 2 action").GetState(field => field.InputId)!, "**Second** action");
+            await renderer.Input(renderer.Field("Step 2 expected result").GetState(field => field.InputId)!, "Second result");
+            var auditBeforeRows = (await new PostgresAuditQuery(database.ConnectionString).FindAsync(new())).Count;
+            var callsBeforeRows = writes.Calls;
+            var firstActionId = renderer.Field("Step 1 action").GetState(field => field.InputId)!;
+            var secondActionId = renderer.Field("Step 2 action").GetState(field => field.InputId)!;
+            Assert.True(renderer.Icon("Move step 1 up").Disabled);
+            Assert.True(renderer.Icon("Move step 2 down").Disabled);
+            await renderer.Event("onclick", new MouseEventArgs(), "aria-label", "Insert step above step 1");
+            Assert.Equal("", renderer.Field("Step 1 action").GetState(field => field.Value));
+            Assert.Equal(firstActionId, renderer.Field("Step 2 action").GetState(field => field.InputId)!);
+            Assert.Equal("First action", renderer.Field("Step 2 action").GetState(field => field.Value));
+            Assert.Equal(secondActionId, renderer.Field("Step 3 action").GetState(field => field.InputId)!);
+            await renderer.Input(renderer.Field("Step 1 action").GetState(field => field.InputId)!, "Temporary inserted action");
+            await renderer.Event("onclick", new MouseEventArgs(), "aria-label", "Move step 1 down");
+            Assert.Equal("First action", renderer.Field("Step 1 action").GetState(field => field.Value));
+            Assert.Equal("Temporary inserted action", renderer.Field("Step 2 action").GetState(field => field.Value));
+            await renderer.Event("onclick", new MouseEventArgs(), "aria-label", "Insert step above step 3");
+            Assert.Equal("", renderer.Field("Step 3 expected result").GetState(field => field.Value));
+            Assert.Equal("Second result", renderer.Field("Step 4 expected result").GetState(field => field.Value));
+            await renderer.Event("onclick", new MouseEventArgs(), "aria-label", "Remove step 3");
+            await renderer.Event("onclick", new MouseEventArgs(), "aria-label", "Remove step 2");
+            Assert.Equal(callsBeforeRows, writes.Calls);
+            Assert.Equal(auditBeforeRows, (await new PostgresAuditQuery(database.ConnectionString).FindAsync(new())).Count);
             await renderer.Event("onclick", new MouseEventArgs(), "aria-label", "Move step 2 up");
+            Assert.Equal(secondActionId, renderer.Field("Step 1 action").GetState(field => field.InputId)!);
             await renderer.Event("onclick", new MouseEventArgs(), "aria-label", "Remove step 2");
             await renderer.Click("Add step");
-            await renderer.Input(renderer.Editor("Step 2 action").InputId, "Third action");
-            await renderer.Input(renderer.Editor("Step 2 expected result").InputId, "");
-            var ids = renderer.Elements("textarea").Select(attrs => attrs.Single(f => f.AttributeName == "id").AttributeValue).ToArray();
+            await renderer.Input(renderer.Field("Step 2 action").GetState(field => field.InputId)!, "Third action");
+            await renderer.Input(renderer.Field("Step 2 expected result").GetState(field => field.InputId)!, "");
+            Assert.Equal(2, renderer.Components<Retravion.Web.Components.Markdown.DescriptionEditor>().Count());
+            foreach (var field in renderer.Components<MudTextField<string>>().Where(field => field.Label?.StartsWith("Step ", StringComparison.Ordinal) == true))
+            {
+                Assert.Equal(InputSizing.Auto, field.Sizing);
+                Assert.Equal(1, field.Lines);
+                Assert.Equal(0, field.MaxLines);
+                Assert.True(field.Immediate);
+            }
+            await renderer.Event("onkeydown", new KeyboardEventArgs { Key = "Tab", Code = "Tab" }, "id", renderer.Field("Step 2 expected result").GetState(field => field.InputId)!);
+            Assert.Equal(4, renderer.Components<MudTextField<string>>().Count(field => field.Label?.StartsWith("Step ", StringComparison.Ordinal) == true));
+            var ids = renderer.Elements("textarea").Where(attrs => attrs.Any(f => f.AttributeName == "id")).Select(attrs => attrs.Single(f => f.AttributeName == "id").AttributeValue).ToArray();
             Assert.Equal(6, ids.Length); Assert.Equal(ids.Length, ids.Distinct().Count());
             Assert.Single(renderer.Elements("form"));
             await renderer.Event("onsubmit", EventArgs.Empty);
@@ -100,6 +133,15 @@ public sealed partial class PostgresProductTests
             Assert.True(detailResponse.IsSuccessStatusCode, detail.Split("HEADERS", StringSplitOptions.None)[0]);
             Assert.Contains("<table>", detail); Assert.Contains("<strong>Second</strong>", detail); Assert.Contains("&lt;b&gt;UI title&lt;/b&gt;", detail);
             Assert.DoesNotContain("<script>bad", detail); Assert.Contains("Exact Requirement links", detail);
+            Assert.Contains("aria-label=\"Test Case steps\"", detail);
+            Assert.Contains("data-label=\"Action\"", detail);
+            Assert.Contains("data-label=\"Expected result\"", detail);
+            var editorHtml = await host.Browser.GetStringAsync($"/test-cases/edit?id={created.TestCase.InternalId}&version={created.TestCase.VersionId}");
+            Assert.Contains("aria-label=\"Edit Test Case steps\"", editorHtml);
+            var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "test-case-fixtures");
+            Directory.CreateDirectory(fixtureDirectory);
+            await File.WriteAllTextAsync(Path.Combine(fixtureDirectory, "details.html"), detail);
+            await File.WriteAllTextAsync(Path.Combine(fixtureDirectory, "editor.html"), editorHtml);
             Assert.Contains("Submit for review", detail); Assert.Contains("no Released-revision protection", detail);
             var wrong = await host.Browser.GetStringAsync($"/test-cases/details?id={created.TestCase.InternalId}&version={Guid.NewGuid()}");
             Assert.Contains("Test Case version not found", wrong); Assert.DoesNotContain("UI title", wrong);
@@ -121,6 +163,8 @@ public sealed partial class PostgresProductTests
             await renderer.Mount(typeof(TestCaseEditor), new() { [nameof(TestCaseEditor.Id)] = created.TestCase.InternalId });
             await renderer.Field("Title").ValueChanged.InvokeAsync("Unsaved retained title");
             await renderer.Input("test-case-description", "Unsaved retained description");
+            await renderer.Input(renderer.Field("Step 2 action").GetState(field => field.InputId)!, "Unsaved **step**\nsecond line");
+            await renderer.Input(renderer.Field("Step 2 expected result").GetState(field => field.InputId)!, "Unsaved result");
             foreach (var committed in new[] { false, true })
             {
                 writes.Store = new PostgresTestCaseStore(database.ConnectionString, async (transaction, cancellationToken) =>
@@ -131,6 +175,8 @@ public sealed partial class PostgresProductTests
                 Assert.Contains("could not be confirmed", renderer.Text()); Assert.Contains("Reload", renderer.Text());
                 Assert.Equal("Unsaved retained title", renderer.Field("Title").GetState(field => field.Value));
                 Assert.Contains("Unsaved retained description", renderer.Text());
+                Assert.Equal("Unsaved **step**\nsecond line", renderer.Field("Step 2 action").GetState(field => field.Value));
+                Assert.Equal("Unsaved result", renderer.Field("Step 2 expected result").GetState(field => field.Value));
                 await renderer.Event("onsubmit", EventArgs.Empty);
                 Assert.Equal(calls + 1, writes.Calls); // Retrieval is required before any user-directed retry.
                 await renderer.Click("Retrieve operation outcome before retrying");
@@ -152,6 +198,12 @@ public sealed partial class PostgresProductTests
             Assert.Contains("retired", retiredDetails); Assert.DoesNotContain("Edit Draft", retiredDetails);
             var retiredForm = await host.Browser.GetStringAsync($"/test-cases/edit?id={created.TestCase.InternalId}");
             Assert.Contains("retired", retiredForm); Assert.DoesNotContain("test-case-form", retiredForm);
+            await renderer.Mount(typeof(MudThemeProvider), new()
+            {
+                [nameof(MudThemeProvider.Theme)] = Retravion.Web.Components.Layout.PrototypeTheme.Value,
+                [nameof(MudThemeProvider.IsDarkMode)] = true
+            });
+            await File.WriteAllTextAsync(Path.Combine(fixtureDirectory, "dark-theme.css"), renderer.Text());
         });
         Assert.Empty(renderer.Errors);
     }
@@ -386,7 +438,7 @@ public sealed partial class PostgresProductTests
         }
         internal IEnumerable<T> Components<T>() => Frames(root).Where(frame => frame.FrameType == RenderTreeFrameType.Component).Select(frame => frame.Component).OfType<T>();
         internal MudTextField<string> Field(string label) => Components<MudTextField<string>>().Single(field => field.Label == label);
-        internal Retravion.Web.Components.Markdown.DescriptionEditor Editor(string label) => Components<Retravion.Web.Components.Markdown.DescriptionEditor>().Single(editor => editor.Label == label);
+        internal MudIconButton Icon(string label) => Components<MudIconButton>().Single(button => button.UserAttributes.TryGetValue("aria-label", out var value) && Equals(value, label));
         internal IEnumerable<RenderTreeFrame[]> Elements(string element)
         {
             var frames = Frames(root).ToArray();
