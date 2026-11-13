@@ -1,3 +1,40 @@
+.test-case-section + .test-case-section {
+    margin-top: 1.5rem;
+}
+
+.section-label {
+    margin: 0 0 .75rem;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--mud-palette-divider);
+    color: var(--mud-palette-text-secondary);
+    font-size: .875rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.test-case-versions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-bottom: 1rem;
+}
+
+.test-case-requirements ::deep .mud-table-root {
+    table-layout: fixed;
+}
+
+.test-case-requirements ::deep .mud-table-cell {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.requirement-version-note {
+    display: block;
+    color: var(--mud-palette-text-secondary);
+    font-size: .875rem;
+}
+
 .test-case-steps ::deep .mud-table-root {
     table-layout: fixed;
 }

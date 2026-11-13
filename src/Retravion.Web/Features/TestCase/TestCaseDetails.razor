@@ -25,17 +25,20 @@
     <p>@($"v{value.VersionNumber}") · @Status(value.Status)</p>
     @if (!_product.IsActive) { <p>This Test Case is read-only because its Product is retired.</p> }
     @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
-    <MudButton Href="@($"/products/links?kind=test-case&id={value.InternalId}&version={value.VersionId}")">Manage links</MudButton>
-    <nav aria-label="Test Case versions">
-        @foreach (var version in _versions)
-        { <MudLink Href="@($"/test-cases/details?id={Id}&version={version.TestCase.VersionId}")">@($"v{version.TestCase.VersionNumber}") · @Status(version.TestCase.Status)</MudLink><span> </span> }
-    </nav>
+    @if (_versions.Count > 1)
+    {
+        <nav aria-label="Other Test Case versions" class="test-case-versions">
+            <span>Other versions:</span>
+            @foreach (var version in _versions.Where(row => row.TestCase.VersionId != value.VersionId))
+            { <MudLink Href="@($"/test-cases/details?id={Id}&version={version.TestCase.VersionId}")">@($"v{version.TestCase.VersionNumber}") · @Status(version.TestCase.Status)</MudLink> }
+        </nav>
+    }
     <MudPaper Class="product-card pa-4" Elevation="0">
         @if (value.CreationReason is { } reason) { <p style="white-space:pre-wrap">Successor creation reason: @reason</p> }
-        <section aria-label="Description"><h3>Description</h3><ProductMarkdownView Markdown="@value.Content.Description" /></section>
-        <section aria-label="Preconditions"><h3>Preconditions</h3><ProductMarkdownView Markdown="@value.Content.Preconditions" /></section>
-        <section aria-label="Steps">
-            <h3>Steps</h3>
+        <section aria-label="Description" class="test-case-section"><h3 class="section-label">Description</h3><ProductMarkdownView Markdown="@value.Content.Description" /></section>
+        <section aria-label="Preconditions" class="test-case-section"><h3 class="section-label">Preconditions</h3><ProductMarkdownView Markdown="@value.Content.Preconditions" /></section>
+        <section aria-label="Steps" class="test-case-section">
+            <h3 class="section-label">Steps</h3>
             <div class="test-case-steps">
                 <MudTable Items="@(value.Content.Steps.Select((step, index) => (Step: step, Number: index + 1)))" Dense="true" Elevation="0" Breakpoint="Breakpoint.Sm" aria-label="Test Case steps">
                     <HeaderContent><MudTh Class="step-number">Step</MudTh><MudTh>Action</MudTh><MudTh>Expected result</MudTh></HeaderContent>
@@ -48,53 +51,33 @@
                 </MudTable>
             </div>
         </section>
-        <section aria-label="Exact Requirement links">
-            <h3>Exact Requirement links</h3>
-            <p>Owned by this Test Case version. New Requirement versions never update these links automatically.</p>
-            @if (value.Links.IsEmpty) { <p>No Requirement links yet.</p> }
-            <ul>
-                @foreach (var endpoint in value.Links)
-                {
-                    <li>
-                        <MudLink Href="@RequirementPath(endpoint)">@EndpointLabel(endpoint)</MudLink>
-                        @if (NewerAvailable(endpoint)) { <span> · A newer Requirement version is available; suitability is not implied.</span> }
-                        @if (Editable)
-                        {
-                            <MudButton Disabled="_busy" OnClick='@(() => ConfirmLink("remove", endpoint))' aria-label="@($"Remove {EndpointLabel(endpoint)}")">Remove link</MudButton>
-                            <MudButton Disabled="@(_busy || _selectedVersion == Guid.Empty)" OnClick='@(() => ConfirmLink("retarget", endpoint))' aria-label="@($"Retarget {EndpointLabel(endpoint)}")">Retarget link</MudButton>
-                        }
-                    </li>
-                }
-            </ul>
-            @if (Editable)
-            {
-                <MudSelect T="Guid" @bind-Value="_selectedVersion" Label="Exact Requirement target version" Disabled="_busy">
-                    @foreach (var target in _targets)
-                    { <MudSelectItem Value="target.Requirement.VersionId">@TargetLabel(target)</MudSelectItem> }
-                </MudSelect>
-            }
-            else { <p>Requirement links can only be changed by an editable Draft owner.</p> }
+    </MudPaper>
+    <div class="product-actions" role="group" aria-label="Test Case actions">
+        @if (Editable)
+        {
+            <MudButton Href="@($"/test-cases/edit?id={value.InternalId}&version={value.VersionId}")" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy">Edit Draft</MudButton>
+        }
+        <MudButton Href="@($"/products/links?kind=test-case&id={value.InternalId}&version={value.VersionId}")" Disabled="_busy">Manage links</MudButton>
+    </div>
+    <MudPaper Class="product-card pa-4 mt-4" Elevation="0">
+        <section aria-label="Requirement links" class="test-case-requirements">
+            <h3 class="section-label">Requirement links</h3>
+            <p>These links point to specific Requirement versions. New versions do not update the links automatically.</p>
+            <MudTable Items="value.Links" Dense="true" Elevation="0" Breakpoint="Breakpoint.Sm" aria-label="Linked Requirements">
+                <HeaderContent><MudTh>Requirement ID</MudTh><MudTh>Title</MudTh><MudTh>Version</MudTh></HeaderContent>
+                <RowTemplate>
+                    @{ var target = Target(context); }
+                    <MudTd DataLabel="Requirement ID"><MudLink Href="@RequirementPath(context)">@(target?.Requirement.Id ?? "Requirement unavailable")</MudLink></MudTd>
+                    <MudTd DataLabel="Title">@(target?.Requirement.Title ?? "Exact Requirement version unavailable")</MudTd>
+                    <MudTd DataLabel="Version">
+                        @(target is null ? "Unavailable" : $"v{target.Requirement.VersionNumber}")
+                        @if (NewerAvailable(context)) { <span class="requirement-version-note">Newer version available; check suitability before changing the link.</span> }
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent><MudText>No Requirement links yet.</MudText></NoRecordsContent>
+            </MudTable>
         </section>
     </MudPaper>
-    @if (Editable)
-    {
-        <div class="product-actions">
-            <MudButton Href="@($"/test-cases/edit?id={value.InternalId}&version={value.VersionId}")" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy">Edit Draft</MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_busy || _selectedVersion == Guid.Empty)" OnClick="AddLink">Add Requirement link</MudButton>
-        </div>
-    }
-    @if (_pendingOperation is not null && _pendingTarget is not null)
-    {
-        <MudPaper Class="pa-4 mt-4" Elevation="0" role="group" aria-label="Confirm Requirement link change">
-            <p>Confirm @(_pendingOperation == "remove" ? "removal" : "retargeting") of Test Case → Requirement:</p>
-            <p>@value.Id @($"v{value.VersionNumber}") → @EndpointLabel(_pendingTarget)</p>
-            @if (_pendingReplacement is not null) { <p>New endpoint: @EndpointLabel(_pendingReplacement)</p> }
-        </MudPaper>
-        <div class="product-actions">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="ApplyLink">Confirm link change</MudButton>
-            <MudButton Disabled="_busy" OnClick="CancelLink">Cancel link change</MudButton>
-        </div>
-    }
     @if (_product.IsActive && IsLatest)
     {
         <div class="product-actions">
@@ -117,7 +100,13 @@
             }
         </div>
     }
-    <p>Reopening requires the latest Approved version, no successor, a reason and no Released-revision protection. Protected corrections require a successor Draft. Approval is not release.</p>
+    @if (_product.IsActive && IsLatest)
+    {
+        @if (value.Status == "Approved")
+        { <p>Reopen requires a reason and no Released-revision protection. For protected corrections, create a successor Draft.</p> }
+        else
+        { <p>Approval is not release.</p> }
+    }
     <MudPaper Class="product-card pa-4 mt-4" Elevation="0">
         <h3>History</h3>
         @if (_history.Count == 0) { <p>No history recorded.</p> }
@@ -156,9 +145,7 @@
     private IReadOnlyList<TestCaseSnapshot> _versions = [];
     private IReadOnlyList<TestCaseHistory> _history = [];
     private readonly List<RequirementSnapshot> _targets = [];
-    private string? _error, _comment, _reason, _pendingOperation;
-    private TestCaseRequirementLink? _pendingTarget, _pendingReplacement;
-    private Guid _selectedVersion;
+    private string? _error, _comment, _reason;
     private bool _busy, _uncertain;
     private bool IsLatest => _versions.LastOrDefault()?.TestCase.VersionId == _case?.TestCase.VersionId;
     private bool Editable => _product?.IsActive == true && IsLatest && _case?.TestCase.Status == "Draft";
@@ -166,7 +153,8 @@
     private static string Status(string value) => value == "InReview" ? "In Review" : value;
     private static string RequirementPath(TestCaseRequirementLink endpoint) => $"/requirements/details?id={endpoint.RequirementInternalId}&version={endpoint.RequirementVersionId}";
     private static string TargetLabel(RequirementSnapshot target) => $"{target.Requirement.Id} v{target.Requirement.VersionNumber} · {target.Requirement.Title} · {target.Requirement.Status}";
-    private string EndpointLabel(TestCaseRequirementLink endpoint) => _targets.FirstOrDefault(target => target.Requirement.InternalId == endpoint.RequirementInternalId && target.Requirement.VersionId == endpoint.RequirementVersionId) is { } row
+    private RequirementSnapshot? Target(TestCaseRequirementLink endpoint) => _targets.FirstOrDefault(target => target.Requirement.InternalId == endpoint.RequirementInternalId && target.Requirement.VersionId == endpoint.RequirementVersionId);
+    private string EndpointLabel(TestCaseRequirementLink endpoint) => Target(endpoint) is { } row
         ? TargetLabel(row) : "Exact Requirement version unavailable";
     private bool NewerAvailable(TestCaseRequirementLink endpoint) => _targets.FirstOrDefault(row => row.Requirement.VersionId == endpoint.RequirementVersionId) is { } target &&
         _targets.Any(row => row.Requirement.InternalId == endpoint.RequirementInternalId && row.Requirement.VersionNumber > target.Requirement.VersionNumber);
@@ -178,7 +166,7 @@
     protected override async Task OnParametersSetAsync() { _comment = null; _reason = null; await Load(); }
     private async Task Load()
     {
-        _case = null; _product = null; _error = null; _versions = []; _history = []; _targets.Clear(); _selectedVersion = Guid.Empty; CancelLink();
+        _case = null; _product = null; _error = null; _versions = []; _history = []; _targets.Clear();
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         var found = await Operations.Find(actor, Id, VersionId);
         if (found.IsFailure) { _error = found.Error; return; }
@@ -222,18 +210,6 @@
         }
         finally { _busy = false; }
     }
-    private TestCaseRequirementLink? Selected => _targets.FirstOrDefault(row => row.Requirement.VersionId == _selectedVersion) is { } target
-        ? new(target.Requirement.InternalId, target.Requirement.VersionId) : null;
-    private void ConfirmLink(string operation, TestCaseRequirementLink endpoint)
-    {
-        if (_busy || !Editable) return;
-        _pendingOperation = operation; _pendingTarget = endpoint; _pendingReplacement = operation == "retarget" ? Selected : null;
-        if (operation == "retarget" && _pendingReplacement is null) CancelLink();
-    }
-    private void CancelLink() { _pendingOperation = null; _pendingTarget = null; _pendingReplacement = null; }
-    private Task AddLink() => Selected is { } target ? Change((actor, expected) => Operations.ChangeLink(actor, expected, "add", target)) : Task.CompletedTask;
-    private Task ApplyLink() => _pendingOperation is { } operation && _pendingTarget is { } target
-        ? Change((actor, expected) => Operations.ChangeLink(actor, expected, operation, target, _pendingReplacement, confirmed: true)) : Task.CompletedTask;
     private Task Review(string decision) => Change((actor, expected) => Operations.Review(actor, expected, decision, _comment));
     private Guid? _successorOperation;
     private Guid _pendingProduct;
