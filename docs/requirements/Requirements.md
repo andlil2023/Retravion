@@ -6,6 +6,8 @@
 - [UN-AUDIT-01 — Traceability for Regulatory Compliance](../user-needs/UN-AUDIT-01%20-%20Traceability%20for%20Regulatory%20Compliance.md)
 - [UN-AUDIT-02 — Inspect Application Activity](../user-needs/UN-AUDIT-02%20-%20Inspect%20Application%20Activity.md)
 
+- [UN-AI-001 — Efficiently Import Product Documentation](../user-needs/UN-AI-001%20-%20Efficiently%20Import%20Product%20Documentation.md)
+
 ## Implementation Status
 
 These requirements describe approved future behavior, not implemented or verified functionality. [PBI #124](https://github.com/andlil2023/Retravion/issues/124) and the versioning specification in [PBI #132](https://github.com/andlil2023/Retravion/issues/132) are documentation only. Requirement versioning implementation belongs to [#133](https://github.com/andlil2023/Retravion/issues/133) and requires separately approved work. Planned verification is specified in [Requirement Management — Test Specifications](../test-cases/Requirements.md). The explicitly approved scope extension in [#144](https://github.com/andlil2023/Retravion/issues/144) replaces #132's unconditional Approved-version immutability with eligible reopening and the shared future release-protection rule REQ-LINK-009 in [Relationship Management](Relationships.md); it does not implement revision functionality.
@@ -85,6 +87,8 @@ The hierarchy extension to REQ-REQ-002 below specifies requested future behavior
 - MCP may create a new Requirement starting at v1 and edit its existing Draft. It cannot create a successor version, change status, make review decisions, or edit In Review or Approved versions. Exact-version access does not bypass these restrictions.
 - Anonymous, password-restricted, and revoked-session access is denied, consistent with REQ-SYS-AUTH-002.
 - Local clients can connect when the application runs in a container; remote MCP access is outside scope.
+
+The future multi-file import workflow is specified by REQ-AI-IMPORT-001–006 in [AI Imports](AI%20Imports.md), under [PBI #245](https://github.com/andlil2023/Retravion/issues/245). It reuses this MCP contract without adding server operations or changing lifecycle, authorization, concurrency or audit rules. The initial import scope creates new Drafts; it does not edit existing record content. Planning and execution remain separately scoped under #246 and #247.
 
 ### REQ-REQ-005 — Audit Requirement Changes
 
