@@ -138,10 +138,13 @@ public sealed partial class PostgresProductTests
             Assert.Contains("data-label=\"Expected result\"", detail);
             var editorHtml = await host.Browser.GetStringAsync($"/test-cases/edit?id={created.TestCase.InternalId}&version={created.TestCase.VersionId}");
             Assert.Contains("aria-label=\"Edit Test Case steps\"", editorHtml);
+            var emptyEditorHtml = await host.Browser.GetStringAsync("/test-cases/create?product=P");
+            Assert.Contains("No steps yet.", emptyEditorHtml);
             var fixtureDirectory = Path.Combine(AppContext.BaseDirectory, "test-case-fixtures");
             Directory.CreateDirectory(fixtureDirectory);
             await File.WriteAllTextAsync(Path.Combine(fixtureDirectory, "details.html"), detail);
             await File.WriteAllTextAsync(Path.Combine(fixtureDirectory, "editor.html"), editorHtml);
+            await File.WriteAllTextAsync(Path.Combine(fixtureDirectory, "empty-editor.html"), emptyEditorHtml);
             Assert.Contains("Submit for review", detail); Assert.Contains("no Released-revision protection", detail);
             var wrong = await host.Browser.GetStringAsync($"/test-cases/details?id={created.TestCase.InternalId}&version={Guid.NewGuid()}");
             Assert.Contains("Test Case version not found", wrong); Assert.DoesNotContain("UI title", wrong);
