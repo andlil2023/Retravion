@@ -1,13 +1,14 @@
 // Retravion terminal bridge: a local stdio MCP server for Pi and Claude Code.
 // It obtains browser approval, keeps the credential in this process only, and forwards the
 // existing Retravion tools over HTTPS. No dependencies; requires Node.js 22 or later.
+import { ImportRunner, importTools } from "./import-run.mjs";
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import https from "node:https";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const version = "2.9.0";
+const version = "2.10.0";
 const protocolVersion = "2025-11-25";
 const maxBytes = 16 * 1024 * 1024;
 const loopback = ["localhost", "127.0.0.1", "[::1]"];
@@ -77,7 +78,7 @@ export class RetravionTerminal {
 		this.#now = now; this.#sleep = sleep; this.#open = open;
 	}
 
-	get tools() { return [...connectionTools, ...this.#tools]; }
+	get tools() { return [...connectionTools, ...importTools, ...this.#tools]; }
 
 	async call(name, args = {}, signal) {
 		this.#signal = signal;
@@ -85,14 +86,20 @@ export class RetravionTerminal {
 			if (name === "rtv_connect") return await this.#connect();
 			if (name === "rtv_complete_connection") return await this.#complete();
 			if (name === "rtv_disconnect") return await this.#disconnect();
+			if (name === "rtv_import") {
+				if (!this.#token) return failure("Not connected. Obtain browser connection consent first.");
+				const runner = new ImportRunner((tool, parameters, signal) => this.call(tool, parameters, signal));
+				const summary = await runner.run(args, signal);
+				return { ...result(summary), ...(summary.error ? { isError: true } : {}) };
+			}
 			if (!this.#tools.some(tool => tool.name === name)) return failure("Unknown Retravion tool.");
 			if (!this.#token) return failure("Not connected. Ask the user, call rtv_connect, then rtv_complete_connection after they approve in the browser.");
 			return await this.#rpc("tools/call", { name, arguments: args });
 		} catch (error) {
 			if (name === "rtv_connect") { this.dispose(); return failure("Retravion connection could not start. Check that Retravion is running, MCP is enabled by an administrator, and mcp_setup.ps1 was run for the current certificate."); }
 			if (name === "rtv_complete_connection") { this.dispose(); return failure("Retravion connection could not be completed. Call rtv_connect again."); }
-			if (error instanceof HttpError && [401, 403, 404].includes(error.status)) { this.dispose(); return failure(ended); }
-			return failure("Retravion did not answer. Do not retry a write automatically: its outcome is unknown. Read the current state first and let the user decide.");
+			if (error instanceof HttpError && [401, 403, 404].includes(error.status)) { this.dispose(); return { ...failure(ended), importOutcome: "uncertain" }; }
+			return { ...failure("Retravion did not answer. Do not retry a write automatically: its outcome is unknown. Read the current state first and let the user decide."), importOutcome: "uncertain" };
 		} finally { this.#signal = undefined; }
 	}
 

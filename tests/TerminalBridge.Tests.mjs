@@ -242,7 +242,7 @@ test("stdio transport lists connection and Retravion tools and answers calls", a
 	await served;
 	assert.equal(lines.find(line => line.id === 0).error.code, -32000);
 	assert.deepEqual(lines.find(line => line.id === 2).result.tools.map(tool => tool.name),
-		[...connectionTools.map(tool => tool.name), "list_products"]);
+		[...connectionTools.map(tool => tool.name), "rtv_import", "list_products"]);
 	assert.equal(lines.find(line => line.id === 3).result.isError, true);
 	assert.equal(lines.find(line => line.id === null).error.code, -32700);
 });

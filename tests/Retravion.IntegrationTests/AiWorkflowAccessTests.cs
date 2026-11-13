@@ -247,7 +247,7 @@ public sealed partial class AccountManagementTests
             var bytes = await response.Content.ReadAsByteArrayAsync();
             Assert.Equal(bundle.Bytes, bytes);
             using var zip = new ZipArchive(new MemoryStream(bytes));
-            Assert.Equal(new[] { "README.md", "bridge/import-plan.mjs", "bridge/server.mjs", "bridge/tools.json", "mcp_setup.ps1", "skills/retravion/SKILL.md" }, zip.Entries.Select(e => e.FullName).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal(new[] { "README.md", "bridge/import-plan.mjs", "bridge/import-run.mjs", "bridge/server.mjs", "bridge/tools.json", "mcp_setup.ps1", "skills/retravion/SKILL.md" }, zip.Entries.Select(e => e.FullName).Order(StringComparer.Ordinal).ToArray());
             string Read(string name) { using var r = new StreamReader(zip.GetEntry(name)!.Open()); return r.ReadToEnd(); }
             var skill = Read("skills/retravion/SKILL.md");
             Assert.StartsWith("---\nname: retravion\ndescription:", skill.Replace("\r\n", "\n"));
@@ -255,7 +255,7 @@ public sealed partial class AccountManagementTests
                 "list_requirements", "read_requirement", "create_draft_requirement", "edit_draft_requirement",
                 "list_test_cases", "read_test_case", "create_draft_test_case", "edit_draft_test_case",
                 "list_features", "read_feature", "create_draft_feature", "edit_draft_feature" }) Assert.Contains($"`{tool}`", skill);
-            Assert.Equal("2.9.0", TerminalPackages.Version);
+            Assert.Equal("2.10.0", TerminalPackages.Version);
             Assert.Equal($"retravion-{client}-{TerminalPackages.Version}.zip", bundle.FileName);
             Assert.Contains($"/packages/{TerminalPackages.Version}/{client}", bundle.DownloadPath);
             Assert.Contains($"integration {TerminalPackages.Version}", skill);

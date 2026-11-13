@@ -95,7 +95,7 @@ if ($uri.Scheme -ne 'https' -or $uri.AbsolutePath -ne '/mcp' -or $uri.Query -or 
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) { throw 'Node.js 22 or later is required for the Retravion bridge. Install it, then rerun.' }
 if ([int]((& $node.Source --version) -replace '^v(\d+).*', '$1') -lt 22) { throw 'Node.js 22 or later is required for the Retravion bridge.' }
-foreach ($file in @('bridge/import-plan.mjs', 'bridge/server.mjs', 'bridge/tools.json', 'skills/retravion/SKILL.md')) {
+foreach ($file in @('bridge/import-run.mjs', 'bridge/import-plan.mjs', 'bridge/server.mjs', 'bridge/tools.json', 'skills/retravion/SKILL.md')) {
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $file))) { throw "Package file $file is missing. Extract the complete ZIP and run the script from there." }
 }
 # Read existing configuration before anything is written, so a problem leaves the project untouched.
@@ -121,6 +121,7 @@ if ($Fingerprint) {
 $pem = "-----BEGIN CERTIFICATE-----`n" + [Convert]::ToBase64String($certificate.RawData, 'InsertLineBreaks').Replace("`r`n", "`n") + "`n-----END CERTIFICATE-----`n"
 $bridge = Join-Path $runtime 'bridge'
 New-Item -ItemType Directory -Path $bridge -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'bridge/import-run.mjs') -Destination $bridge -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'bridge/import-plan.mjs') -Destination $bridge -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'bridge/server.mjs') -Destination $bridge -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'bridge/tools.json') -Destination $bridge -Force
