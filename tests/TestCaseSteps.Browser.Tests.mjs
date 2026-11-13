@@ -27,7 +27,7 @@ const darkThemeMarkup = await readFile(new URL('Retravion.IntegrationTests/bin/R
 const darkThemeCss = [...darkThemeMarkup.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map(match => match[1]).join('\n');
 assert.ok(darkThemeCss.includes('--mud-palette-surface:'), 'Render the production dark theme with the component test first.');
 const fixtures = new Map();
-for (const name of ['details', 'editor', 'empty-editor', 'linked-details']) {
+for (const name of ['details', 'editor', 'empty-editor', 'linked-details', 'empty-details']) {
     const html = await readFile(new URL(`Retravion.IntegrationTests/bin/Release/net10.0/test-case-fixtures/${name}.html`, import.meta.url), 'utf8');
     // No app connection or remote resources: these are authenticated SSR snapshots from the test host.
     fixtures.set('/' + name, html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -54,6 +54,35 @@ async function evaluate(expression) {
     assert.ok(!result.exceptionDetails, JSON.stringify(result.exceptionDetails));
     return result.result.value;
 }
+async function checkEmptyTable(selector, headers, message, width) {
+    const layout = await evaluate(`(() => {
+        const table = document.querySelector(${JSON.stringify(selector)});
+        const row = table.querySelector('tbody > tr');
+        const cell = row.querySelector('td');
+        return {
+            empty: cell.classList.contains('mud-table-empty-row'),
+            text: row.textContent.trim(),
+            spansTable: Math.abs(cell.getBoundingClientRect().width - table.getBoundingClientRect().width) < 2,
+            overflow: table.scrollWidth > table.clientWidth + 1,
+            headers: [...table.querySelectorAll('thead th')].map(cell => {
+                const rect = cell.getBoundingClientRect();
+                return { text: cell.textContent.trim(), width: rect.width, height: rect.height, top: rect.top };
+            })
+        };
+    })()`);
+    assert.equal(layout.empty, true, selector);
+    assert.equal(layout.text, message);
+    assert.equal(layout.spansTable, true, `${selector}: empty message spans table at ${width}px`);
+    assert.equal(layout.overflow, false, `${selector}: no overflow at ${width}px`);
+    assert.deepEqual(layout.headers.map(header => header.text), headers);
+    if (width > 960) {
+        for (const header of layout.headers) {
+            assert.ok(header.width > 60, `${selector}: readable ${header.text} at ${width}px (${header.width}px)`);
+            assert.ok(header.height < 65, `${selector}: heading must not wrap vertically: ${header.text}`);
+            assert.equal(header.top, layout.headers[0].top, 'Headings align.');
+        }
+    }
+}
 try {
     browser = spawn(executable, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', 'about:blank'], { stdio: 'ignore' });
     let port;
@@ -71,10 +100,10 @@ try {
         if (message.error) item.reject(new Error(JSON.stringify(message.error))); else item.resolve(message.result);
     });
     await once(socket, 'open');
-    for (const name of ['details', 'editor', 'empty-editor']) {
+    for (const name of ['details', 'editor', 'empty-editor', 'empty-details']) {
         await command('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/${name}` });
         for (let i = 0; i < 100 && !await evaluate(`location.pathname === '/${name}' && Boolean(document.querySelector('.test-case-steps table'))`); i++) await delay(50);
-        assert.equal(await evaluate("document.querySelectorAll('.test-case-steps tbody > tr').length"), name === 'empty-editor' ? 1 : 2);
+        assert.equal(await evaluate("document.querySelectorAll('.test-case-steps tbody > tr').length"), name.startsWith('empty-') ? 1 : 2);
         if (name === 'details') {
             const structure = await evaluate(`(() => {
                 const actions = document.querySelector('[aria-label="Test Case actions"]');
@@ -147,11 +176,15 @@ try {
                     assert.ok(sections.border > 0 && sections.separation, 'Section label is separated from Markdown content.');
                     assert.equal(sections.transform, 'uppercase');
                 }
-                if (name === 'empty-editor') {
+                if (name === 'details' || name === 'empty-details') {
+                    await checkEmptyTable('.test-case-requirements table', ['Requirement ID', 'Title', 'Version'], 'No Requirement links yet.', width);
+                }
+                if (name.startsWith('empty-')) {
                     assert.equal(layout.emptyText, 'No steps yet.');
                     assert.equal(layout.emptySpansTable, true, 'Empty message spans the table.');
                     if (width > 960) {
-                        assert.deepEqual(layout.headers.map(header => header.text), ['Step', 'Action', 'Expected result', 'Step actions']);
+                        assert.deepEqual(layout.headers.map(header => header.text), name === 'empty-editor'
+                            ? ['Step', 'Action', 'Expected result', 'Step actions'] : ['Step', 'Action', 'Expected result']);
                         for (const header of layout.headers) {
                             assert.ok(header.width > 60, `Readable empty heading ${header.text}: ${header.width}px at ${width}px`);
                             assert.ok(header.height < 65, `Empty heading must not wrap vertically: ${header.text}`);

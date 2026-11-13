@@ -24,6 +24,12 @@
     table-layout: fixed;
 }
 
+/* MudTable's empty cell spans 1000 columns; fixed layout creates phantom columns. */
+.test-case-requirements ::deep .mud-table-root:has(.mud-table-empty-row),
+.test-case-steps ::deep .mud-table-root:has(.mud-table-empty-row) {
+    table-layout: auto;
+}
+
 .test-case-requirements ::deep .mud-table-cell {
     vertical-align: top;
     overflow-wrap: anywhere;
