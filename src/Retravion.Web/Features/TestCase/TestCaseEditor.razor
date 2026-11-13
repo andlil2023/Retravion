@@ -24,21 +24,35 @@
             <DescriptionEditor @key="_formKey" FieldOnly="true" InputId="test-case-description" InitialDescription="@_description" DescriptionChanged="@(value => _description = value)" Label="Description" Busy="_busy" />
             <DescriptionEditor @key="_preconditionsKey" FieldOnly="true" InputId="test-case-preconditions" InitialDescription="@_preconditions" DescriptionChanged="@(value => _preconditions = value)" Label="Preconditions" Busy="_busy" />
             <div class="pa-4"><h2>Steps</h2></div>
-            @for (var i = 0; i < _steps.Count; i++)
-            {
-                var index = i;
-                var step = _steps[index];
-                <section @key="step.Key" aria-label="@($"Step {index + 1}")">
-                    <div class="pa-4">
-                        <h3>Step @(index + 1)</h3>
-                        <MudButton ButtonType="ButtonType.Button" OnClick="@(() => Move(step, -1))" Disabled="@(_busy || index == 0)" aria-label="@($"Move step {index + 1} up")">Move up</MudButton>
-                        <MudButton ButtonType="ButtonType.Button" OnClick="@(() => Move(step, 1))" Disabled="@(_busy || index == _steps.Count - 1)" aria-label="@($"Move step {index + 1} down")">Move down</MudButton>
-                        <MudButton ButtonType="ButtonType.Button" OnClick="@(() => Remove(step))" Disabled="_busy" aria-label="@($"Remove step {index + 1}")">Remove step</MudButton>
-                    </div>
-                    <DescriptionEditor FieldOnly="true" InputId="@($"action-{step.Key}")" InitialDescription="@step.Action" DescriptionChanged="@(value => step.Action = value)" Label="@($"Step {index + 1} action")" Busy="_busy" />
-                    <DescriptionEditor FieldOnly="true" InputId="@($"result-{step.Key}")" InitialDescription="@step.ExpectedResult" DescriptionChanged="@(value => step.ExpectedResult = value)" Label="@($"Step {index + 1} expected result")" Busy="_busy" />
-                </section>
-            }
+            <div class="test-case-steps px-4">
+                <p>Action and expected result support Markdown. Formatting is shown on details after saving.</p>
+                <MudTable Items="_steps" Dense="true" Elevation="0" Breakpoint="Breakpoint.Sm" aria-label="Edit Test Case steps">
+                    <HeaderContent>
+                        <MudTh Class="step-number">Step</MudTh><MudTh>Action</MudTh><MudTh>Expected result</MudTh><MudTh Class="step-controls">Step actions</MudTh>
+                    </HeaderContent>
+                    <RowTemplate Context="step">
+                        @{ var index = _steps.IndexOf(step); }
+                        <MudTd DataLabel="Step" Class="step-number">@(index + 1)</MudTd>
+                        <MudTd DataLabel="Action">
+                            <MudTextField @key="step.Key" T="string" InputId="@($"action-{step.Key}")" @bind-Value="step.Action" Immediate="true"
+                                          Label="@($"Step {index + 1} action")" Lines="1" Sizing="InputSizing.Auto" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+                        </MudTd>
+                        <MudTd DataLabel="Expected result">
+                            <MudTextField @key="step.Key" T="string" InputId="@($"result-{step.Key}")" @bind-Value="step.ExpectedResult" Immediate="true"
+                                          Label="@($"Step {index + 1} expected result")" Lines="1" Sizing="InputSizing.Auto" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+                        </MudTd>
+                        <MudTd DataLabel="Step actions" Class="step-controls">
+                            <div class="step-action-buttons">
+                                <MudIconButton Size="Size.Small" ButtonType="ButtonType.Button" Icon="@Icons.Material.Outlined.Add" OnClick="@(() => Insert(step))" Disabled="_busy" aria-label="@($"Insert step above step {index + 1}")" title="Insert step above" />
+                                <MudIconButton Size="Size.Small" ButtonType="ButtonType.Button" Icon="@Icons.Material.Outlined.ArrowUpward" OnClick="@(() => Move(step, -1))" Disabled="@(_busy || index == 0)" aria-label="@($"Move step {index + 1} up")" title="Move step up" />
+                                <MudIconButton Size="Size.Small" ButtonType="ButtonType.Button" Icon="@Icons.Material.Outlined.ArrowDownward" OnClick="@(() => Move(step, 1))" Disabled="@(_busy || index == _steps.Count - 1)" aria-label="@($"Move step {index + 1} down")" title="Move step down" />
+                                <MudIconButton Size="Size.Small" ButtonType="ButtonType.Button" Icon="@Icons.Material.Outlined.Delete" OnClick="@(() => Remove(step))" Disabled="_busy" aria-label="@($"Remove step {index + 1}")" title="Remove step" />
+                            </div>
+                        </MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent><MudText>No steps yet.</MudText></NoRecordsContent>
+                </MudTable>
+            </div>
             <div class="pa-4"><MudButton ButtonType="ButtonType.Button" OnClick="Add" Disabled="_busy">Add step</MudButton></div>
         </form>
     </MudPaper>
@@ -100,6 +114,12 @@
     }
 
     private void Add() { if (!_busy) _steps.Add(new("", "")); }
+    private void Insert(StepDraft step)
+    {
+        if (_busy) return;
+        var index = _steps.IndexOf(step);
+        if (index >= 0) _steps.Insert(index, new("", ""));
+    }
     private void Remove(StepDraft step) { if (!_busy) _steps.Remove(step); }
     private void Move(StepDraft step, int direction)
     {

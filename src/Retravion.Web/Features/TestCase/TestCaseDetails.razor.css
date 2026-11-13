@@ -1,0 +1,25 @@
+.test-case-steps ::deep .mud-table-root {
+    table-layout: fixed;
+}
+
+.test-case-steps ::deep .mud-table-cell {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.step-markdown {
+    min-width: 0;
+    width: 100%;
+    overflow-x: auto;
+}
+
+.step-markdown ::deep pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.step-markdown ::deep img { max-width: 100%; height: auto; }
+
+@media (min-width: 960.02px) {
+    .test-case-steps ::deep .step-number { width: 5rem; }
+}
+
+@media (max-width: 960px) {
+    .test-case-steps ::deep .mud-table-cell { flex-wrap: wrap; gap: .5rem; }
+}
