@@ -173,6 +173,11 @@ public sealed partial class PostgresProductTests
             Assert.Contains("UI title", renderer.Text());
             await renderer.Field("Search ID or title").ValueChanged.InvokeAsync("TC-002");
             Assert.DoesNotContain("UI title", renderer.Text()); Assert.Contains("Other match", renderer.Text());
+            var emptyCase = (await store.Create(product.InternalId, CaseContent("Empty layout", []), CaseActor, CaseTime)).Value;
+            var emptyDetail = await host.Browser.GetStringAsync($"/test-cases/details?id={emptyCase.TestCase.InternalId}&version={emptyCase.TestCase.VersionId}");
+            Assert.Contains("No steps yet.", emptyDetail);
+            Assert.Contains("No Requirement links yet.", emptyDetail);
+            await File.WriteAllTextAsync(Path.Combine(fixtureDirectory, "empty-details.html"), emptyDetail);
             var navigationHtml = await host.Browser.GetStringAsync("/test-cases?product=P");
             Assert.Contains("Test Cases for P", navigationHtml); Assert.Contains("/test-cases/create?product=P", navigationHtml);
             navigation.Go($"test-cases/edit?id={created.TestCase.InternalId}");
