@@ -144,7 +144,12 @@ public sealed partial class PostgresProductTests
             Assert.True(steps < actions && actions < links);
             var actionGroup = detail[actions..detail.IndexOf("</div>", actions, StringComparison.Ordinal)];
             Assert.Contains("Edit Draft", actionGroup); Assert.Contains("Manage links", actionGroup);
-            Assert.DoesNotContain("Other versions:", detail);
+            Assert.True(detail.IndexOf("aria-label=\"Product context\"", StringComparison.Ordinal) < detail.IndexOf("&lt;b&gt;UI title&lt;/b&gt;", StringComparison.Ordinal));
+            Assert.Contains("test-case-id", detail); Assert.Contains("Version 1", detail); Assert.Contains("test-case-status", detail);
+            Assert.Matches("<summary[^>]*>Versions</summary>", detail);
+            Assert.Matches("<nav[^>]*aria-label=\"Test Case versions\"", detail);
+            Assert.Matches("<a[^>]*aria-current=\"page\"", detail);
+            Assert.Contains($"version={created.TestCase.VersionId}", detail);
             Assert.Contains("aria-label=\"Test Case steps\"", detail);
             Assert.Contains("data-label=\"Action\"", detail);
             Assert.Contains("data-label=\"Expected result\"", detail);
@@ -359,11 +364,11 @@ public sealed partial class PostgresProductTests
             await Mount(row.TestCase.VersionId);
             Assert.Contains("earlier version is read-only", renderer.Text());
             Assert.DoesNotContain("Reopen requires", renderer.Text());
-            Assert.Contains("Other versions:", renderer.Text());
+            Assert.Contains("Versions", renderer.Text());
             var historicalHtml = await host.Browser.GetStringAsync($"/test-cases/details?id={row.TestCase.InternalId}&version={row.TestCase.VersionId}");
-            var versionNavigation = System.Text.RegularExpressions.Regex.Match(historicalHtml, "<nav aria-label=\"Other Test Case versions\"[^>]*>(.*?)</nav>", System.Text.RegularExpressions.RegexOptions.Singleline).Value;
+            var versionNavigation = System.Text.RegularExpressions.Regex.Match(historicalHtml, "<nav aria-label=\"Test Case versions\"[^>]*>(.*?)</nav>", System.Text.RegularExpressions.RegexOptions.Singleline).Value;
             Assert.NotEmpty(versionNavigation);
-            Assert.DoesNotContain(row.TestCase.VersionId.ToString(), versionNavigation);
+            Assert.Matches($"<a[^>]*version={row.TestCase.VersionId}[^>]*aria-current=\"page\"", versionNavigation);
             Assert.Contains(successor.TestCase.VersionId.ToString(), versionNavigation);
             Assert.Equal($"/products/links?kind=test-case&id={row.TestCase.InternalId}&version={row.TestCase.VersionId}", renderer.Button("Manage links").Href);
             Assert.DoesNotContain(renderer.Components<MudButton>(), button => button.Href?.Contains("/test-cases/edit") == true);
