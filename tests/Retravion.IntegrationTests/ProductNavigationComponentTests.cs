@@ -140,6 +140,8 @@ public sealed partial class AccountManagementTests
             {
                 renderer.AssertExpanded(firstGroup, firstExpanded);
                 renderer.AssertExpanded(secondGroup, secondExpanded);
+                renderer.AssertDevelopmentIcons(firstParent, firstGroup, firstExpanded);
+                renderer.AssertDevelopmentIcons(secondParent, secondGroup, secondExpanded);
                 renderer.AssertExpanded(firstParent, true);
                 renderer.AssertExpanded(secondParent, secondParentExpanded);
                 Assert.Equal(links, renderer.ProductLinks());
@@ -216,13 +218,46 @@ public sealed partial class AccountManagementTests
             Assert.Equal(accessibleLabel, Assert.Single(attributes, frame => frame.AttributeName == "aria-label").AttributeValue);
             var handler = Assert.Single(attributes, frame => frame.AttributeEventHandlerId != 0);
             Assert.Equal("onclick", handler.AttributeName);
-            AssertIcon(parent.Skip(button).Take(parent[button].ElementSubtreeLength), Icons.Material.Outlined.Code);
             var groupId = (string)Assert.Single(attributes, frame => frame.AttributeName == "aria-controls").AttributeValue;
             var group = SkipWhitespace(parent, button + parent[button].ElementSubtreeLength);
             Assert.Equal(RenderTreeFrameType.Element, parent[group].FrameType);
             Assert.Equal("div", parent[group].ElementName);
             Assert.Equal(groupId, Assert.Single(ElementAttributes(parent, group), frame => frame.AttributeName == "id").AttributeValue);
             return groupId;
+        }
+
+        internal void AssertDevelopmentIcons(string parentId, string groupId, bool expanded)
+        {
+            var parent = GroupFrames(parentId);
+            var button = Assert.Single(Enumerable.Range(0, parent.Length), index =>
+                parent[index].FrameType == RenderTreeFrameType.Element && parent[index].ElementName == "button");
+            var attributes = ElementAttributes(parent, button);
+            Assert.Equal(groupId, Assert.Single(attributes, frame => frame.AttributeName == "aria-controls").AttributeValue);
+            var icons = parent.Skip(button + 1).Take(parent[button].ElementSubtreeLength - 1)
+                .Where(frame => frame.FrameType == RenderTreeFrameType.Component).ToArray();
+            Assert.Collection(icons,
+                indicator => AssertRenderedSvg(indicator, "product-navigation-development-indicator",
+                    expanded ? Icons.Material.Outlined.ExpandMore : Icons.Material.Outlined.ChevronRight, decorative: true),
+                code => AssertRenderedSvg(code, "product-navigation-development-code", Icons.Material.Outlined.Code));
+        }
+
+        private void AssertRenderedSvg(RenderTreeFrame component, string cssClass, string glyph, bool decorative = false)
+        {
+            Assert.Equal(typeof(MudIcon), component.ComponentType);
+            var rendered = GetCurrentRenderTreeFrames(component.ComponentId);
+            var frames = rendered.Array[..rendered.Count];
+            var svgIndex = Assert.Single(Enumerable.Range(0, frames.Length), index =>
+                frames[index].FrameType == RenderTreeFrameType.Element && frames[index].ElementName == "svg");
+            var attributes = ElementAttributes(frames, svgIndex).ToDictionary(frame => frame.AttributeName, frame => frame.AttributeValue);
+            Assert.Contains(cssClass, Assert.IsType<string>(attributes["class"]).Split(' '));
+            Assert.Equal(glyph, Assert.Single(frames.Skip(svgIndex + 1).Take(frames[svgIndex].ElementSubtreeLength - 1),
+                frame => frame.FrameType == RenderTreeFrameType.Markup).MarkupContent);
+            if (decorative)
+            {
+                Assert.Equal("true", attributes["aria-hidden"]);
+                Assert.Equal("false", attributes["focusable"]);
+                Assert.False(attributes.ContainsKey("tabindex"));
+            }
         }
 
         internal void AssertSpecifications(string groupId)

@@ -40,9 +40,26 @@ const captureContext = (view, state) => {
     return { product: 'UI-A', state, theme, width: Number(width) };
 };
 
+const positiveRect = rect => rect && [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
+    rect.right > rect.left && rect.bottom > rect.top;
+const containsRect = (outer, inner) => positiveRect(inner) && inner.left >= outer.left && inner.right <= outer.right &&
+    inner.top >= outer.top && inner.bottom <= outer.bottom;
+
+function assertDevelopmentIndicator({ rect, icon, indicator }, expanded) {
+    assert.ok(indicator, 'Development indicator is missing.');
+    assert.equal(indicator.glyph, expanded ? 'expanded' : 'collapsed', 'Incorrect Development chevron state.');
+    assert.equal(indicator.decorative, true, 'Development indicator must be hidden from AX and nonfocusable.');
+    assert.equal(indicator.visible, true, 'Development indicator is not visible.');
+    assert.ok(indicator.contrast >= 3 && indicator.contrast <= 21, 'Development indicator must contrast with the row background.');
+    const box = indicator.rect;
+    assert.ok(positiveRect(rect) && positiveRect(icon) && containsRect(rect, box) && box.right <= icon.left,
+        'Development indicator must fit to the left of Code without overlap.');
+    assert.ok(Math.abs((box.left + box.right - rect.left - icon.left) / 2) <= 1 &&
+        Math.abs((box.top + box.bottom - rect.top - rect.bottom) / 2) <= 1,
+        'Development indicator must be centered in its gutter.');
+}
+
 export function developmentClip({ viewport, sidebar, rows }, { width, state }) {
-    const positiveRect = rect => rect && [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
-        rect.right > rect.left && rect.bottom > rect.top;
     assert.ok(viewport.width === width && Number.isFinite(viewport.height) && viewport.height > 0 &&
         [viewport.x, viewport.y].every(value => Number.isInteger(value) && value >= 0), 'Unexpected capture viewport.');
     assert.ok(positiveRect(sidebar), 'Sidebar is not visible.');
@@ -58,45 +75,131 @@ export function developmentClip({ viewport, sidebar, rows }, { width, state }) {
     for (const [index, row] of rows.entries()) {
         assert.ok(positiveRect(row.rect) && row.rect.left >= left && row.rect.right <= right &&
             (!index || Math.abs(row.rect.top - rows[index - 1].rect.bottom) < 1), 'Crop rows must be fully visible and adjacent.');
+        const visibleRow = { ...row.rect, top: Math.max(top, row.rect.top), bottom: Math.min(bottom, row.rect.bottom) };
         for (const content of [row.icon, row.label]) {
-            assert.ok(positiveRect(content) && content.left >= row.rect.left && content.right <= row.rect.right &&
-                content.top >= Math.max(top, row.rect.top) && content.bottom <= Math.min(bottom, row.rect.bottom),
-                'Crop must contain each complete icon and label within its row.');
+            assert.ok(containsRect(visibleRow, content), 'Crop must contain each complete icon and label within its row.');
+        }
+        if (row.text === 'Development') {
+            assert.ok(row.indicator, 'Development indicator is missing.');
+            assert.ok(containsRect(visibleRow, row.indicator.rect), 'Crop must contain the complete Development indicator.');
+            assertDevelopmentIndicator(row, state === 'expanded');
+            for (const part of ['icon', 'label']) {
+                assert.ok(Math.abs(row[part].left - rows[0][part].left) <= 1, `Development crop ${part} must align with Revisions.`);
+            }
         }
     }
     // DOM rectangles are viewport-relative; Chromium's clip uses CSS page coordinates.
     return { x: viewport.x + left, y: viewport.y + top, width: right - left, height: bottom - top, scale: 1 };
 }
 
-function validPng(image, clip) {
-    if (!Buffer.isBuffer(image) || image.length <= pngSignature.length || !image.subarray(0, 8).equals(pngSignature)) return false;
-    if (!clip) return true; // Preserve the non-Development full-viewport evidence contract.
+const hasPngSignature = image => Buffer.isBuffer(image) && image.length > pngSignature.length && image.subarray(0, 8).equals(pngSignature);
+
+function decodeCrop(image, clip) {
+    if (!hasPngSignature(image)) return null;
     // The opaque Chromium crops are 8-bit RGB, non-interlaced, with only IHDR, IDAT(s), IEND.
     const scanlineBytes = 1 + 3 * clip.width; // One filter byte followed by RGB samples.
     const expectedBytes = scanlineBytes * clip.height;
     const data = [];
     for (let offset = pngSignature.length; offset + 12 <= image.length;) {
         const size = image.readUInt32BE(offset), end = offset + 12 + size;
-        if (end > image.length || crc32(image.subarray(offset + 4, end - 4)) !== image.readUInt32BE(end - 4)) return false;
+        if (end > image.length || crc32(image.subarray(offset + 4, end - 4)) !== image.readUInt32BE(end - 4)) return null;
         const type = image.toString('latin1', offset + 4, offset + 8);
         const payload = image.subarray(offset + 8, end - 4);
         if (offset === pngSignature.length) {
             if (type !== 'IHDR' || size !== 13 || payload.readUInt32BE(0) !== clip.width ||
-                payload.readUInt32BE(4) !== clip.height || !payload.subarray(8).equals(Buffer.from([8, 2, 0, 0, 0]))) return false;
+                payload.readUInt32BE(4) !== clip.height || !payload.subarray(8).equals(Buffer.from([8, 2, 0, 0, 0]))) return null;
         } else if (type === 'IDAT') {
             data.push(payload);
         } else if (type === 'IEND' && size === 0 && end === image.length && data.length) {
             const compressed = Buffer.concat(data);
             try {
                 const { buffer, engine } = inflateSync(compressed, { maxOutputLength: expectedBytes, info: true });
-                if (buffer.length !== expectedBytes || engine.bytesWritten !== compressed.length) return false;
-                for (let row = 0; row < buffer.length; row += scanlineBytes) if (buffer[row] > 4) return false;
-                return true;
-            } catch { return false; }
-        } else return false;
+                if (buffer.length !== expectedBytes || engine.bytesWritten !== compressed.length) return null;
+                return unfilterRgb(buffer, scanlineBytes);
+            } catch { return null; }
+        } else return null;
         offset = end;
     }
-    return false;
+    return null;
+}
+
+function paeth(left, up, diagonal) {
+    const estimate = left + up - diagonal;
+    const a = Math.abs(estimate - left), b = Math.abs(estimate - up), c = Math.abs(estimate - diagonal);
+    return a <= b && a <= c ? left : b <= c ? up : diagonal;
+}
+
+function unfilterRgb(buffer, stride) {
+    // Undo the PNG filters in-place, retaining the filter byte at the start of each row.
+    for (let row = 0; row < buffer.length; row += stride) {
+        const filter = buffer[row];
+        if (filter > 4) return null;
+        if (filter === 0) continue;
+        for (let x = 1; x < stride; x++) {
+            const i = row + x, left = x > 3 ? buffer[i - 3] : 0, up = row ? buffer[i - stride] : 0;
+            const diagonal = row && x > 3 ? buffer[i - stride - 3] : 0;
+            buffer[i] += filter === 1 ? left : filter === 2 ? up : filter === 3 ? (left + up) >> 1 : paeth(left, up, diagonal);
+        }
+    }
+    return buffer;
+}
+
+// Outlined ExpandMore's filled polygon in the 24x24 Material viewbox. ChevronRight is
+// the same polygon rotated counterclockwise. Compare the PNG to this unclipped shape,
+// not to a DOM hit test or to a mask taken from the potentially clipped element.
+const downChevron = [[16.59, 8.59], [12, 13.17], [7.41, 8.59], [6, 10], [12, 16], [18, 10]];
+const rightChevron = downChevron.map(([x, y]) => [y, 24 - x]);
+function insidePolygon(polygon, x, y) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const [a, b] = polygon[i], [c, d] = polygon[j];
+        if ((b > y) !== (d > y) && x < a + (c - a) * (y - b) / (d - b)) inside = !inside;
+    }
+    return inside;
+}
+
+function assertCapturedChevron(image, clip, geometry, state) {
+    const pixels = decodeCrop(image, clip);
+    assert.ok(pixels, 'Chromium did not return a decodable PNG of the requested crop dimensions.');
+    const { rect, foreground, background } = geometry.rows[1].indicator;
+    const isRgb = color => Array.isArray(color) && color.length === 3 &&
+        color.every(channel => Number.isInteger(channel) && channel >= 0 && channel <= 255);
+    assert.ok(isRgb(foreground) && isRgb(background) && contrast(foreground, background) >= 3,
+        'Expected contrasting Development paint colors.');
+    const left = rect.left + geometry.viewport.x - clip.x, top = rect.top + geometry.viewport.y - clip.y;
+    const width = rect.right - rect.left, height = rect.bottom - rect.top;
+    const size = Math.min(width, height), originX = left + (width - size) / 2, originY = top + (height - size) / 2;
+    const polygon = state === 'expanded' ? downChevron : rightChevron;
+    const matchesAt = (dx, dy) => {
+        let corePixels = 0;
+        for (let y = Math.floor(top); y < Math.ceil(top + height); y++) {
+            for (let x = Math.floor(left); x < Math.ceil(left + width); x++) {
+                let covered = 0;
+                for (let sy = 0; sy < 8; sy++) for (let sx = 0; sx < 8; sx++) {
+                    if (insidePolygon(polygon, (x + (sx + 0.5) / 8 - originX - dx) * 24 / size,
+                        (y + (sy + 0.5) / 8 - originY - dy) * 24 / size)) covered++;
+                }
+                const i = y * (1 + 3 * clip.width) + 1 + x * 3;
+                const pixel = [...pixels.subarray(i, i + 3)];
+                // Allow antialiasing differences at edges, but require the entire stroke
+                // to match, not merely a contrasting pixel somewhere in the box.
+                if (!background.every((base, channel) => {
+                    const delta = foreground[channel] - base;
+                    return Math.abs(pixel[channel] - (base + delta * covered / 64)) <= 3 + 0.22 * Math.abs(delta);
+                })) return false;
+                if (covered === 64) {
+                    corePixels++;
+                    if (contrast(pixel, background) < 3) return false;
+                }
+            }
+        }
+        return corePixels > 0;
+    };
+    // Chromium can snap layout to device pixels before rasterizing a transformed SVG.
+    // One common subpixel offset must explain the whole glyph; no per-pixel repositioning.
+    const offsets = [0, -0.25, 0.25, -0.5, 0.5];
+    assert.ok(offsets.some(dx => offsets.some(dy => matchesAt(dx, dy))),
+        'Captured Development chevron paint is incomplete, shifted or obscured.');
 }
 
 export function scenarioVerdict({ checks, captures }, development = true) {
@@ -113,11 +216,11 @@ export function scenarioVerdict({ checks, captures }, development = true) {
             try {
                 const tree = JSON.parse(pair.tree);
                 if (!Array.isArray(tree.nodes) || !tree.nodes.length) return false;
-                if (!development) return validPng(pair.image);
+                if (!development) return hasPngSignature(pair.image);
                 const [theme, width, state] = key.split('-');
                 const context = captureContext(`${theme}-${width}`, state);
                 assert.deepEqual(pair.clip, developmentClip(pair.geometry, context));
-                if (!validPng(pair.image, pair.clip)) return false;
+                assertCapturedChevron(pair.image, pair.clip, pair.geometry, state);
                 assert.deepEqual(tree.capture, { ...context, pngSha256: imageHash(pair.image) });
                 assertDevelopmentTree(tree.nodes, state);
                 return true;
@@ -171,16 +274,16 @@ export function hasDisabledText(nodes, text) {
     });
 }
 
-export function assertDevelopmentTree(nodes, state) {
+export function assertDevelopmentTree(nodes, state, secondExpanded = false) {
     const expanded = state === 'expanded';
-    for (const [id, expected] of [['UI-A', expanded], ['UI-B', false]]) {
+    for (const [id, expected] of [['UI-A', expanded], ['UI-B', secondExpanded]]) {
         const buttons = nodes.filter(node => !node.ignored && node.role?.value === 'button' &&
             node.name?.value === `Development for ${id} – Evidence product ${id}`);
         assert.equal(buttons.length, 1, `Expected one exposed Development button for ${id}.`);
         assert.ok(buttons[0].properties?.some(property => property.name === 'expanded' && property.value.value === expected),
             `Incorrect AX expanded state for ${id}.`);
     }
-    if (expanded) assert.ok(hasDisabledText(nodes, 'Specifications'), 'Specifications must belong to an exposed disabled node.');
+    if (expanded || secondExpanded) assert.ok(hasDisabledText(nodes, 'Specifications'), 'Specifications must belong to an exposed disabled node.');
     else assert.ok(!nodes.some(node => !node.ignored && node.name?.value === 'Specifications'), 'Collapsed Specifications is exposed in AX.');
 }
 
@@ -188,16 +291,47 @@ const childGroup = id => `#product-navigation-children-${id}`;
 const developmentButton = id => `${childGroup(id)} > button[aria-controls^="product-navigation-development-"]`;
 
 // Runs in Chromium; use rendered boxes (not rounded offsets) and do not mutate the DOM.
-function inspectDevelopment(selector) {
+function inspectDevelopment(selector, productGlyphs, contrastRatio) {
     const button = document.querySelector(selector), children = button.parentElement;
     const revisions = children.querySelector(':scope > a[href^="/revisions?"]');
     const group = document.getElementById(button.getAttribute('aria-controls'));
     const specifications = group.querySelector(':scope > .product-navigation-specifications');
     const sidebar = document.querySelector('#app-navigation');
-    const rect = e => e.getBoundingClientRect().toJSON();
+    const rect = e => e?.getBoundingClientRect().toJSON() ?? null;
     const rendered = e => e.getClientRects().length > 0 && e.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true });
-    const row = e => ({ text: e.textContent.trim(), rect: rect(e), icon: rect(e.querySelector('svg')),
-        label: rect(e.querySelector('span')) });
+    const indicator = button.querySelector(':scope > svg.product-navigation-development-indicator');
+    const inspectIndicator = () => {
+        if (!indicator) return null;
+        const style = getComputedStyle(indicator);
+        const painted = [...indicator.querySelectorAll('path')].map(path => getComputedStyle(path)).filter(path => path.fill !== 'none');
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext('2d');
+        const rgb = css => {
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = css;
+            context.fillRect(0, 0, 1, 1);
+            return [...context.getImageData(0, 0, 1, 1).data];
+        };
+        const background = rgb(getComputedStyle(button).backgroundColor);
+        const behind = background[3] === 0 ? rgb(getComputedStyle(sidebar).backgroundColor) : background;
+        const fills = painted.map(path => rgb(path.fill));
+        return {
+            foreground: fills.length === 1 ? fills[0].slice(0, 3) : null,
+            background: behind.slice(0, 3),
+            glyph: Object.keys(productGlyphs).find(state => productGlyphs[state] === indicator.innerHTML) ?? null,
+            rect: rect(indicator),
+            decorative: indicator.getAttribute('aria-hidden') === 'true' && indicator.getAttribute('focusable') === 'false' &&
+                indicator.tabIndex === -1 && !indicator.hasAttribute('tabindex'),
+            visible: rendered(indicator) && Number(style.opacity) === 1 && painted.length > 0 &&
+                painted.every(path => path.visibility === 'visible' && Number(path.opacity) === 1 && Number(path.fillOpacity) === 1),
+            contrast: behind[3] === 255 && fills.length ? Math.min(...fills.map(fill =>
+                fill[3] === 255 ? contrastRatio(fill.slice(0, 3), behind.slice(0, 3)) : 0)) : 0
+        };
+    };
+    const row = e => ({ text: e.textContent.trim(), rect: rect(e),
+        icon: rect(e.querySelector(e === button ? ':scope > svg.product-navigation-development-code' : ':scope > svg.mud-icon-root')),
+        label: rect(e.querySelector(':scope > span')), ...(e === button ? { indicator: inspectIndicator() } : {}) });
     const peers = [...children.querySelectorAll(':scope > .product-navigation-child')].map(row);
     const side = rect(sidebar), viewport = window.visualViewport;
     const visibleRows = [revisions, button, ...(rendered(specifications) ? [specifications] : [])];
@@ -214,9 +348,10 @@ function inspectDevelopment(selector) {
                 right: side.left + sidebar.clientLeft + sidebar.clientWidth, bottom: side.top + sidebar.clientTop + sidebar.clientHeight } : null,
             rows: visibleRows.map(row)
         },
-        unobscured: viewport.scale === 1 && visibleRows.every(e => {
+        unobscured: viewport.scale === 1 && [...visibleRows, indicator].every(e => {
+            if (!e || !rendered(e) || !sidebar.contains(e)) return false;
             const r = rect(e), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
-            return rendered(e) && sidebar.contains(e) && e.contains(hit);
+            return (e === indicator ? button : e).contains(hit);
         })
     };
 }
@@ -232,6 +367,7 @@ export function assertDevelopmentDom(product, expanded) {
     assert.deepEqual(product.peers.map(row => row.text), ['Areas', 'User Needs', 'Requirements', 'Test Cases', 'Features', 'Revisions', 'Development']);
     const [areas] = product.peers, development = product.peers.at(-1);
     for (const part of ['icon', 'label']) {
+        assert.ok(product.peers.every(row => positiveRect(row[part])), `Every peer must have a rendered content ${part}.`);
         for (const peer of product.peers.slice(1)) {
             assert.ok(Math.abs(peer[part].left - areas[part].left) <= 1, `${peer.text} ${part} must align with Areas.`);
         }
@@ -243,6 +379,7 @@ export function assertDevelopmentDom(product, expanded) {
             assert.ok(product.specifications[part].left >= development[part].left + 16, `Specifications ${part} must be deeper than Development.`);
         }
     }
+    assertDevelopmentIndicator(development, expanded);
 }
 
 // Never propagate native output/arguments: bootstrap commands may contain sensitive configuration.
@@ -526,14 +663,17 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                 id:e.getAttribute('aria-controls'), expanded:e.getAttribute('aria-expanded'), hidden:document.getElementById(e.getAttribute('aria-controls')).hidden }))
         }))()`);
         {
+            const productGlyphs = {};
             await check('interaction', productChecks[0], async () => {
                 assert.equal(await evaluate(`document.querySelectorAll(${JSON.stringify(productGroups)}).length`), 2);
             });
             const parentButton = 'button[aria-controls="product-navigation-children-UI-A"]';
+            const parentGlyph = () => evaluate(`document.querySelector(${JSON.stringify(`${parentButton}.product-node-toggle > svg`)})?.innerHTML`);
             await check('interaction', productChecks[1], async () => {
                 const before = await state();
                 await click(parentButton);
                 await waitFor(async () => (await state()).parents[0].hidden, 'product collapse');
+                if (development) productGlyphs.collapsed = await parentGlyph();
                 const after = await state();
                 assert.equal(after.parents[1].hidden, before.parents[1].hidden);
                 assert.deepEqual(after.links, before.links); assert.equal(after.url, before.url);
@@ -554,33 +694,41 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                 await check('interaction', developmentChecks[0], async () => {
                     const initial = await state(); assert.equal(initial.nodes.length, 2);
                     assert.ok(initial.nodes.every(node => node.expanded === 'false' && node.hidden));
+                    productGlyphs.expanded = await parentGlyph();
+                    assert.ok(productGlyphs.collapsed && productGlyphs.expanded && productGlyphs.collapsed !== productGlyphs.expanded,
+                        'The product toggle must provide distinct disclosure glyphs.');
+                    assertDevelopmentTree((await send('Accessibility.getFullAXTree')).nodes, 'collapsed');
                 });
                 const before = await state();
                 const first = developmentButton('UI-A');
+                const assertTransition = async (index, expected, description) => {
+                    await waitFor(async () => (await state()).nodes[index].expanded === String(expected[index]), description);
+                    const { nodes } = await send('Accessibility.getFullAXTree');
+                    assertDevelopmentTree(nodes, expected[0] ? 'expanded' : 'collapsed', expected[1]);
+                    assert.deepEqual(await state(), { ...before, nodes: before.nodes.map((node, i) =>
+                        ({ ...node, expanded: String(expected[i]), hidden: !expected[i] })) });
+                };
                 await check('interaction', developmentChecks[1], async () => {
                     await click(first);
-                    await waitFor(async () => (await state()).nodes[0].expanded === 'true', 'Development expansion');
-                    const after = await state();
-                    assert.deepEqual(after.parents, before.parents); assert.deepEqual(after.links, before.links); assert.equal(after.url, before.url);
-                    assert.equal(after.nodes[0].hidden, false); assert.equal(after.nodes[1].expanded, 'false'); assert.equal(after.nodes[1].hidden, true);
+                    await assertTransition(0, [true, false], 'Development expansion');
                 });
                 await check('accessibility', developmentChecks[2], async () => {
-                    await evaluate(`document.querySelector(${JSON.stringify(first)}).focus()`);
-                    assert.equal(await evaluate(`document.activeElement.matches(${JSON.stringify(first)})`), true);
-                    await key('Enter', 13);
-                    await waitFor(async () => (await state()).nodes[0].expanded === 'false', 'Enter collapse');
-                    assert.equal((await state()).nodes[0].hidden, true);
-                    await key(' ', 32);
-                    await waitFor(async () => (await state()).nodes[0].expanded === 'true', 'Space expansion');
-                    assert.equal((await state()).nodes[0].hidden, false);
-                    assert.equal((await state()).nodes[1].expanded, 'false');
+                    for (const [index, id] of ['UI-A', 'UI-B'].entries()) {
+                        await evaluate(`document.querySelector('${childGroup(id)} > a[href^="/revisions?"]').focus()`);
+                        await key('Tab', 9);
+                        assert.equal(await evaluate(`document.activeElement.matches(${JSON.stringify(developmentButton(id))})`), true);
+                        await key('Enter', 13);
+                        await assertTransition(index, index === 0 ? [false, false] : [true, true], `${id} Enter toggle`);
+                        await key(' ', 32);
+                        await assertTransition(index, [true, false], `${id} Space toggle`);
+                    }
                 });
                 await check('accessibility', developmentChecks[3], async () => {
                     const label = await evaluate(`(() => { const e=document.querySelector('${childGroup('UI-A')} .product-navigation-specifications'); return {
                         text:e?.textContent.trim(), disabled:e?.getAttribute('aria-disabled'), tabIndex:e?.tabIndex,
                         href:e?.getAttribute('href'), interactive:e?.matches('a,button,input,select,textarea,[contenteditable="true"]'),
                         childControls:e?.querySelectorAll('a,button,input,select,textarea,[tabindex]').length,
-                        icon:Boolean(e?.querySelector('svg')) }; })()`);
+                        icon:Boolean(e?.querySelector(':scope > svg.mud-icon-root')) }; })()`);
                     assert.equal(label.text, 'Specifications'); assert.equal(label.disabled, 'true'); assert.equal(label.tabIndex, -1);
                     assert.equal(label.href, null); assert.equal(label.interactive, false); assert.equal(label.childControls, 0); assert.equal(label.icon, true);
                     const beforeLabelClick = await state();
@@ -589,9 +737,10 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                     assert.equal((await state()).url, before.url);
                     await evaluate(`document.querySelector(${JSON.stringify(first)}).focus()`); await key('Tab', 9);
                     assert.equal(await evaluate("document.activeElement.closest('.product-navigation-specifications') === null"), true);
+                    assert.equal(await evaluate("document.activeElement.matches('.product-node-toggle[aria-controls=\"product-navigation-children-UI-B\"]')"), true);
                 });
             }
-            const inspect = id => evaluate(`(${inspectDevelopment})(${JSON.stringify(developmentButton(id))})`);
+            const inspect = id => evaluate(`(${inspectDevelopment})(${JSON.stringify(developmentButton(id))}, ${JSON.stringify(productGlyphs)}, ${contrast})`);
             const setDevelopment = async (id, expanded) => {
                 const selector = developmentButton(id);
                 const expression = `document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-expanded')`;
@@ -652,7 +801,7 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                             const screenshot = await captureCommand('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, clip });
                             assert.equal(typeof screenshot?.data, 'string', 'Chromium did not return PNG data.');
                             const image = Buffer.from(screenshot.data, 'base64');
-                            assert.ok(validPng(image, clip), 'Chromium did not return a decodable PNG of the requested crop dimensions.');
+                            assertCapturedChevron(image, clip, first.geometry, state);
                             captures.push({ key, clip, geometry: first.geometry, image,
                                 tree: JSON.stringify({ capture: { ...context, pngSha256: imageHash(image) }, nodes }, null, 2) });
                         });
@@ -662,8 +811,10 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                         await setDevelopment('UI-B', true);
                         assertDevelopmentDom(await inspect('UI-B'), true);
                         assertDevelopmentDom(await inspect('UI-A'), true);
+                        assertDevelopmentTree((await send('Accessibility.getFullAXTree')).nodes, 'expanded', true);
                         await setDevelopment('UI-B', false);
                         assertDevelopmentDom(await inspect('UI-B'), false);
+                        assertDevelopmentTree((await send('Accessibility.getFullAXTree')).nodes, 'expanded');
                         assert.deepEqual(await state(), before);
                     });
                     await check('accessibility', styleCheck(name), async () => {

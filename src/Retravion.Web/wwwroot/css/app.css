@@ -129,6 +129,15 @@ a, button, input { -webkit-tap-highlight-color: transparent; }
 .product-navigation-item .mud-icon-root { flex-shrink: 0; }
 .product-navigation-item span { min-width: 0; }
 .product-navigation-child { padding-left: 28px; justify-content: flex-start; }
+.product-navigation-development { position: relative; }
+.product-navigation-development > .product-navigation-development-indicator {
+    /* Center in the existing 28px gutter without consuming space in the flex row. */
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--mud-palette-drawer-text);
+}
 .product-navigation-specifications {
     display: flex;
     align-items: center;

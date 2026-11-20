@@ -91,8 +91,11 @@ test('verify fails for a missing browser rather than fabricating evidence', asyn
 const views = ['light-1280', 'light-390', 'dark-1280', 'dark-390'];
 const keys = views.flatMap(view => ['collapsed', 'expanded'].map(state => `${view}-${state}`));
 const rect = (left, top, right, bottom) => ({ left, top, right, bottom });
-const row = (text, y, indent = 0) => ({ text, rect: rect(16, y, 230, y + 44),
-    icon: rect(46 + indent, y + 11, 67 + indent, y + 32), label: rect(79 + indent, y + 11, 165 + indent, y + 33) });
+const shift = (box, dx, dy = 0) => rect(box.left + dx, box.top + dy, box.right + dx, box.bottom + dy);
+const row = (text, y, indent = 0, expanded = false) => ({ text, rect: rect(16, y, 230, y + 44),
+    icon: rect(46 + indent, y + 11, 67 + indent, y + 32), label: rect(79 + indent, y + 11, 165 + indent, y + 33),
+    ...(text === 'Development' ? { indicator: { glyph: expanded ? 'expanded' : 'collapsed', rect: rect(20.5, y + 11.5, 41.5, y + 32.5),
+        decorative: true, visible: true, contrast: 8 } } : {}) });
 const pngChunk = (type, data = Buffer.alloc(0)) => {
     const chunk = Buffer.alloc(12 + data.length);
     chunk.writeUInt32BE(data.length); chunk.write(type, 4); data.copy(chunk, 8);
@@ -123,11 +126,42 @@ function fixtureCapture(key) {
     const capture = { product: 'UI-A', theme, width: Number(width), state };
     const nodes = [axButton('UI-A', expanded), axButton('UI-B', false), ...(expanded ? [axSpecifications] : [])];
     const geometry = { viewport: { x: 0, y: 0, width: capture.width, height: 1000 }, sidebar: rect(0, 0, 248, 1000),
-        rows: [row('Revisions', 400), row('Development', 444), ...(expanded ? [row('Specifications', 488, 20)] : [])] };
+        rows: [row('Revisions', 400), row('Development', 444, 0, expanded), ...(expanded ? [row('Specifications', 488, 20)] : [])] };
     const clip = { x: 0, y: 400, width: 248, height: expanded ? 132 : 88, scale: 1 };
-    const image = fixtureImage(clip, keys.indexOf(key));
+    const indicator = geometry.rows[1].indicator;
+    indicator.foreground = [229, 237, 243];
+    indicator.background = theme === 'light' ? [20, 46, 67] : [13, 33, 49];
+    const image = fixtureChevronImage(clip, indicator, keys.indexOf(key));
     const pngSha256 = createHash('sha256').update(image).digest('hex');
     return { key, geometry, clip, image, tree: JSON.stringify({ capture: { ...capture, pngSha256 }, nodes }) };
+}
+
+// Render the chevron as two diagonal bands with beveled tips, independent of the
+// collector's polygon test. Only paint changes when simulating CSS clip-path.
+function fixtureChevronImage(clip, { glyph, rect: box, foreground, background }, marker, paint = () => true) {
+    const scanlines = fixtureScanlines(clip), stride = 1 + 3 * clip.width;
+    scanlines[1] = marker;
+    const left = box.left - clip.x, top = box.top - clip.y;
+    for (let y = Math.floor(top); y < Math.ceil(box.bottom - clip.y); y++) {
+        const row = y * stride;
+        for (let x = Math.floor(left); x < Math.ceil(box.right - clip.x); x++) {
+            let coverage = 0;
+            for (let sy = 0; sy < 16; sy++) for (let sx = 0; sx < 16; sx++) {
+                const u = x + (sx + 0.5) / 16 - left, v = y + (sy + 0.5) / 16 - top;
+                if (!paint(u, v)) continue;
+                const [a, b] = glyph === 'expanded' ? [u, v] : [21 - v, u];
+                const distance = Math.abs(a * 24 / 21 - 12), level = b * 24 / 21;
+                if (level >= Math.max(distance + 4, 13.17 - distance) && level <= 16 - distance) coverage += 1 / 256;
+            }
+            for (let c = 0; c < 3; c++) {
+                scanlines[row + 1 + 3 * x + c] = Math.round(background[c] + coverage * (foreground[c] - background[c]));
+            }
+        }
+        // Chromium may use Sub filtering on the exact rows whose pixels we inspect.
+        scanlines[row] = 1;
+        for (let i = row + stride - 1; i > row + 3; i--) scanlines[i] -= scanlines[i - 3];
+    }
+    return fixturePng(clip, deflateSync(scanlines));
 }
 
 function developmentResult() {
@@ -173,7 +207,75 @@ function malformedIdatCapture() {
     return result;
 }
 
+function clippedChevronPaint(paint) {
+    const result = developmentResult();
+    const pair = result.captures.at(-1);
+    replaceImage(pair, fixtureChevronImage(pair.clip, pair.geometry.rows[1].indicator, keys.length - 1, paint));
+    return result;
+}
+
+const paintRegressions = [
+    ['chevron hidden by inset(50%)', () => false],
+    ['chevron partially clipped by inset(0 50% 0 0)', u => u < 10.5]
+];
+for (const [label, paint] of paintRegressions) {
+    test(`capture verdict rejects ${label} without any change in DOM bounds or state`, () => {
+        const result = clippedChevronPaint(paint);
+        const { image, geometry, clip, tree, key } = result.captures.at(-1);
+        const original = fixtureCapture(key);
+        assert.deepEqual(geometry, original.geometry);
+        assert.deepEqual(developmentClip(geometry, JSON.parse(tree).capture), clip);
+        assert.notDeepEqual(image, original.image);
+        assert.ok(result.checks.every(check => check.status === 'passed'));
+        assert.equal(scenarioVerdict(result).status, 'failed');
+    });
+}
+
 const emptyResult = () => ({ checks: [], captures: [] });
+const indicatorRegressions = [
+    ['missing indicator', () => null, /indicator is missing/],
+    ['wrong-state chevron', indicator => ({ ...indicator, glyph: indicator.glyph === 'expanded' ? 'collapsed' : 'expanded' }), /chevron state/],
+    ['shifted indicator', indicator => ({ ...indicator, rect: shift(indicator.rect, 2) }), /centered in its gutter/],
+    ['clipped indicator', indicator => ({ ...indicator, rect: shift(indicator.rect, -5) }), /complete Development indicator/],
+    ['overlapping indicator', indicator => ({ ...indicator, rect: shift(indicator.rect, 5) }), /without overlap/],
+    ['invisible indicator', indicator => ({ ...indicator, visible: false }), /not visible/],
+    ['low-contrast indicator', indicator => ({ ...indicator, contrast: 2.9 }), /must contrast/],
+    ['focusable indicator', indicator => ({ ...indicator, decorative: false }), /nonfocusable/]
+];
+
+function invalidIndicatorCapture(update) {
+    const result = developmentResult();
+    const development = result.captures.at(-1).geometry.rows[1];
+    development.indicator = update(development.indicator);
+    return result;
+}
+
+for (const [label, update, message] of indicatorRegressions) {
+    test(`capture verdict rejects ${label} despite passed checks and intact pairs`, () => {
+        const result = invalidIndicatorCapture(update);
+        const { geometry, tree } = result.captures.at(-1);
+        assert.throws(() => developmentClip(geometry, JSON.parse(tree).capture), message);
+        assert.equal(scenarioVerdict(result).status, 'failed');
+    });
+}
+
+test('clip rejects an indicator inside its row but cut by an inward-rounded crop edge', () => {
+    const { geometry, tree } = fixtureCapture('light-390-collapsed');
+    const development = geometry.rows[1];
+    development.rect.bottom += 0.75;
+    development.indicator.rect.top = development.rect.top + 0.25;
+    development.indicator.rect.bottom = development.rect.bottom - 0.25;
+    assert.throws(() => developmentClip(geometry, JSON.parse(tree).capture), /complete Development indicator/);
+});
+
+test('capture verdict rejects offset Code even with a centered indicator', () => {
+    const result = developmentResult();
+    const { geometry, tree } = result.captures.at(-1);
+    const development = geometry.rows[1];
+    development.icon = shift(development.icon, 1.01);
+    assert.throws(() => developmentClip(geometry, JSON.parse(tree).capture), /crop icon must align with Revisions/);
+    assert.equal(scenarioVerdict(result).status, 'failed');
+});
 
 test('aggregate requires every named assertion and the exact eight-state capture matrix', () => {
     const { checks, captures } = developmentResult();
@@ -224,7 +326,7 @@ test('capture verdict rejects malformed PNGs even with matching AX digests', () 
     }
 });
 
-test('collapsed state requires native DOM hiding and no exposed AX Specifications', () => {
+test('collapsed state requires native DOM hiding, direct alignment and no exposed AX Specifications', () => {
     const product = { native: true, expanded: 'false', hidden: true, groupRendered: false, specificationsRendered: false,
         nested: true, disabled: 'true', peers: ['Areas', 'User Needs', 'Requirements', 'Test Cases', 'Features', 'Revisions', 'Development']
             .map((text, index) => row(text, index * 44)) };
@@ -236,16 +338,21 @@ test('collapsed state requires native DOM hiding and no exposed AX Specification
     const [areas, needs, ...rest] = product.peers;
     // Both are within 1px of Areas, but the unrounded Development-to-User Needs gap is > 1px.
     for (const part of ['icon', 'label']) {
-        const peers = [areas, { ...needs, [part]: { left: needs[part].left + 0.6 } }, ...rest.slice(0, -1),
-            { ...rest.at(-1), [part]: { left: rest.at(-1)[part].left - 0.6 } }];
+        const peers = [areas, { ...needs, [part]: shift(needs[part], 0.6) }, ...rest.slice(0, -1),
+            { ...rest.at(-1), [part]: shift(rest.at(-1)[part], -0.6) }];
         assert.throws(() => assertDevelopmentDom({ ...product, peers }, false), /align directly with User Needs/);
     }
+    // Keep the indicator perfectly in place while only Code moves by more than 1px.
+    const development = rest.at(-1);
+    const offsetCode = [...product.peers.slice(0, -1), { ...development, icon: shift(development.icon, 1.01) }];
+    assert.throws(() => assertDevelopmentDom({ ...product, peers: offsetCode }, false), /Development icon must align with Areas/);
     const visible = { ...product, expanded: 'true', hidden: false, groupRendered: true, specificationsRendered: true,
+        peers: [...product.peers.slice(0, -1), row('Development', 6 * 44, 0, true)],
         specifications: row('Specifications', 7 * 44, 16.2) };
     assert.doesNotThrow(() => assertDevelopmentDom(visible, true));
     for (const part of ['icon', 'label']) {
-        const development = rest.at(-1), peers = [...product.peers.slice(0, -1),
-            { ...development, [part]: { left: development[part].left + 0.6 } }];
+        const expandedDevelopment = visible.peers.at(-1), peers = [...visible.peers.slice(0, -1),
+            { ...expandedDevelopment, [part]: shift(expandedDevelopment[part], 0.6) }];
         assert.throws(() => assertDevelopmentDom({ ...visible, peers }, true), /deeper than Development/);
     }
     const buttons = [axButton('UI-A', false), axButton('UI-B', false)];
@@ -313,6 +420,8 @@ for (const [label, result] of [['complete', developmentResult], ['late failure a
     ['missing state with all checks passed', () => { const result = developmentResult(); result.captures.pop(); return result; }],
     ['duplicate state', () => { const result = developmentResult(); result.captures[7] = result.captures[6]; return result; }],
     ['malformed IDAT with a matching AX digest', malformedIdatCapture],
+    ...indicatorRegressions.slice(0, 4).map(([label, update]) => [label, () => invalidIndicatorCapture(update)]),
+    ...paintRegressions.map(([label, paint]) => [label, () => clippedChevronPaint(paint)]),
     ['invalid last capture with all checks passed', () => {
         const result = developmentResult(); result.captures.at(-1).image = Buffer.alloc(0); return result;
     }]]) {
