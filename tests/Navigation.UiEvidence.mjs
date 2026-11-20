@@ -450,6 +450,33 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                         const layout = await evaluate(`(() => {const r=document.querySelector('#app-navigation').getBoundingClientRect();
                             return { left:r.left, right:r.right, width:r.width, overflow:document.documentElement.scrollWidth>innerWidth };})()`);
                         assert.ok(layout.left >= -1 && layout.right <= width + 1 && layout.width > 0); assert.equal(layout.overflow, false);
+                        if (development) {
+                            const products = await evaluate(`(() => [...document.querySelectorAll('.product-navigation-product')].map(product => {
+                                const children=product.querySelector('.product-navigation-children');
+                                const peers=[...children.children].filter(e=>e.matches('.product-navigation-child'));
+                                const box=e=>({ icon:e.querySelector('svg').getBoundingClientRect().left,
+                                    label:e.querySelector('span').getBoundingClientRect().left });
+                                const button=children.querySelector('button[aria-controls^="product-navigation-development-"]');
+                                const group=document.getElementById(button.getAttribute('aria-controls'));
+                                const specifications=group.querySelector('.product-navigation-specifications');
+                                return { peers:peers.map(e=>({ text:e.textContent.trim(), ...box(e) })),
+                                    nested:group.parentElement===children && group.contains(specifications),
+                                    specifications:group.hidden ? null : box(specifications) };
+                            }))()`);
+                            for (const product of products) {
+                                assert.equal(product.peers.length, 7, 'Development must remain a direct sibling of the six existing product links.');
+                                const reference = product.peers[0];
+                                for (const peer of product.peers.slice(1)) {
+                                    assert.ok(Math.abs(peer.icon - reference.icon) <= 1, `${peer.text} icon must align with ${reference.text}: ${JSON.stringify(product.peers)}`);
+                                    assert.ok(Math.abs(peer.label - reference.label) <= 1, `${peer.text} label must align with ${reference.text}: ${JSON.stringify(product.peers)}`);
+                                }
+                                assert.equal(product.nested, true, 'Specifications must be nested inside Development, not Revisions.');
+                                if (product.specifications) {
+                                    assert.ok(product.specifications.icon >= reference.icon + 16, 'Specifications icon must remain one level deeper.');
+                                    assert.ok(product.specifications.label >= reference.label + 16, 'Specifications label must remain one level deeper.');
+                                }
+                            }
+                        }
                     });
                     if (development) await check('accessibility', styleCheck(name), async () => {
                         const colors = await evaluate(`(() => { const e=document.querySelector('.product-navigation-specifications'),
