@@ -128,7 +128,7 @@ a, button, input { -webkit-tap-highlight-color: transparent; }
 .product-navigation-item { overflow-wrap: anywhere; font-size: 13px; text-decoration: none; }
 .product-navigation-item .mud-icon-root { flex-shrink: 0; }
 .product-navigation-item span { min-width: 0; }
-.product-navigation-child { padding-left: 28px; }
+.product-navigation-child { padding-left: 28px; justify-content: flex-start; }
 .product-navigation-specifications {
     display: flex;
     align-items: center;

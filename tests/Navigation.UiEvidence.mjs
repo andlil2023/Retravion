@@ -1,7 +1,7 @@
 // Standalone navigation verification and opt-in pi-factory collection. Run from the target repository root.
 // Node 24+, .NET SDK from global.json, Podman and Edge/Chrome; no npm packages.
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { crc32, inflateSync } from 'node:zlib';
 
 const exec = promisify(execFile);
 const delay = ms => new Promise(done => setTimeout(done, ms));
@@ -28,20 +29,102 @@ const viewports = ['light-1280', 'light-390', 'dark-1280', 'dark-390'];
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const layoutCheck = name => `Navigation is visible without horizontal overflow (${name})`;
 const styleCheck = name => `Specifications has readable theme-derived disabled styling (${name})`;
-const treeCheck = name => `Accessibility tree exposes expanded Development and disabled Specifications (${name})`;
+const states = ['collapsed', 'expanded'];
+const stateKey = (view, state) => `${view}-${state}`;
+const imageHash = image => createHash('sha256').update(image).digest('hex');
+const developmentCaptures = viewports.flatMap(view => states.map(state => stateKey(view, state)));
+const captureCheck = key => `UI-A native state, accessibility and crop (${key})`;
+const peerCheck = view => `UI-B expands independently with aligned navigation (${view})`;
+const captureContext = (view, state) => {
+    const [theme, width] = view.split('-');
+    return { product: 'UI-A', state, theme, width: Number(width) };
+};
+
+export function developmentClip({ viewport, sidebar, rows }, { width, state }) {
+    const positiveRect = rect => rect && [rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite) &&
+        rect.right > rect.left && rect.bottom > rect.top;
+    assert.ok(viewport.width === width && Number.isFinite(viewport.height) && viewport.height > 0 &&
+        [viewport.x, viewport.y].every(value => Number.isInteger(value) && value >= 0), 'Unexpected capture viewport.');
+    assert.ok(positiveRect(sidebar), 'Sidebar is not visible.');
+    assert.ok(states.includes(state), 'Unexpected capture state.');
+    const expected = ['Revisions', 'Development', ...(state === 'expanded' ? ['Specifications'] : [])];
+    assert.deepEqual(rows.map(row => row.text), expected, 'Unexpected rows in the Development crop.');
+    // Round inward so an adjacent row or the workspace cannot bleed into the crop.
+    const left = Math.ceil(Math.max(sidebar.left, 0)), right = Math.floor(Math.min(sidebar.right, viewport.width));
+    const top = Math.ceil(rows[0].rect.top), bottom = Math.floor(rows.at(-1).rect.bottom);
+    assert.ok(right > left && bottom > top && bottom - top < 250 &&
+        rows[0].rect.top >= Math.max(0, sidebar.top) && rows.at(-1).rect.bottom <= Math.min(viewport.height, sidebar.bottom),
+        'Crop must be positive, shorter than 250px, and within the visible sidebar and viewport.');
+    for (const [index, row] of rows.entries()) {
+        assert.ok(positiveRect(row.rect) && row.rect.left >= left && row.rect.right <= right &&
+            (!index || Math.abs(row.rect.top - rows[index - 1].rect.bottom) < 1), 'Crop rows must be fully visible and adjacent.');
+        for (const content of [row.icon, row.label]) {
+            assert.ok(positiveRect(content) && content.left >= row.rect.left && content.right <= row.rect.right &&
+                content.top >= Math.max(top, row.rect.top) && content.bottom <= Math.min(bottom, row.rect.bottom),
+                'Crop must contain each complete icon and label within its row.');
+        }
+    }
+    // DOM rectangles are viewport-relative; Chromium's clip uses CSS page coordinates.
+    return { x: viewport.x + left, y: viewport.y + top, width: right - left, height: bottom - top, scale: 1 };
+}
+
+function validPng(image, clip) {
+    if (!Buffer.isBuffer(image) || image.length <= pngSignature.length || !image.subarray(0, 8).equals(pngSignature)) return false;
+    if (!clip) return true; // Preserve the non-Development full-viewport evidence contract.
+    // The opaque Chromium crops are 8-bit RGB, non-interlaced, with only IHDR, IDAT(s), IEND.
+    const scanlineBytes = 1 + 3 * clip.width; // One filter byte followed by RGB samples.
+    const expectedBytes = scanlineBytes * clip.height;
+    const data = [];
+    for (let offset = pngSignature.length; offset + 12 <= image.length;) {
+        const size = image.readUInt32BE(offset), end = offset + 12 + size;
+        if (end > image.length || crc32(image.subarray(offset + 4, end - 4)) !== image.readUInt32BE(end - 4)) return false;
+        const type = image.toString('latin1', offset + 4, offset + 8);
+        const payload = image.subarray(offset + 8, end - 4);
+        if (offset === pngSignature.length) {
+            if (type !== 'IHDR' || size !== 13 || payload.readUInt32BE(0) !== clip.width ||
+                payload.readUInt32BE(4) !== clip.height || !payload.subarray(8).equals(Buffer.from([8, 2, 0, 0, 0]))) return false;
+        } else if (type === 'IDAT') {
+            data.push(payload);
+        } else if (type === 'IEND' && size === 0 && end === image.length && data.length) {
+            const compressed = Buffer.concat(data);
+            try {
+                const { buffer, engine } = inflateSync(compressed, { maxOutputLength: expectedBytes, info: true });
+                if (buffer.length !== expectedBytes || engine.bytesWritten !== compressed.length) return false;
+                for (let row = 0; row < buffer.length; row += scanlineBytes) if (buffer[row] > 4) return false;
+                return true;
+            } catch { return false; }
+        } else return false;
+        offset = end;
+    }
+    return false;
+}
 
 export function scenarioVerdict({ checks, captures }, development = true) {
     const required = [...productChecks, ...(development ? developmentChecks : []),
-        ...viewports.flatMap(name => development ? [layoutCheck(name), styleCheck(name), treeCheck(name)] : [layoutCheck(name)])];
-    const passed = checks.length === required.length && required.every(name =>
-        checks.some(check => check.name === name && check.status === 'passed')) &&
-        captures.size === viewports.length && viewports.every(name => {
-            const pair = captures.get(name);
-            return Buffer.isBuffer(pair?.image) && pair.image.length > pngSignature.length &&
-                pair.image.subarray(0, pngSignature.length).equals(pngSignature) && typeof pair.tree === 'string' && pair.tree.length > 0;
+        ...viewports.flatMap(view => development ? [layoutCheck(view), styleCheck(view), peerCheck(view),
+            ...states.map(state => captureCheck(stateKey(view, state)))] : [layoutCheck(view)])];
+    const expected = development ? developmentCaptures : viewports;
+    const passed = Array.isArray(checks) && checks.length === required.length && required.every(name =>
+        checks.some(check => check?.name === name && check.status === 'passed')) &&
+        Array.isArray(captures) && captures.length === expected.length && expected.every(key => {
+            const pairs = captures.filter(pair => pair?.key === key);
+            if (pairs.length !== 1) return false;
+            const [pair] = pairs;
+            try {
+                const tree = JSON.parse(pair.tree);
+                if (!Array.isArray(tree.nodes) || !tree.nodes.length) return false;
+                if (!development) return validPng(pair.image);
+                const [theme, width, state] = key.split('-');
+                const context = captureContext(`${theme}-${width}`, state);
+                assert.deepEqual(pair.clip, developmentClip(pair.geometry, context));
+                if (!validPng(pair.image, pair.clip)) return false;
+                assert.deepEqual(tree.capture, { ...context, pngSha256: imageHash(pair.image) });
+                assertDevelopmentTree(tree.nodes, state);
+                return true;
+            } catch { return false; }
         });
     return { kind: 'interaction', name: development ? aggregateName : 'product-navigation', status: passed ? 'passed' : 'failed',
-        ...(passed ? {} : { details: 'The scenario did not pass every required check and complete all four capture pairs.' }) };
+        ...(passed ? {} : { details: `The scenario did not pass every required check and complete all ${expected.length} distinct capture pairs.` }) };
 }
 
 const limitations = [
@@ -86,6 +169,80 @@ export function hasDisabledText(nodes, text) {
         }
         return false;
     });
+}
+
+export function assertDevelopmentTree(nodes, state) {
+    const expanded = state === 'expanded';
+    for (const [id, expected] of [['UI-A', expanded], ['UI-B', false]]) {
+        const buttons = nodes.filter(node => !node.ignored && node.role?.value === 'button' &&
+            node.name?.value === `Development for ${id} – Evidence product ${id}`);
+        assert.equal(buttons.length, 1, `Expected one exposed Development button for ${id}.`);
+        assert.ok(buttons[0].properties?.some(property => property.name === 'expanded' && property.value.value === expected),
+            `Incorrect AX expanded state for ${id}.`);
+    }
+    if (expanded) assert.ok(hasDisabledText(nodes, 'Specifications'), 'Specifications must belong to an exposed disabled node.');
+    else assert.ok(!nodes.some(node => !node.ignored && node.name?.value === 'Specifications'), 'Collapsed Specifications is exposed in AX.');
+}
+
+const childGroup = id => `#product-navigation-children-${id}`;
+const developmentButton = id => `${childGroup(id)} > button[aria-controls^="product-navigation-development-"]`;
+
+// Runs in Chromium; use rendered boxes (not rounded offsets) and do not mutate the DOM.
+function inspectDevelopment(selector) {
+    const button = document.querySelector(selector), children = button.parentElement;
+    const revisions = children.querySelector(':scope > a[href^="/revisions?"]');
+    const group = document.getElementById(button.getAttribute('aria-controls'));
+    const specifications = group.querySelector(':scope > .product-navigation-specifications');
+    const sidebar = document.querySelector('#app-navigation');
+    const rect = e => e.getBoundingClientRect().toJSON();
+    const rendered = e => e.getClientRects().length > 0 && e.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true });
+    const row = e => ({ text: e.textContent.trim(), rect: rect(e), icon: rect(e.querySelector('svg')),
+        label: rect(e.querySelector('span')) });
+    const peers = [...children.querySelectorAll(':scope > .product-navigation-child')].map(row);
+    const side = rect(sidebar), viewport = window.visualViewport;
+    const visibleRows = [revisions, button, ...(rendered(specifications) ? [specifications] : [])];
+    return {
+        expanded: button.getAttribute('aria-expanded'), hidden: group.hidden,
+        native: button instanceof HTMLButtonElement && button.type === 'button' && !button.disabled,
+        nested: button.nextElementSibling === group && !revisions.contains(specifications),
+        groupRendered: rendered(group), specificationsRendered: rendered(specifications),
+        disabled: specifications.getAttribute('aria-disabled'),
+        peers, specifications: rendered(specifications) ? row(specifications) : null,
+        geometry: {
+            viewport: { x: viewport.pageLeft, y: viewport.pageTop, width: innerWidth, height: innerHeight },
+            sidebar: rendered(sidebar) ? { left: side.left + sidebar.clientLeft, top: side.top + sidebar.clientTop,
+                right: side.left + sidebar.clientLeft + sidebar.clientWidth, bottom: side.top + sidebar.clientTop + sidebar.clientHeight } : null,
+            rows: visibleRows.map(row)
+        },
+        unobscured: viewport.scale === 1 && visibleRows.every(e => {
+            const r = rect(e), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+            return rendered(e) && sidebar.contains(e) && e.contains(hit);
+        })
+    };
+}
+
+export function assertDevelopmentDom(product, expanded) {
+    assert.equal(product.native, true, 'Development must be an enabled native button.');
+    assert.equal(product.expanded, String(expanded), 'Unexpected DOM aria-expanded state.');
+    assert.equal(product.hidden, !expanded, 'Unexpected controlled group hidden state.');
+    assert.equal(product.groupRendered, expanded, 'Unexpected controlled group rendering.');
+    assert.equal(product.specificationsRendered, expanded, 'Unexpected Specifications rendering.');
+    assert.equal(product.nested, true, 'Specifications must be nested inside Development, not Revisions.');
+    assert.equal(product.disabled, 'true');
+    assert.deepEqual(product.peers.map(row => row.text), ['Areas', 'User Needs', 'Requirements', 'Test Cases', 'Features', 'Revisions', 'Development']);
+    const [areas] = product.peers, development = product.peers.at(-1);
+    for (const part of ['icon', 'label']) {
+        for (const peer of product.peers.slice(1)) {
+            assert.ok(Math.abs(peer[part].left - areas[part].left) <= 1, `${peer.text} ${part} must align with Areas.`);
+        }
+        for (const peer of product.peers.slice(0, -1)) {
+            assert.ok(Math.abs(development[part].left - peer[part].left) <= 1, `Development ${part} must align directly with ${peer.text}.`);
+        }
+        if (expanded) {
+            assert.ok(product.specifications[part].left >= areas[part].left + 16, `Specifications ${part} must remain deeper than Areas.`);
+            assert.ok(product.specifications[part].left >= development[part].left + 16, `Specifications ${part} must be deeper than Development.`);
+        }
+    }
 }
 
 // Never propagate native output/arguments: bootstrap commands may contain sensitive configuration.
@@ -227,7 +384,7 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
     const databasePassword = password(), initialPassword = password(), replacementPassword = password();
     const profile = join(scratch, 'browser');
     const build = join(scratch, 'build');
-    const checks = [], captures = new Map();
+    const checks = [], captures = [];
     const check = async (kind, name, action) => {
         checkpoint();
         try { await action(); checks.push({ kind, name, status: 'passed' }); }
@@ -399,8 +556,7 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                     assert.ok(initial.nodes.every(node => node.expanded === 'false' && node.hidden));
                 });
                 const before = await state();
-                const first = `${developmentButtons}:first-of-type`;
-                // Each Development button is the only direct button in its product child group.
+                const first = developmentButton('UI-A');
                 await check('interaction', developmentChecks[1], async () => {
                     await click(first);
                     await waitFor(async () => (await state()).nodes[0].expanded === 'true', 'Development expansion');
@@ -420,7 +576,7 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                     assert.equal((await state()).nodes[1].expanded, 'false');
                 });
                 await check('accessibility', developmentChecks[3], async () => {
-                    const label = await evaluate(`(() => { const e=document.querySelector('.product-navigation-specifications'); return {
+                    const label = await evaluate(`(() => { const e=document.querySelector('${childGroup('UI-A')} .product-navigation-specifications'); return {
                         text:e?.textContent.trim(), disabled:e?.getAttribute('aria-disabled'), tabIndex:e?.tabIndex,
                         href:e?.getAttribute('href'), interactive:e?.matches('a,button,input,select,textarea,[contenteditable="true"]'),
                         childControls:e?.querySelectorAll('a,button,input,select,textarea,[tabindex]').length,
@@ -428,13 +584,32 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                     assert.equal(label.text, 'Specifications'); assert.equal(label.disabled, 'true'); assert.equal(label.tabIndex, -1);
                     assert.equal(label.href, null); assert.equal(label.interactive, false); assert.equal(label.childControls, 0); assert.equal(label.icon, true);
                     const beforeLabelClick = await state();
-                    await click('.product-navigation-specifications');
+                    await click(`${childGroup('UI-A')} .product-navigation-specifications`);
                     assert.deepEqual(await state(), beforeLabelClick);
                     assert.equal((await state()).url, before.url);
                     await evaluate(`document.querySelector(${JSON.stringify(first)}).focus()`); await key('Tab', 9);
                     assert.equal(await evaluate("document.activeElement.closest('.product-navigation-specifications') === null"), true);
                 });
             }
+            const inspect = id => evaluate(`(${inspectDevelopment})(${JSON.stringify(developmentButton(id))})`);
+            const setDevelopment = async (id, expanded) => {
+                const selector = developmentButton(id);
+                const expression = `document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-expanded')`;
+                if (await evaluate(expression) !== String(expanded)) await click(selector);
+                await waitExpression(`${expression} === ${JSON.stringify(String(expanded))}`, 'native Development state');
+            };
+            const requireSyntheticPage = async () => {
+                assert.equal(await evaluate(`location.href === ${JSON.stringify(address + '/products/details?id=UI-A')}`), true,
+                    'Only the authenticated synthetic product details page may be captured.');
+            };
+            // A failed AX or PNG command is a failed capture check, even if earlier pairs succeeded.
+            const captureCommand = async (method, params) => {
+                try { return await send(method, params); }
+                catch (error) {
+                    if (!(error instanceof BrowserProtocolError)) throw error;
+                    throw new Error('Chromium could not collect the required PNG/AX pair.');
+                }
+            };
             for (const dark of [false, true]) {
                 await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
                 if (dark) { await click('.theme-toggle'); await waitExpression("Boolean(document.querySelector('.theme-dark'))", 'dark theme'); }
@@ -450,36 +625,49 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                         const layout = await evaluate(`(() => {const r=document.querySelector('#app-navigation').getBoundingClientRect();
                             return { left:r.left, right:r.right, width:r.width, overflow:document.documentElement.scrollWidth>innerWidth };})()`);
                         assert.ok(layout.left >= -1 && layout.right <= width + 1 && layout.width > 0); assert.equal(layout.overflow, false);
-                        if (development) {
-                            const products = await evaluate(`(() => [...document.querySelectorAll('.product-navigation-product')].map(product => {
-                                const children=product.querySelector('.product-navigation-children');
-                                const peers=[...children.children].filter(e=>e.matches('.product-navigation-child'));
-                                const box=e=>({ icon:e.querySelector('svg').getBoundingClientRect().left,
-                                    label:e.querySelector('span').getBoundingClientRect().left });
-                                const button=children.querySelector('button[aria-controls^="product-navigation-development-"]');
-                                const group=document.getElementById(button.getAttribute('aria-controls'));
-                                const specifications=group.querySelector('.product-navigation-specifications');
-                                return { peers:peers.map(e=>({ text:e.textContent.trim(), ...box(e) })),
-                                    nested:group.parentElement===children && group.contains(specifications),
-                                    specifications:group.hidden ? null : box(specifications) };
-                            }))()`);
-                            for (const product of products) {
-                                assert.equal(product.peers.length, 7, 'Development must remain a direct sibling of the six existing product links.');
-                                const reference = product.peers[0];
-                                for (const peer of product.peers.slice(1)) {
-                                    assert.ok(Math.abs(peer.icon - reference.icon) <= 1, `${peer.text} icon must align with ${reference.text}: ${JSON.stringify(product.peers)}`);
-                                    assert.ok(Math.abs(peer.label - reference.label) <= 1, `${peer.text} label must align with ${reference.text}: ${JSON.stringify(product.peers)}`);
-                                }
-                                assert.equal(product.nested, true, 'Specifications must be nested inside Development, not Revisions.');
-                                if (product.specifications) {
-                                    assert.ok(product.specifications.icon >= reference.icon + 16, 'Specifications icon must remain one level deeper.');
-                                    assert.ok(product.specifications.label >= reference.label + 16, 'Specifications label must remain one level deeper.');
-                                }
-                            }
-                        }
                     });
-                    if (development) await check('accessibility', styleCheck(name), async () => {
-                        const colors = await evaluate(`(() => { const e=document.querySelector('.product-navigation-specifications'),
+                    if (!development) {
+                        await requireSyntheticPage();
+                        const image = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+                        const accessibility = await send('Accessibility.getFullAXTree');
+                        assert.ok(accessibility.nodes.length > 0, 'Accessibility tree is empty.');
+                        captures.push({ key: name, image: Buffer.from(image.data, 'base64'), tree: JSON.stringify(accessibility, null, 2) });
+                        continue;
+                    }
+                    for (const state of states) {
+                        const key = stateKey(name, state), context = captureContext(name, state);
+                        const expanded = state === 'expanded';
+                        await check('accessibility', captureCheck(key), async () => {
+                            await setDevelopment('UI-A', expanded);
+                            await evaluate(`document.querySelector(${JSON.stringify(developmentButton('UI-A'))}).scrollIntoView({ block:'center', behavior:'instant' })`);
+                            await requireSyntheticPage();
+                            assert.equal(await evaluate(`Boolean(document.querySelector('.app-shell.theme-${context.theme}'))`), true, 'Unexpected capture theme.');
+                            const first = await inspect('UI-A');
+                            assertDevelopmentDom(first, expanded);
+                            assertDevelopmentDom(await inspect('UI-B'), false);
+                            assert.equal(first.unobscured, true, 'Capture rows are not visible in the drawer.');
+                            const clip = developmentClip(first.geometry, context);
+                            const { nodes } = await captureCommand('Accessibility.getFullAXTree');
+                            assertDevelopmentTree(nodes, state);
+                            const screenshot = await captureCommand('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, clip });
+                            assert.equal(typeof screenshot?.data, 'string', 'Chromium did not return PNG data.');
+                            const image = Buffer.from(screenshot.data, 'base64');
+                            assert.ok(validPng(image, clip), 'Chromium did not return a decodable PNG of the requested crop dimensions.');
+                            captures.push({ key, clip, geometry: first.geometry, image,
+                                tree: JSON.stringify({ capture: { ...context, pngSha256: imageHash(image) }, nodes }, null, 2) });
+                        });
+                    }
+                    await check('interaction', peerCheck(name), async () => {
+                        const before = await state();
+                        await setDevelopment('UI-B', true);
+                        assertDevelopmentDom(await inspect('UI-B'), true);
+                        assertDevelopmentDom(await inspect('UI-A'), true);
+                        await setDevelopment('UI-B', false);
+                        assertDevelopmentDom(await inspect('UI-B'), false);
+                        assert.deepEqual(await state(), before);
+                    });
+                    await check('accessibility', styleCheck(name), async () => {
+                        const colors = await evaluate(`(() => { const e=document.querySelector('${childGroup('UI-A')} .product-navigation-specifications'),
                             s=getComputedStyle(e), side=getComputedStyle(document.querySelector('#app-navigation'));
                             const canvas=document.createElement('canvas'), c=canvas.getContext('2d');
                             const rgb=color=>{ c.clearRect(0,0,1,1); c.fillStyle=color; c.fillRect(0,0,1,1); return [...c.getImageData(0,0,1,1).data]; };
@@ -491,17 +679,6 @@ async function runScenario({ env, repo, development, scratch, own, checkpoint })
                         assert.notDeepEqual(colors.foreground, colors.link); assert.ok(colors.rect.width > 0 && colors.rect.height > 0);
                         assert.notEqual(colors.cursor, 'pointer');
                     });
-                    assert.equal(await evaluate(`location.href === ${JSON.stringify(address + '/products/details?id=UI-A')}`), true,
-                        'Only the authenticated synthetic product details page may be captured.');
-                    const image = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-                    const accessibility = await send('Accessibility.getFullAXTree');
-                    assert.ok(accessibility.nodes.length > 0, 'Accessibility tree is empty.');
-                    if (development) await check('accessibility', treeCheck(name), async () => {
-                        assert.ok(accessibility.nodes.some(node => node.role?.value === 'button' && node.name?.value.startsWith('Development for UI-A') &&
-                            node.properties?.some(property => property.name === 'expanded' && property.value.value === true)));
-                        assert.ok(hasDisabledText(accessibility.nodes, 'Specifications'), 'Specifications text must belong to an exposed disabled node.');
-                    });
-                    captures.set(name, { image: Buffer.from(image.data, 'base64'), tree: JSON.stringify(accessibility, null, 2) });
                 }
             }
         }
@@ -538,14 +715,15 @@ export async function collect({ env = process.env, repository = process.cwd(), d
         try { await handle.writeFile(content); } finally { await handle.close(); }
     };
     try {
-        if (verdict.status === 'passed') for (const name of viewports) {
-            const { image, tree } = captures.get(name);
-            const screenshotPath = `navigation-${name}.png`, treePath = `navigation-${name}.accessibility.json`;
+        if (verdict.status === 'passed') for (const key of development ? developmentCaptures : viewports) {
+            const { image, tree } = captures.find(pair => pair.key === key);
+            const screenshotPath = `navigation-${key}.png`, treePath = `navigation-${key}.accessibility.json`;
             await write(screenshotPath, image); await write(treePath, tree);
             artifacts.push({ kind: 'screenshot', path: screenshotPath }, { kind: 'accessibility-tree', path: treePath });
-            const [theme, width] = name.split('-');
-            imageLinks.push({ checkName: development ? verdict.name : layoutCheck(name), screenshotPath,
-                caption: `Authenticated product navigation, ${theme} theme, ${width}px; synthetic test products only.` });
+            const [theme, width, state] = key.split('-');
+            imageLinks.push({ checkName: development ? aggregateName : layoutCheck(key), screenshotPath,
+                caption: development ? `UI-A Development ${state}, ${theme} theme, ${width}px viewport — synthetic navigation crop.` :
+                    `Authenticated product navigation, ${theme} theme, ${width}px; synthetic test products only.` });
         }
         const manifest = { version: 1, taskId: context.taskId, attempt: context.attempt, capturedAt: new Date().toISOString(),
             sourceFingerprint: context.sourceFingerprint, application: { framework: 'Blazor Server / Chromium', buildId: `${buildId}:${context.sourceFingerprint}` },
