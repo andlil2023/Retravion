@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { crc32, deflateSync } from 'node:zlib';
+import { crc32, deflateSync, inflateSync } from 'node:zlib';
 import { assertDevelopmentDom, assertDevelopmentTree, collect, contrast, developmentClip, factoryContext,
     hasDisabledText, isInside, scenarioVerdict, verify } from './Navigation.UiEvidence.mjs';
 
@@ -103,6 +103,15 @@ const pngChunk = (type, data = Buffer.alloc(0)) => {
     return chunk;
 };
 const fixtureScanlines = ({ width, height }) => Buffer.alloc((3 * width + 1) * height);
+function fixtureCompressedData(image) {
+    const chunks = [];
+    for (let offset = 8; offset + 12 <= image.length;) {
+        const size = image.readUInt32BE(offset);
+        if (image.toString('ascii', offset + 4, offset + 8) === 'IDAT') chunks.push(image.subarray(offset + 8, offset + 8 + size));
+        offset += size + 12;
+    }
+    return Buffer.concat(chunks);
+}
 function fixturePng({ width, height }, compressed, { colorType = 2, between = [] } = {}) {
     const header = Buffer.alloc(13);
     header.writeUInt32BE(width); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = colorType;
@@ -201,7 +210,8 @@ function replaceImage(pair, image) {
 function malformedIdatCapture() {
     const result = developmentResult();
     const pair = result.captures.at(-1);
-    const compressed = deflateSync(fixtureScanlines(pair.clip));
+    assert.equal(scenarioVerdict(result).status, 'passed', 'The source image must contain a valid painted chevron.');
+    const compressed = fixtureCompressedData(pair.image);
     // Legal chunk lengths and CRCs, matching dimensions and AX digest, but not a zlib stream.
     replaceImage(pair, fixturePng(pair.clip, Buffer.alloc(compressed.length)));
     return result;
@@ -305,8 +315,10 @@ test('capture verdict rejects swapped AX context, mismatched PNGs and incomplete
 test('capture verdict rejects malformed PNGs even with matching AX digests', () => {
     assert.equal(scenarioVerdict(malformedIdatCapture()).status, 'failed');
     const result = developmentResult(), pair = result.captures.at(-1);
-    const { clip } = pair, scanlines = fixtureScanlines(clip);
-    const compressed = deflateSync(scanlines);
+    const { clip } = pair, compressed = fixtureCompressedData(pair.image);
+    const scanlines = inflateSync(compressed);
+    replaceImage(pair, fixturePng(clip, deflateSync(scanlines)));
+    assert.equal(scenarioVerdict(result).status, 'passed', 'Decoder-negative controls must retain the valid chevron paint.');
     const invalidFilter = Buffer.from(scanlines);
     invalidFilter[scanlines.length - (3 * clip.width + 1)] = 5; // Last row's filter, not a pixel.
     const badCrc = fixturePng(clip, compressed);
@@ -318,7 +330,7 @@ test('capture verdict rejects malformed PNGs even with matching AX digests', () 
         ['truncated zlib stream', fixturePng(clip, compressed.subarray(0, -1))],
         ['trailing compressed bytes', fixturePng(clip, Buffer.concat([compressed, Buffer.from([1])]))],
         ['short scanlines', fixturePng(clip, deflateSync(scanlines.subarray(0, -1)))],
-        ['output beyond crop size', fixturePng(clip, deflateSync(Buffer.alloc(scanlines.length + 1)))],
+        ['output beyond crop size', fixturePng(clip, deflateSync(Buffer.concat([scanlines, Buffer.from([0])])))],
         ['illegal row filter', fixturePng(clip, deflateSync(invalidFilter))]
     ]) {
         replaceImage(pair, image);
