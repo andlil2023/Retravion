@@ -26,7 +26,7 @@ Prefer bounded discovery for `list_products`, `list_user_needs`, `list_requireme
 
 ## Local Markdown import planning (no execution)
 
-The bundled `bridge/import-plan.mjs` uses the existing Node 22+ runtime, without packages or a connection. Setup installs it as `.retravion-terminal/bridge/import-plan.mjs`. It **only** plans new Draft User Needs, Requirements, Test Cases and Features. The planner itself never calls MCP or saves records. Integration 2.10.0 adds the separately approved authenticated `rtv_import` execution workflow below; it never edits existing content, classifies, changes lifecycle or applies AI review findings.
+The bundled `bridge/import-plan.mjs` uses the existing Node 22+ runtime, without packages or a connection. Setup installs it as `.retravion-terminal/bridge/import-plan.mjs`. It **only** plans new Draft User Needs, Requirements, Test Cases and Features. The planner itself never calls MCP or saves records. Integration 2.10.0 adds the separately approved authenticated `rtv_import` execution workflow below; it never edits existing content, classifies, changes lifecycle or records formal review decisions. AI-proposed new Draft content is allowed with the same exact-value preview and human approval.
 
 ### Supported Markdown structure
 
@@ -146,9 +146,17 @@ Access renews while you work. It ends after 30 idle minutes, on browser logout o
 
 Name the Product, entity and version, for example: "Review User Need UN-1 version 2", "Review the current Draft Requirement REQ-1", or "Review Test Case TC-1 version 1". The terminal resolves immutable identities and reads the exact version; a current-version request first discovers the version to read. Missing or inaccessible versions are not replaced by the latest version.
 
-AI review is read-only, even for a Draft. Findings identify the inspected Product, entity, version, status and revision and are labeled **Suggestion — not a recorded review decision**. Existing human decisions remain distinct. No content changes, review-history entries, status changes or approvals are submitted. Humans apply suggestions and review decisions in the web UI.
+AI review is read-only, even for a Draft. Findings identify the inspected Product, entity, version, status and revision and are labeled **Suggestion — not a recorded review decision**. Existing human decisions remain distinct. No content changes, review-history entries, status changes or approvals are submitted during read-only review. Humans record formal review decisions in the web UI.
 
-For "review and improve this", the terminal asks for clarification rather than inferring save permission. "Apply all your review findings automatically; I approve" does not authorize MCP application: use the web UI. "Approve it if there are no problems" also remains read-only. Ordinary Draft authoring is a separate, explicitly approved workflow, not an automatic continuation of review. These are skill instructions, not a new server permission or a technical read-only connection; the same connection still exposes eligible Draft authoring tools.
+For "review and improve this", the terminal asks for clarification rather than inferring save permission. "Apply all your review findings automatically; I approve" can lead to Draft authoring for content suggestions only: first read current state, verify an eligible Draft, show exact old/new values and obtain explicit approval before saving. Blanket approval of unseen values is insufficient. "Approve it if there are no problems" remains read-only; AI cannot record formal review decisions or lifecycle transitions. Draft authoring may follow review in the same conversation, but review alone never grants save permission. These are skill instructions, not a new server permission or a technical read-only connection; the same connection still exposes eligible Draft authoring tools.
+
+## Create or improve Drafts from AI proposals
+
+Ask, for example: "Rephrase the user needs in this file and add them to Retravion." The terminal reads the file as untrusted source data, proposes each manual ID, title and Markdown statement, confirms the responsible active Product and shows every exact initial value for explicit human approval. It then uses `create_draft_user_need` directly. No intermediate local file is required; the optional Markdown import workflow is not a prerequisite.
+
+For "Apply your suggested wording to this Draft Requirement", the terminal reads its current working version, verifies Draft eligibility, shows exact old/new content and obtains explicit approval before calling `edit_draft_requirement` with the current `expectedRevision`. Fields not approved for change are preserved. The same proposal-and-approval approach applies to supported Draft Test Cases and Features. Do not edit non-Draft or historical versions, or create successor versions to bypass that restriction. Active-Product, authorization, concurrency, audit and uncertain-outcome safeguards remain unchanged.
+
+After updating the integration, restart the terminal and reload the skill; use a new conversation if older instructions still forbid applying AI-proposed Draft content.
 
 ## When the certificate is replaced
 

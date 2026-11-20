@@ -11,21 +11,40 @@
 { <MudButton OnClick="RetrieveOutcome" Disabled="_busy">Retrieve successor outcome before retrying</MudButton> }
 @if (_requirement is not null && _product is not null)
 {
+    <div class="requirement-details">
+    <p class="requirement-context" aria-label="Product context">@_product.Id · @_product.Name <span aria-hidden="true">/</span> Requirements</p>
     <MudPaper Class="pa-4" Elevation="0">
-        <h2>@_requirement.Requirement.Id – @_requirement.Requirement.Title</h2>
-        <p>Product: @_product.Id – @_product.Name</p>
+        <div class="requirement-heading">
+            <div class="requirement-identity">
+                <p class="requirement-id">@_requirement.Requirement.Id</p>
+                <h2>@_requirement.Requirement.Title</h2>
+            </div>
+            <div class="requirement-metadata">
+                <div class="requirement-badges">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Version @_requirement.Requirement.VersionNumber</MudChip>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Class="requirement-status">@(_requirement.Requirement.Status == RequirementStatus.InReview ? "In Review" : _requirement.Requirement.Status.ToString())</MudChip>
+                </div>
+                <details class="requirement-versions">
+                    <summary>Versions</summary>
+                    <nav aria-label="Requirement versions">
+                        @foreach (var version in _versions ?? [])
+                        {
+                            <MudLink Href="@($"/requirements/details?id={Id}&version={version.Requirement.VersionId}")" aria-current="@(version.Requirement.VersionId == _requirement.Requirement.VersionId ? "page" : null)">@($"v{version.Requirement.VersionNumber}") · @(version.Requirement.Status == RequirementStatus.InReview ? "In Review" : version.Requirement.Status.ToString())</MudLink>
+                        }
+                    </nav>
+                </details>
+            </div>
+        </div>
         <p>Type: @_requirement.Requirement.Type</p>
         @if (_requirement.Requirement.AreaId is null) { <p>Area: Unclassified</p> }
         else { <AreaDisplay Product="_product.InternalId" AreaId="_requirement.Requirement.AreaId" /> }
-        <p>@($"v{_requirement.Requirement.VersionNumber}") · Status: @(_requirement.Requirement.Status == RequirementStatus.InReview ? "In Review" : _requirement.Requirement.Status.ToString()) @(!_product.IsActive ? "(Product retired)" : "")</p>
+        @if (!_product.IsActive) { <p>Product retired</p> }
         @if (_requirement.Requirement.CreationReason is { } reason) { <p>Successor creation reason: @reason</p> }
-        <nav aria-label="Requirement versions">
-            @foreach (var version in _versions ?? [])
-            { <MudLink Href="@($"/requirements/details?id={Id}&version={version.Requirement.VersionId}")">@($"v{version.Requirement.VersionNumber}") · @(version.Requirement.Status == RequirementStatus.InReview ? "In Review" : version.Requirement.Status.ToString())</MudLink><span> </span> }
-        </nav>
         @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
-        <h3>Statement</h3><ProductMarkdownView Markdown="@_requirement.Requirement.Statement" />
-        <h3>Rationale</h3><p style="white-space:pre-wrap">@(_requirement.Requirement.Rationale ?? "Not provided")</p>
+        <section class="requirement-statement" aria-labelledby="requirement-statement-heading">
+            <h3 id="requirement-statement-heading">Statement</h3><ProductMarkdownView Markdown="@_requirement.Requirement.Statement" />
+            <h3>Rationale</h3><p style="white-space:pre-wrap">@(_requirement.Requirement.Rationale ?? "Not provided")</p>
+        </section>
         @if (_provenance is { } origin)
         {
             <h3>Derived from</h3>
@@ -37,7 +56,49 @@
             <h4>Source statement at copy time</h4><ProductMarkdownView Markdown="@origin.SourceStatement" />
             <p style="white-space:pre-wrap">Source rationale: @(origin.SourceRationale ?? "Not provided")</p>
         }
-        <h3>Review history</h3>
+    </MudPaper>
+    <div class="requirement-actions mt-4" role="group" aria-label="Requirement actions">
+        @if (_product.IsActive && IsLatest && _pending is null && _requirement.Requirement.Status == RequirementStatus.Draft)
+        {
+            <MudButton Href="@($"/requirements/edit?id={_requirement.Requirement.InternalId}")" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy">Edit</MudButton>
+        }
+        <MudButton Href="@($"/products/links?kind=requirement&id={_requirement.Requirement.InternalId}&version={_requirement.Requirement.VersionId}")">Manage links</MudButton>
+        <MudButton Href="@($"/requirements/derive?id={_requirement.Requirement.InternalId}&version={_requirement.Requirement.VersionId}")">Copy to another Product</MudButton>
+    </div>
+    @if (_product.IsActive && IsLatest && _pending is null)
+    {
+        <section class="requirement-review mt-6" aria-labelledby="requirement-review-heading">
+            <MudPaper Class="pa-4" Elevation="0">
+                <h3 id="requirement-review-heading">@(_requirement.Requirement.Status == RequirementStatus.Draft ? "Submit for review" : _requirement.Requirement.Status == RequirementStatus.InReview ? "Review decision" : "Change approved Requirement")</h3>
+                @if (_requirement.Requirement.Status == RequirementStatus.Approved)
+                {
+                    <MudTextField @bind-Value="_reason" Label="Change or reopening reason" Required="true" Disabled="_busy" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Variant="Variant.Outlined" Lines="2" Class="mt-4" Disabled="_busy" />
+                }
+            </MudPaper>
+            <div class="requirement-actions mt-4">
+                @if (_requirement.Requirement.Status == RequirementStatus.Draft)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("InReview"))'>Submit for review</MudButton>
+                }
+                else if (_requirement.Requirement.Status == RequirementStatus.InReview)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Draft"))'>Return to Draft</MudButton>
+                }
+                else
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="CreateSuccessor">Create successor Draft</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Reopen">Reopen to Draft</MudButton>
+                }
+            </div>
+        </section>
+    }
+    <section class="requirement-history mt-8" aria-labelledby="requirement-history-heading">
+        <h3 id="requirement-history-heading">Review history</h3>
         @if (_history is null) { <p role="status">Loading review history…</p> }
         else if (_history.Count == 0) { <p>No review decisions yet.</p> }
         else
@@ -54,34 +115,8 @@
                 </details>
             }
         }
-    </MudPaper>
-    <div class="mt-4">
-        <MudButton Href="@($"/products/links?kind=requirement&id={_requirement.Requirement.InternalId}&version={_requirement.Requirement.VersionId}")">Manage links</MudButton>
-        <MudButton Href="@($"/requirements/derive?id={_requirement.Requirement.InternalId}&version={_requirement.Requirement.VersionId}")">Copy to another Product</MudButton>
+    </section>
     </div>
-    @if (_product.IsActive && IsLatest && _pending is null)
-    {
-        <div class="mt-4">
-            @if (_requirement.Requirement.Status == RequirementStatus.Draft)
-            {
-                <MudButton Href="@($"/requirements/edit?id={_requirement.Requirement.InternalId}")" Disabled="_busy">Edit</MudButton>
-                <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Disabled="_busy" />
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("InReview"))'>Submit for review</MudButton>
-            }
-            else if (_requirement.Requirement.Status == RequirementStatus.InReview)
-            {
-                <MudTextField @bind-Value="_comment" Label="Review comment (optional)" Disabled="_busy" />
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Approved"))'>Approve</MudButton>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick='@(() => Review("Draft"))'>Return to Draft</MudButton>
-            }
-            else
-            {
-                <MudTextField @bind-Value="_reason" Label="Change or reopening reason" Required="true" Disabled="_busy" />
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="CreateSuccessor">Create successor Draft</MudButton>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="Reopen">Reopen to Draft</MudButton>
-            }
-        </div>
-    }
 }
 @code {
     [SupplyParameterFromQuery(Name = "id")] public Guid Id { get; set; }

@@ -18,22 +18,31 @@
 @if (_case is not null && _product is not null)
 {
     var value = _case.TestCase;
-    <p>@_product.Id – @_product.Name</p>
-    <h2>@value.Id – @value.Content.Title</h2>
-    @if (value.AreaId is null) { <p>Area: Unclassified</p> }
-    else { <AreaDisplay Product="_product.InternalId" AreaId="value.AreaId" /> }
-    <p>@($"v{value.VersionNumber}") · @Status(value.Status)</p>
-    @if (!_product.IsActive) { <p>This Test Case is read-only because its Product is retired.</p> }
-    @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
-    @if (_versions.Count > 1)
-    {
-        <nav aria-label="Other Test Case versions" class="test-case-versions">
-            <span>Other versions:</span>
-            @foreach (var version in _versions.Where(row => row.TestCase.VersionId != value.VersionId))
-            { <MudLink Href="@($"/test-cases/details?id={Id}&version={version.TestCase.VersionId}")">@($"v{version.TestCase.VersionNumber}") · @Status(version.TestCase.Status)</MudLink> }
-        </nav>
-    }
+    <p class="test-case-context" aria-label="Product context">@_product.Id · @_product.Name <span aria-hidden="true">/</span> Test Cases</p>
     <MudPaper Class="product-card pa-4" Elevation="0">
+        <div class="test-case-heading">
+            <div class="test-case-identity">
+                <p class="test-case-id">@value.Id</p>
+                <h2>@value.Content.Title</h2>
+            </div>
+            <div class="test-case-metadata">
+                <div class="test-case-badges">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Version @value.VersionNumber</MudChip>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Class="test-case-status">@Status(value.Status)</MudChip>
+                </div>
+                <details class="test-case-versions">
+                    <summary>Versions</summary>
+                    <nav aria-label="Test Case versions">
+                        @foreach (var version in _versions)
+                        { <MudLink Href="@($"/test-cases/details?id={Id}&version={version.TestCase.VersionId}")" aria-current="@(version.TestCase.VersionId == value.VersionId ? "page" : null)">@($"v{version.TestCase.VersionNumber}") · @Status(version.TestCase.Status)</MudLink> }
+                    </nav>
+                </details>
+            </div>
+        </div>
+        @if (value.AreaId is null) { <p>Area: Unclassified</p> }
+        else { <AreaDisplay Product="_product.InternalId" AreaId="value.AreaId" /> }
+        @if (!_product.IsActive) { <p>This Test Case is read-only because its Product is retired.</p> }
+        @if (!IsLatest) { <p>This earlier version is read-only because a newer version exists.</p> }
         @if (value.CreationReason is { } reason) { <p style="white-space:pre-wrap">Successor creation reason: @reason</p> }
         <section aria-label="Description" class="test-case-section"><h3 class="section-label">Description</h3><ProductMarkdownView Markdown="@value.Content.Description" /></section>
         <section aria-label="Preconditions" class="test-case-section"><h3 class="section-label">Preconditions</h3><ProductMarkdownView Markdown="@value.Content.Preconditions" /></section>

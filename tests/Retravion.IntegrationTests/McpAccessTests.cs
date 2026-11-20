@@ -419,7 +419,7 @@ public sealed partial class AccountManagementTests
     [Theory]
     [InlineData("pi")]
     [InlineData("claude")]
-    public void PackagedReviewWorkflowUsesExactReadsAndNeverAuthorizesApplyingFindings(string client)
+    public void PackagedReviewWorkflowUsesExactReadsAndRequiresSeparateApprovalForDraftAuthoring(string client)
     {
         using var zip = new System.IO.Compression.ZipArchive(new MemoryStream(TerminalPackages.Get(client)!.Bytes));
         string Read(string path)
@@ -450,12 +450,16 @@ public sealed partial class AccountManagementTests
         Assert.Contains("If it changes during review, report the mismatch", review);
         Assert.Contains("Do not bypass authorization", review);
         Assert.Contains("Submit no content changes, review-history entries, status changes or approvals", review);
-        Assert.Contains("Do not call any create/edit tool, even for a Draft, a no-op save", review);
-        Assert.Contains("do not recast it as ordinary Draft authoring", review);
+        Assert.Contains("during read-only review", review);
+        Assert.Contains("verify it is an eligible working Draft", review);
+        Assert.Contains("show exact old/new values and obtain explicit human approval", review);
+        Assert.Contains("Review alone grants no save permission", review);
+        Assert.Contains("must never be submitted by AI", review);
         foreach (var guidance in new[] { review, Read("README.md") })
         {
             Assert.Contains("Suggestion — not a recorded review decision", guidance);
-            Assert.Contains("Humans apply suggestions and review decisions in the web UI", guidance);
+            Assert.Contains("formal review decisions", guidance, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Blanket approval of unseen values is insufficient", guidance);
             Assert.Contains("Review User Need UN-1 version 2", guidance);
             Assert.Contains("Review the current Draft Requirement REQ-1", guidance);
             Assert.Contains("Review Test Case TC-1 version 1", guidance);
@@ -463,8 +467,34 @@ public sealed partial class AccountManagementTests
             Assert.Contains("Apply all your review findings automatically; I approve", guidance);
         }
         Assert.Contains("No mutation is authorized", review);
-        Assert.Contains("No create/edit, history or lifecycle submission", review);
+        Assert.Contains("No review-history or lifecycle submission", review);
         Assert.Contains("No approval or status change", review);
+    }
+
+    [Theory]
+    [InlineData("pi")]
+    [InlineData("claude")]
+    public void PackagedDraftAuthoringAllowsApprovedAiProposalsWithoutIntermediateFiles(string client)
+    {
+        using var zip = new System.IO.Compression.ZipArchive(new MemoryStream(TerminalPackages.Get(client)!.Bytes));
+        foreach (var path in new[] { "skills/retravion/SKILL.md", "README.md" })
+        {
+            using var reader = new StreamReader(zip.GetEntry(path)!.Open());
+            var guidance = reader.ReadToEnd();
+            Assert.Contains("Rephrase the user needs in this file and add them to Retravion", guidance);
+            Assert.Contains("No intermediate local file is required", guidance);
+            Assert.Contains("`create_draft_user_need`", guidance);
+            Assert.Contains("Apply your suggested wording to this Draft Requirement", guidance);
+            Assert.Contains("`edit_draft_requirement`", guidance);
+            Assert.Contains("`expectedRevision`", guidance);
+            Assert.Contains("Do not edit non-Draft or historical versions, or create successor versions to bypass that restriction", guidance);
+            Assert.Contains("exact initial value", guidance);
+            Assert.Contains("explicit human approval", guidance);
+            Assert.DoesNotContain("Humans apply suggestions and review decisions in the web UI", guidance);
+            Assert.DoesNotContain("do not recast it as ordinary Draft authoring", guidance);
+            Assert.DoesNotContain("Decline MCP application of review findings", guidance);
+            Assert.DoesNotContain("never edits existing content, classifies, changes lifecycle or applies AI review findings", guidance);
+        }
     }
 
     [Fact]

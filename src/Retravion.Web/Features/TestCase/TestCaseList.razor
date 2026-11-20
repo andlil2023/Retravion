@@ -15,14 +15,18 @@ else
 {
     <p>@_product!.Id – @_product.Name</p>
     @if (!_product.IsActive) { <p>Test Cases are read-only while this Product is retired.</p> }
-    <MudTextField T="string" @bind-Value="_search" Label="Search ID or title" Immediate="true" />
-    <MudSelect T="string" @bind-Value="_status" Label="Status filter">
-        <MudSelectItem Value="@("All")">All statuses</MudSelectItem>
-        <MudSelectItem Value="@("Draft")">Draft</MudSelectItem>
-        <MudSelectItem Value="@("InReview")">In Review</MudSelectItem>
-        <MudSelectItem Value="@("Approved")">Approved</MudSelectItem>
-    </MudSelect>
-    <AreaSelect Product="_product.InternalId" @bind-Value="_area" Filter="true" />
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" sm="4"><MudTextField T="string" @bind-Value="_search" Label="Search ID or title" Immediate="true" /></MudItem>
+        <MudItem xs="12" sm="4">
+            <MudSelect T="string" @bind-Value="_status" Label="Status filter">
+                <MudSelectItem Value="@("All")">All statuses</MudSelectItem>
+                <MudSelectItem Value="@("Draft")">Draft</MudSelectItem>
+                <MudSelectItem Value="@("InReview")">In Review</MudSelectItem>
+                <MudSelectItem Value="@("Approved")">Approved</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="4"><AreaSelect Product="_product.InternalId" @bind-Value="_area" Filter="true" /></MudItem>
+    </MudGrid>
     <MudTable Items="Filtered" Dense="true" Hover="true" Elevation="0" aria-label="Test Cases">
         <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Version</MudTh><MudTh>Status</MudTh></HeaderContent>
         <RowTemplate>

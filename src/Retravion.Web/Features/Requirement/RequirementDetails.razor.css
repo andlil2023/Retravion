@@ -1,0 +1,28 @@
+.requirement-details { min-width: 0; }
+.requirement-context { margin: 0 0 1rem; color: var(--mud-palette-text-secondary); font-size: .875rem; overflow-wrap: anywhere; }
+.requirement-context span { margin: 0 .4rem; }
+.requirement-heading { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .75rem 1.5rem; }
+.requirement-identity { flex: 1 1 26rem; min-width: 0; max-width: 48rem; }
+.requirement-id { color: var(--mud-palette-text-secondary); font-size: .875rem; font-weight: 600; margin: 0 0 .375rem; overflow-wrap: anywhere; }
+.requirement-identity h2 { margin: 0; font-size: 1.3rem; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.requirement-metadata { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .5rem; }
+.requirement-badges { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
+.requirement-metadata ::deep .mud-chip { margin: 0; }
+.requirement-metadata ::deep .requirement-status { background: var(--mud-palette-primary-hover); }
+.requirement-versions { font-size: .875rem; color: var(--mud-palette-primary); }
+.requirement-versions summary { cursor: pointer; min-height: 44px; align-content: center; }
+.requirement-versions summary:focus-visible, .requirement-history summary:focus-visible { outline: 2px solid var(--mud-palette-primary); outline-offset: 3px; }
+.requirement-versions nav { display: flex; flex-direction: column; gap: .5rem; padding: .5rem 0; }
+.requirement-statement { margin-top: 1.25rem; max-width: 85ch; }
+.requirement-details h3 { font-size: 1rem; margin: 0 0 .75rem; }
+.requirement-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.requirement-actions ::deep .mud-button-root { min-height: 44px; }
+.requirement-review { max-width: 47.5rem; }
+.requirement-history { border-top: 1px solid var(--mud-palette-divider); padding-top: 1.5rem; }
+.requirement-history > p { color: var(--mud-palette-text-secondary); font-size: .875rem; }
+.requirement-history details { border-bottom: 1px solid var(--mud-palette-divider); padding: .75rem 0; overflow-wrap: anywhere; }
+.requirement-history summary { cursor: pointer; min-height: 44px; align-content: center; }
+@media (max-width: 540px) {
+    .requirement-metadata { width: 100%; }
+    .requirement-actions ::deep .mud-button-root { flex: 1 1 auto; }
+}
