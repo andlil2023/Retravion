@@ -128,7 +128,27 @@ a, button, input { -webkit-tap-highlight-color: transparent; }
 .product-navigation-item { overflow-wrap: anywhere; font-size: 13px; text-decoration: none; }
 .product-navigation-item .mud-icon-root { flex-shrink: 0; }
 .product-navigation-item span { min-width: 0; }
-.product-navigation-child { padding-left: 28px; }
+.product-navigation-child { padding-left: 28px; justify-content: flex-start; }
+.product-navigation-development { position: relative; }
+.product-navigation-development > .product-navigation-development-indicator {
+    /* Center in the existing 28px gutter without consuming space in the flex row. */
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--mud-palette-drawer-text);
+}
+.product-navigation-specifications {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 10px 12px 10px 48px;
+    /* The catalog's disabled action color is for content surfaces, not the dark drawer. */
+    color: var(--sidebar-muted);
+    color: color-mix(in srgb, var(--mud-palette-drawer-text) 65%, var(--mud-palette-drawer-background));
+}
+.product-navigation-specifications .mud-icon-root { font-size: 21px; }
 .product-navigation-message { padding: 0 12px; color: #e5edf3; font-size: 13px; }
 .product-navigation-retry { padding: 0 12px; }
 .sidebar-footer { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; margin: auto 12px 0; padding-top: 32px; font-size: 12px; }

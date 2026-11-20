@@ -184,6 +184,102 @@ pwsh -NoProfile -File tests/Deployment.Tests.ps1
 
 These checks mock external operations.
 
+### Navigation UI evidence (pi-factory)
+
+From the root of a reviewed checkout containing per-product Development/Specifications
+navigation, run these named checks:
+
+| Check name | Command |
+| --- | --- |
+| `navigation-ui` | `node tests/Navigation.UiEvidence.mjs --development --verify` |
+| `ui-evidence-unit` | `node --test tests/Navigation.UiEvidence.Tests.mjs` |
+
+The browser check needs Node 24+, the SDK in `global.json`, a running local Podman
+machine and installed Chromium. On Windows it finds Edge or Chrome at their standard
+paths; elsewhere set `RETRAVION_TEST_BROWSER` to the absolute executable path. It
+builds the real app, starts PostgreSQL 17 and the Development app on ephemeral IPv4
+loopback ports, signs in with generated credentials, completes normal password
+replacement, and creates two synthetic products through the UI. No existing app URL,
+production credentials or database URL are needed or accepted. `--verify` needs no
+`FACTORY_*` context, writes no manifest or published artifacts and exits zero only if
+all required assertions and eight state-specific PNG/AX pairs succeed and cleanup completes.
+
+For **a new factory run** against that target, select the prepared
+`.factory/config.dashboard-evidence.json`, keep the trusted named commands above and
+designate T001 for rendered UI collection. The operator must explicitly authorize
+synthetic developer-review screenshots for this run. Confirm the selected
+configuration has this `uiEvidence` setting before starting:
+
+```json
+{
+  "uiEvidence": {
+    "command": {
+      "executable": "node",
+      "args": ["tests/Navigation.UiEvidence.mjs", "--development"],
+      "timeoutMs": 480000
+    },
+    "syntheticDeveloperReviewAuthorized": true
+  }
+}
+```
+
+Use this exact `criterionChecks` mapping in the new task plan:
+
+```json
+{
+  "criterionChecks": [
+    { "criterion": 0, "checks": ["navigation-ui"] },
+    { "criterion": 1, "checks": ["navigation-ui", "ui-evidence-unit"] },
+    { "criterion": 2, "checks": ["navigation-ui", "ui-evidence-unit"] },
+    { "criterion": 3, "checks": ["navigation-ui", "ui-evidence-unit"] }
+  ]
+}
+```
+
+The factory invokes the collector separately with `FACTORY_TASK_ID`, `FACTORY_ATTEMPT`,
+`FACTORY_SOURCE_FINGERPRINT` and a fresh external `FACTORY_UI_EVIDENCE_DIRECTORY`.
+On success the manifest retains that identity, the detailed assertions, and one
+passing aggregate check named `navigation-ui`. All eight `imageLinks` use
+`checkName: "navigation-ui"` and identify UI-A, the native disclosure state, theme,
+viewport width, and synthetic navigation context. Each PNG has a same-stem
+`.accessibility.json` companion containing the Chromium AX tree, its capture context,
+and the matching PNG's SHA-256 digest:
+
+| Theme / viewport | Collapsed | Expanded |
+| --- | --- | --- |
+| Light / 1280px | `navigation-light-1280-collapsed.png` | `navigation-light-1280-expanded.png` |
+| Light / 390px | `navigation-light-390-collapsed.png` | `navigation-light-390-expanded.png` |
+| Dark / 1280px | `navigation-dark-1280-collapsed.png` | `navigation-dark-1280-expanded.png` |
+| Dark / 390px | `navigation-dark-390-collapsed.png` | `navigation-dark-390-expanded.png` |
+
+Each image is a native-size Chromium crop shorter than 250px, showing Revisions
+and Development inside the drawer, with disabled Specifications visible only in
+the expanded state. No crop shows main content; the matching AX tree covers the
+synthetic details page, not just the crop. The collector checks both products'
+alignment in both states, but captures only UI-A. No image links target
+`ui-evidence-unit` or individual assertions. Failed assertions or incomplete,
+duplicate or invalid captures fail `navigation-ui` without publishing success
+links, even after earlier captures succeeded. Development PNG validation checks
+Chromium's non-interlaced 8-bit RGB encoding, chunk checksums and scanlines,
+with decompression bounded by the crop dimensions. Operational or cleanup errors
+exit nonzero. Without `--development`, the collector still runs only its generic
+product-navigation checks and collects four full-viewport pairs, not this matrix.
+
+Standalone verification does not supply collector evidence. Confirm the current
+attempt's validated images actually render in the dashboard Evidence report, and keep
+a vision-capable UI reviewer enabled. Do not edit earlier runs, their pinned
+configuration or run state to claim new evidence.
+
+The images and mouse/keyboard, visibility, selection, disabled Specifications,
+contrast and AX assertions apply only to the exercised synthetic navigation states.
+They do not certify accessibility, replace assistive-technology user testing or
+cover other pages. Neither mode records authentication screens, passwords or raw
+provider output. Both remove the owned app,
+browser, database container and external scratch directory on ordinary success and
+failure. If forcibly terminated, inspect only the invocation's
+`retravion-ui-evidence-*` container and `retravion-ui-scenario-*` scratch directory;
+never prune or stop unrelated review resources.
+
 ### PostgreSQL integration tests
 
 Local development and agent database tests must use a disposable PostgreSQL Podman
