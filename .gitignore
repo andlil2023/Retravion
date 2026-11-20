@@ -27,3 +27,9 @@ artifacts/
 **/appsettings.Local.json
 .DS_Store
 Thumbs.db
+
+# Factory files
+.factory/
+node_modules/
+package-lock.json
+package.json
