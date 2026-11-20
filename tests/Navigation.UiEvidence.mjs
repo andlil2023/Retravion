@@ -1,10 +1,10 @@
-// Trusted, opt-in pi-factory collector. Run from the TARGET repository root.
+// Standalone navigation verification and opt-in pi-factory collection. Run from the target repository root.
 // Node 24+, .NET SDK from global.json, Podman and Edge/Chrome; no npm packages.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,10 +12,42 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const delay = ms => new Promise(done => setTimeout(done, ms));
+const aggregateName = 'navigation-ui';
+const productChecks = [
+    'Two isolated products appear in product navigation',
+    'Product mouse toggle is independent and preserves links and location',
+    'Product keyboard toggle updates native expanded state and visibility'
+];
+const developmentChecks = [
+    'Development starts collapsed for both products',
+    'Mouse toggles only the targeted Development node and preserves navigation',
+    'Enter and Space toggle the native button with matching accessible state',
+    'Specifications is disabled, not a link or focus stop, and does not navigate'
+];
+const viewports = ['light-1280', 'light-390', 'dark-1280', 'dark-390'];
+const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const layoutCheck = name => `Navigation is visible without horizontal overflow (${name})`;
+const styleCheck = name => `Specifications has readable theme-derived disabled styling (${name})`;
+const treeCheck = name => `Accessibility tree exposes expanded Development and disabled Specifications (${name})`;
+
+export function scenarioVerdict({ checks, captures }, development = true) {
+    const required = [...productChecks, ...(development ? developmentChecks : []),
+        ...viewports.flatMap(name => development ? [layoutCheck(name), styleCheck(name), treeCheck(name)] : [layoutCheck(name)])];
+    const passed = checks.length === required.length && required.every(name =>
+        checks.some(check => check.name === name && check.status === 'passed')) &&
+        captures.size === viewports.length && viewports.every(name => {
+            const pair = captures.get(name);
+            return Buffer.isBuffer(pair?.image) && pair.image.length > pngSignature.length &&
+                pair.image.subarray(0, pngSignature.length).equals(pngSignature) && typeof pair.tree === 'string' && pair.tree.length > 0;
+        });
+    return { kind: 'interaction', name: development ? aggregateName : 'product-navigation', status: passed ? 'passed' : 'failed',
+        ...(passed ? {} : { details: 'The scenario did not pass every required check and complete all four capture pairs.' }) };
+}
+
 const limitations = [
     'Scoped to product navigation, not other changed pages or comprehensive accessibility compliance.',
     'Accessibility-tree and native keyboard checks do not replace assistive-technology user testing.',
-    'Forced termination of the collector can prevent cleanup; inspect owned resources after interruption.'
+    'Forced termination can prevent cleanup; inspect owned resources after interruption.'
 ];
 
 export function factoryContext(env) {
@@ -86,9 +118,12 @@ async function stop(child) {
     assert.ok(child.exitCode !== null || child.signalCode !== null, 'Owned process did not stop.');
 }
 
+class BrowserProtocolError extends Error {}
+
 async function openBrowser(executable, profile) {
     const child = spawn(executable, ['--headless=new', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
-        `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore', windowsHide: true });
+        `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--no-proxy-server', 'about:blank'],
+    { stdio: 'ignore', windowsHide: true });
     let startupError = false;
     child.on('error', () => { startupError = true; });
     let socket;
@@ -96,13 +131,16 @@ async function openBrowser(executable, profile) {
         let port;
         await waitFor(async () => {
             assert.ok(!startupError && child.exitCode === null, 'Browser did not start.');
-            try { port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]; return /^\d+$/.test(port); }
+            try { port = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0].trim(); return /^\d+$/.test(port); }
             catch { return false; }
         }, 'browser debugging port');
-        const response = await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT', signal: AbortSignal.timeout(5000) });
+        const response = await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,
+            { method: 'PUT', redirect: 'error', signal: AbortSignal.timeout(5000) });
         assert.ok(response.ok, 'Browser target unavailable.');
         const target = await response.json();
-        socket = new WebSocket(target.webSocketDebuggerUrl);
+        const socketUrl = new URL(target.webSocketDebuggerUrl);
+        assert.ok(socketUrl.origin === `ws://127.0.0.1:${port}`, 'Unexpected browser debugging endpoint.');
+        socket = new WebSocket(socketUrl);
         let nextId = 0, connectedFrames = 0;
         const pending = new Map(), transports = new Set();
         socket.addEventListener('message', ({ data }) => {
@@ -112,10 +150,10 @@ async function openBrowser(executable, profile) {
             const item = pending.get(message.id);
             if (!item) return;
             pending.delete(message.id); clearTimeout(item.timer);
-            if (message.error) item.reject(new Error('Browser protocol command failed.')); else item.resolve(message.result);
+            if (message.error) item.reject(new BrowserProtocolError('Browser protocol command failed.')); else item.resolve(message.result);
         });
         socket.addEventListener('close', () => {
-            for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error('Browser connection closed.')); }
+            for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new BrowserProtocolError('Browser connection closed.')); }
             pending.clear();
         });
         await new Promise((done, reject) => {
@@ -125,9 +163,11 @@ async function openBrowser(executable, profile) {
         });
         const send = (method, params = {}) => new Promise((done, reject) => {
             const id = ++nextId;
-            const timer = setTimeout(() => { pending.delete(id); reject(new Error('Browser protocol command timed out.')); }, 15_000);
+            if (socket.readyState !== WebSocket.OPEN) { reject(new BrowserProtocolError('Browser connection closed.')); return; }
+            const timer = setTimeout(() => { pending.delete(id); reject(new BrowserProtocolError('Browser protocol command timed out.')); }, 15_000);
             pending.set(id, { resolve: done, reject, timer });
-            socket.send(JSON.stringify({ id, method, params }));
+            try { socket.send(JSON.stringify({ id, method, params })); }
+            catch { pending.delete(id); clearTimeout(timer); reject(new BrowserProtocolError('Browser protocol send failed.')); }
         });
         const evaluate = async expression => {
             const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
@@ -139,84 +179,123 @@ async function openBrowser(executable, profile) {
     } catch (error) { socket?.close(); await stop(child); throw error; }
 }
 
-export async function collect({ env = process.env, repository = process.cwd(), development = false } = {}) {
-    const context = factoryContext(env);
+async function repositoryRoot(repository) {
     const repo = await realpath(repository);
     assert.ok(existsSync(join(repo, 'Retravion.slnx')), 'Run from a Retravion repository root.');
-    await mkdir(context.directory, { recursive: true });
-    const output = await realpath(context.directory);
-    assert.ok(!isInside(repo, output), 'Evidence must be outside the target worktree.');
-    assert.equal((await readdir(output)).length, 0, 'Use a fresh, empty evidence directory.');
+    return repo;
+}
+
+async function withScenario({ repo, env, development, scenario }) {
+    const tempRoot = await realpath(tmpdir());
+    assert.ok(!isInside(repo, tempRoot), 'Temporary files must be outside the target worktree.');
+    const scratch = await mkdtemp(join(tempRoot, 'retravion-ui-scenario-'));
+    const owned = [];
+    const own = (name, dispose) => owned.push({ name, dispose });
+    own('temporary files', () => rm(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
+    let interrupted = false;
+    const onSignal = () => { interrupted = true; };
+    const checkpoint = () => { if (interrupted) throw new Error('Navigation scenario interrupted.'); };
+    process.on('SIGINT', onSignal); process.on('SIGTERM', onSignal);
+    try {
+        return await scenario({ repo, env, development, scratch, own, checkpoint });
+    } finally {
+        const failures = [];
+        try {
+            for (const { name, dispose } of owned.reverse()) {
+                try { await dispose(); } catch { failures.push(name); }
+            }
+        } finally {
+            process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal);
+        }
+        if (failures.length) throw new Error(`Cleanup failed (${failures.join(', ')}).`);
+        checkpoint();
+    }
+}
+
+class ScenarioAssertionFailure extends Error {}
+
+async function runScenario({ env, repo, development, scratch, own, checkpoint }) {
     const executable = env.RETRAVION_TEST_BROWSER || [
         'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
         'C:/Program Files/Google/Chrome/Application/chrome.exe'
     ].find(existsSync);
     assert.ok(executable && existsSync(executable), 'Set RETRAVION_TEST_BROWSER to an installed Chromium executable.');
-    const buildId = await command('git', ['rev-parse', 'HEAD'], { cwd: repo });
     const id = randomUUID().replaceAll('-', '');
     const container = `retravion-ui-evidence-${id}`;
     const username = `ui-${id.slice(0, 12)}`;
     const password = () => `Aa1!${randomUUID().replaceAll('-', '').slice(0, 20)}`;
     const databasePassword = password(), initialPassword = password(), replacementPassword = password();
-    const profile = await mkdtemp(join(tmpdir(), 'retravion-ui-browser-'));
-    let app, browser, cleanupPromise;
-    const cleanup = () => cleanupPromise ??= (async () => {
-        const failures = [];
-        if (browser) {
-            try { await browser.send('Browser.close'); } catch { /* The protocol may close before its reply. */ }
-            browser.socket.close();
-            try { await stop(browser.child); } catch { failures.push('browser'); }
-        }
-        try { await stop(app); } catch { failures.push('application'); }
-        // The random name is ours even if podman lost the create acknowledgement.
-        try { await command('podman', ['rm', '--force', '--ignore', container]); } catch { failures.push('database'); }
-        try { await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { failures.push('profile'); }
-        if (failures.length) throw new Error(`Cleanup failed (${failures.join(', ')}); inspect owned container ${container}.`);
-    })();
-    const onSignal = () => { cleanup().then(() => process.exit(1), () => process.exit(1)); };
-    process.once('SIGINT', onSignal); process.once('SIGTERM', onSignal);
-    const checks = [], artifacts = [], imageLinks = [];
+    const profile = join(scratch, 'browser');
+    const build = join(scratch, 'build');
+    const checks = [], captures = new Map();
     const check = async (kind, name, action) => {
+        checkpoint();
         try { await action(); checks.push({ kind, name, status: 'passed' }); }
         catch (error) {
+            if (error instanceof BrowserProtocolError) throw error;
             // Assertions below contain only fixed expectations and synthetic navigation data, never credentials.
             checks.push({ kind, name, status: 'failed', details: error.message.slice(0, 1000) });
             console.log(`Navigation assertion failed: ${name}: ${error.message.slice(0, 1000)}`);
-            throw new Error(`Check failed: ${name}.`);
+            throw new ScenarioAssertionFailure();
         }
     };
-    let operationalFailure, scenarioFailure;
     try {
-        console.log(`Starting isolated navigation evidence environment (${container}).`);
-        await command('dotnet', ['build', 'src/Retravion.Web/Retravion.Web.csproj', '--configuration', 'Release'], { cwd: repo, timeout: 180_000 });
-        await command('podman', ['run', '--detach', '--rm', '--name', container, '--env', 'POSTGRES_PASSWORD', '--publish', '127.0.0.1::5432', 'postgres:17'],
-            { env: { ...env, POSTGRES_PASSWORD: databasePassword } });
+        console.log(`Starting isolated navigation environment (${container}).`);
+        const tempEnv = { TMP: scratch, TEMP: scratch, TMPDIR: scratch };
+        await command('dotnet', ['build', 'src/Retravion.Web/Retravion.Web.csproj', '--configuration', 'Release',
+            '--disable-build-servers', '--artifacts-path', build], { cwd: repo, env: { ...env, ...tempEnv }, timeout: 180_000 });
+        checkpoint();
+        const podmanEnv = { ...env };
+        for (const key of Object.keys(podmanEnv)) {
+            if (/^(CONTAINER_HOST|CONTAINER_CONNECTION|DOCKER_HOST)$/i.test(key)) delete podmanEnv[key];
+        }
+        const podman = (args, options = {}) => command('podman', args, { env: podmanEnv, ...options });
+        // The name is ours even if Podman loses the create acknowledgement.
+        own(`database ${container}`, () => podman(['rm', '--force', '--ignore', '--volumes', container]));
+        await podman(['run', '--detach', '--rm', '--name', container, '--env', 'POSTGRES_PASSWORD', '--publish', '127.0.0.1::5432', 'postgres:17'],
+            { env: { ...podmanEnv, POSTGRES_PASSWORD: databasePassword } });
         await waitFor(async () => {
-            try { await command('podman', ['exec', container, 'pg_isready', '-U', 'postgres'], { timeout: 5000 }); return true; }
+            checkpoint();
+            try { await podman(['exec', container, 'pg_isready', '-U', 'postgres'], { timeout: 5000 }); return true; }
             catch { return false; }
         }, 'disposable PostgreSQL readiness', 60_000);
-        const binding = await command('podman', ['port', container, '5432/tcp']);
+        const binding = await podman(['port', container, '5432/tcp']);
         assert.match(binding, /^127\.0\.0\.1:\d+$/, 'Unexpected PostgreSQL port binding.');
         const connection = `Host=127.0.0.1;Port=${binding.split(':')[1]};Database=postgres;Username=postgres;Password=${databasePassword}`;
-        const appEnv = { ...env, DOTNET_ENVIRONMENT: 'Production', ASPNETCORE_ENVIRONMENT: 'Production',
+        const environment = development ? 'Development' : 'Production';
+        // Only inherit OS/runtime discovery settings, not external app, hosting or database configuration.
+        const systemEnv = Object.fromEntries(Object.entries(env).filter(([key]) =>
+            /^(PATH|SystemRoot|SystemDrive|WINDIR|ProgramData|ProgramFiles(\(x86\))?|DOTNET_ROOT(_(X64|ARM64|X86))?|LANG)$/i.test(key)));
+        // Keep application profile files (including cookie-protection keys) with the disposable app.
+        const appEnv = { ...systemEnv, ...tempEnv, HOME: scratch, USERPROFILE: scratch, LOCALAPPDATA: scratch, APPDATA: scratch,
+            DOTNET_ENVIRONMENT: environment, ASPNETCORE_ENVIRONMENT: environment,
             ConnectionStrings__DefaultConnection: connection, InitialAdmin__Username: username, InitialAdmin__Password: initialPassword,
             Logging__LogLevel__Default: 'Warning', 'Logging__LogLevel__Microsoft.Hosting.Lifetime': 'Information' };
-        // Launch the built app directly, not dotnet run, so the owned process is the server.
-        app = spawn('dotnet', [join(repo, 'src/Retravion.Web/bin/Release/net10.0/Retravion.Web.dll'),
-            '--contentRoot', join(repo, 'src/Retravion.Web'), '--urls', 'http://127.0.0.1:0'],
-        { cwd: repo, env: appEnv, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+        checkpoint();
+        // Launch the built app directly. Use the built static asset manifests and source webroot,
+        // but don't load local appsettings overrides from the checkout.
+        const app = spawn('dotnet', [join(build, 'bin/Retravion.Web/release/Retravion.Web.dll'),
+            '--contentRoot', scratch, '--webroot', join(repo, 'src/Retravion.Web/wwwroot'), '--urls', 'http://127.0.0.1:0'],
+        { cwd: scratch, env: appEnv, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+        own('application', () => stop(app));
         let address, startupError = false, startupOutput = '';
         app.on('error', () => { startupError = true; });
         app.stdout.on('data', bytes => {
+            if (address) return; // Drain stdout without buffering it after obtaining the loopback address.
             startupOutput = (startupOutput + bytes.toString()).slice(-8192);
-            address = startupOutput.match(/Now listening on: (http:\/\/127\.0\.0\.1:\d+)/)?.[1] ?? address;
+            address = startupOutput.match(/Now listening on: (http:\/\/127\.0\.0\.1:\d+)\s/)?.[1];
         });
         await waitFor(() => {
+            checkpoint();
             assert.ok(!startupError && app.exitCode === null, 'Application did not start.');
             return address;
         }, 'isolated application readiness', 60_000);
         startupOutput = '';
-        browser = await openBrowser(executable, profile);
+        const browser = await openBrowser(executable, profile);
+        own('browser', async () => {
+            try { await browser.send('Browser.close'); } catch { /* The protocol may close before its reply. */ }
+            try { browser.socket.close(); } finally { await stop(browser.child); }
+        });
         const { send, evaluate } = browser;
         await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
         const waitExpression = (expression, description) => waitFor(() => evaluate(expression), description);
@@ -277,12 +356,7 @@ export async function collect({ env = process.env, repository = process.cwd(), d
             await waitExpression("Boolean(document.querySelector('.mud-popover-open .mud-list-item'))", 'product kind options');
             await click('.mud-popover-open .mud-list-item');
             await click('button[form="create-product-form"][type="submit"]');
-            try { await waitExpression(`location.pathname === '/products/details' && new URLSearchParams(location.search).get('id') === ${JSON.stringify(product)}`, 'product creation'); }
-            catch {
-                const image = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-                await writeFile(join(output, 'product-setup-failure.png'), Buffer.from(image.data, 'base64'));
-                throw new Error('Product creation did not reach its details page; inspect product-setup-failure.png.');
-            }
+            await waitExpression(`location.pathname === '/products/details' && new URLSearchParams(location.search).get('id') === ${JSON.stringify(product)}`, 'product creation');
         }
         await navigate('/products/details?id=UI-A', true);
         const productGroups = '[id^="product-navigation-children-"]';
@@ -294,12 +368,12 @@ export async function collect({ env = process.env, repository = process.cwd(), d
             nodes:[...document.querySelectorAll(${JSON.stringify(developmentButtons)})].map(e=>({
                 id:e.getAttribute('aria-controls'), expanded:e.getAttribute('aria-expanded'), hidden:document.getElementById(e.getAttribute('aria-controls')).hidden }))
         }))()`);
-        try {
-            await check('interaction', 'Two isolated products appear in product navigation', async () => {
+        {
+            await check('interaction', productChecks[0], async () => {
                 assert.equal(await evaluate(`document.querySelectorAll(${JSON.stringify(productGroups)}).length`), 2);
             });
             const parentButton = 'button[aria-controls="product-navigation-children-UI-A"]';
-            await check('interaction', 'Product mouse toggle is independent and preserves links and location', async () => {
+            await check('interaction', productChecks[1], async () => {
                 const before = await state();
                 await click(parentButton);
                 await waitFor(async () => (await state()).parents[0].hidden, 'product collapse');
@@ -308,7 +382,7 @@ export async function collect({ env = process.env, repository = process.cwd(), d
                 assert.deepEqual(after.links, before.links); assert.equal(after.url, before.url);
                 assert.equal(await evaluate(`document.querySelector(${JSON.stringify(parentButton)}).getAttribute('aria-expanded')`), 'false');
             });
-            await check('accessibility', 'Product keyboard toggle updates native expanded state and visibility', async () => {
+            await check('accessibility', productChecks[2], async () => {
                 await evaluate(`document.querySelector(${JSON.stringify(parentButton)}).focus()`);
                 await key('Enter', 13);
                 await waitFor(async () => !(await state()).parents[0].hidden, 'keyboard product expansion');
@@ -320,21 +394,21 @@ export async function collect({ env = process.env, repository = process.cwd(), d
                 await waitFor(async () => !(await state()).parents[0].hidden, 'restore product expansion');
             });
             if (development) {
-                await check('interaction', 'Development starts collapsed for both products', async () => {
+                await check('interaction', developmentChecks[0], async () => {
                     const initial = await state(); assert.equal(initial.nodes.length, 2);
                     assert.ok(initial.nodes.every(node => node.expanded === 'false' && node.hidden));
                 });
                 const before = await state();
                 const first = `${developmentButtons}:first-of-type`;
                 // Each Development button is the only direct button in its product child group.
-                await check('interaction', 'Mouse toggles only the targeted Development node and preserves navigation', async () => {
+                await check('interaction', developmentChecks[1], async () => {
                     await click(first);
                     await waitFor(async () => (await state()).nodes[0].expanded === 'true', 'Development expansion');
                     const after = await state();
                     assert.deepEqual(after.parents, before.parents); assert.deepEqual(after.links, before.links); assert.equal(after.url, before.url);
                     assert.equal(after.nodes[0].hidden, false); assert.equal(after.nodes[1].expanded, 'false'); assert.equal(after.nodes[1].hidden, true);
                 });
-                await check('accessibility', 'Enter and Space toggle the native button with matching accessible state', async () => {
+                await check('accessibility', developmentChecks[2], async () => {
                     await evaluate(`document.querySelector(${JSON.stringify(first)}).focus()`);
                     assert.equal(await evaluate(`document.activeElement.matches(${JSON.stringify(first)})`), true);
                     await key('Enter', 13);
@@ -345,7 +419,7 @@ export async function collect({ env = process.env, repository = process.cwd(), d
                     assert.equal((await state()).nodes[0].hidden, false);
                     assert.equal((await state()).nodes[1].expanded, 'false');
                 });
-                await check('accessibility', 'Specifications is disabled, not a link or focus stop, and does not navigate', async () => {
+                await check('accessibility', developmentChecks[3], async () => {
                     const label = await evaluate(`(() => { const e=document.querySelector('.product-navigation-specifications'); return {
                         text:e?.textContent.trim(), disabled:e?.getAttribute('aria-disabled'), tabIndex:e?.tabIndex,
                         href:e?.getAttribute('href'), interactive:e?.matches('a,button,input,select,textarea,[contenteditable="true"]'),
@@ -372,12 +446,12 @@ export async function collect({ env = process.env, repository = process.cwd(), d
                     // Let drawer transitions finish before measuring and taking evidence.
                     await delay(350);
                     const name = `${dark ? 'dark' : 'light'}-${width}`;
-                    await check('accessibility', `Navigation is visible without horizontal overflow (${name})`, async () => {
+                    await check('accessibility', layoutCheck(name), async () => {
                         const layout = await evaluate(`(() => {const r=document.querySelector('#app-navigation').getBoundingClientRect();
                             return { left:r.left, right:r.right, width:r.width, overflow:document.documentElement.scrollWidth>innerWidth };})()`);
                         assert.ok(layout.left >= -1 && layout.right <= width + 1 && layout.width > 0); assert.equal(layout.overflow, false);
                     });
-                    if (development) await check('accessibility', `Specifications has readable theme-derived disabled styling (${name})`, async () => {
+                    if (development) await check('accessibility', styleCheck(name), async () => {
                         const colors = await evaluate(`(() => { const e=document.querySelector('.product-navigation-specifications'),
                             s=getComputedStyle(e), side=getComputedStyle(document.querySelector('#app-navigation'));
                             const canvas=document.createElement('canvas'), c=canvas.getContext('2d');
@@ -390,51 +464,86 @@ export async function collect({ env = process.env, repository = process.cwd(), d
                         assert.notDeepEqual(colors.foreground, colors.link); assert.ok(colors.rect.width > 0 && colors.rect.height > 0);
                         assert.notEqual(colors.cursor, 'pointer');
                     });
-                    const screenshot = `navigation-${name}.png`, tree = `navigation-${name}.accessibility.json`;
+                    assert.equal(await evaluate(`location.href === ${JSON.stringify(address + '/products/details?id=UI-A')}`), true,
+                        'Only the authenticated synthetic product details page may be captured.');
                     const image = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-                    await writeFile(join(output, screenshot), Buffer.from(image.data, 'base64'));
                     const accessibility = await send('Accessibility.getFullAXTree');
                     assert.ok(accessibility.nodes.length > 0, 'Accessibility tree is empty.');
-                    if (development) await check('accessibility', `Accessibility tree exposes expanded Development and disabled Specifications (${name})`, async () => {
+                    if (development) await check('accessibility', treeCheck(name), async () => {
                         assert.ok(accessibility.nodes.some(node => node.role?.value === 'button' && node.name?.value.startsWith('Development for UI-A') &&
                             node.properties?.some(property => property.name === 'expanded' && property.value.value === true)));
                         assert.ok(hasDisabledText(accessibility.nodes, 'Specifications'), 'Specifications text must belong to an exposed disabled node.');
                     });
-                    await writeFile(join(output, tree), JSON.stringify(accessibility, null, 2));
-                    artifacts.push({ kind: 'screenshot', path: screenshot }, { kind: 'accessibility-tree', path: tree });
-                    imageLinks.push({ checkName: development ? `Specifications has readable theme-derived disabled styling (${name})` : `Navigation is visible without horizontal overflow (${name})`,
-                        screenshotPath: screenshot, caption: `Authenticated product navigation, ${dark ? 'dark' : 'light'} theme, ${width}px; synthetic test products only.` });
+                    captures.set(name, { image: Buffer.from(image.data, 'base64'), tree: JSON.stringify(accessibility, null, 2) });
                 }
             }
-        } catch (error) {
-            if (!checks.some(item => item.status === 'failed')) throw error;
-            scenarioFailure = error;
-            // Preserve the actual failed page too; do not turn an assertion into a missing-artifact error.
-            const image = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-            await writeFile(join(output, 'navigation-failure.png'), Buffer.from(image.data, 'base64'));
-            await writeFile(join(output, 'navigation-failure.accessibility.json'), JSON.stringify(await send('Accessibility.getFullAXTree'), null, 2));
-            artifacts.push({ kind: 'screenshot', path: 'navigation-failure.png' }, { kind: 'accessibility-tree', path: 'navigation-failure.accessibility.json' });
         }
-    } catch (error) { operationalFailure = error; }
-    finally {
-        try { await cleanup(); } catch (error) { operationalFailure ??= error; }
-        process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal);
+    } catch (error) {
+        if (!(error instanceof ScenarioAssertionFailure)) throw error;
     }
-    if (operationalFailure) throw operationalFailure;
-    // Failed assertions are a valid failed-evidence manifest, not a collector crash.
-    const manifest = { version: 1, taskId: context.taskId, attempt: context.attempt, capturedAt: new Date().toISOString(),
-        sourceFingerprint: context.sourceFingerprint, application: { framework: 'Blazor Server / Chromium', buildId: `${buildId}:${context.sourceFingerprint}` },
-        checks, artifacts, imageLinks, limitations: [...limitations, ...(!development ? ['Development-specific checks were not requested.'] : [])] };
-    await writeFile(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-    console.log(`Navigation evidence ${scenarioFailure ? 'contains failed checks' : 'passed'}; isolated resources cleaned up.`);
-    return manifest;
+    return { checks, captures };
+}
+
+export async function verify({ env = process.env, repository = process.cwd(), scenario = runScenario } = {}) {
+    const repo = await repositoryRoot(repository);
+    const result = await withScenario({ repo, env, development: true, scenario });
+    const verdict = scenarioVerdict(result);
+    console.log(`${verdict.name}: ${verdict.status}; isolated resources cleaned up.`);
+    return verdict.status === 'passed' ? 0 : 1;
+}
+
+export async function collect({ env = process.env, repository = process.cwd(), development = false, scenario = runScenario } = {}) {
+    const context = factoryContext(env);
+    const repo = await repositoryRoot(repository);
+    // The factory creates this directory. Resolve it before creating any output.
+    const output = await realpath(context.directory);
+    assert.ok(!isInside(repo, output), 'Evidence must be outside the target worktree.');
+    assert.equal((await readdir(output)).length, 0, 'Use a fresh, empty evidence directory.');
+    const buildId = await command('git', ['rev-parse', 'HEAD'], { cwd: repo });
+    const { checks, captures } = await withScenario({ repo, env, development, scenario });
+    const verdict = scenarioVerdict({ checks, captures }, development);
+    const artifacts = [], imageLinks = [], created = [];
+    const write = async (path, content) => {
+        const file = join(output, path);
+        // Track only files we exclusively created; a failed write may still leave a partial file.
+        const handle = await open(file, 'wx');
+        created.push(file);
+        try { await handle.writeFile(content); } finally { await handle.close(); }
+    };
+    try {
+        if (verdict.status === 'passed') for (const name of viewports) {
+            const { image, tree } = captures.get(name);
+            const screenshotPath = `navigation-${name}.png`, treePath = `navigation-${name}.accessibility.json`;
+            await write(screenshotPath, image); await write(treePath, tree);
+            artifacts.push({ kind: 'screenshot', path: screenshotPath }, { kind: 'accessibility-tree', path: treePath });
+            const [theme, width] = name.split('-');
+            imageLinks.push({ checkName: development ? verdict.name : layoutCheck(name), screenshotPath,
+                caption: `Authenticated product navigation, ${theme} theme, ${width}px; synthetic test products only.` });
+        }
+        const manifest = { version: 1, taskId: context.taskId, attempt: context.attempt, capturedAt: new Date().toISOString(),
+            sourceFingerprint: context.sourceFingerprint, application: { framework: 'Blazor Server / Chromium', buildId: `${buildId}:${context.sourceFingerprint}` },
+            checks: [...checks.filter(check => check.name !== verdict.name), verdict], artifacts, imageLinks,
+            limitations: [...limitations, ...(!development ? ['Development-specific checks were not requested.'] : [])] };
+        // The manifest is the publication point, after all checks, cleanup and artifact writes.
+        const stagedManifest = `.manifest-${randomUUID()}.tmp`;
+        await write(stagedManifest, JSON.stringify(manifest, null, 2) + '\n');
+        await rename(join(output, stagedManifest), join(output, 'manifest.json'));
+        return manifest;
+    } catch (error) {
+        await Promise.all(created.map(file => rm(file, { force: true })));
+        throw error;
+    }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const args = process.argv.slice(2);
-    if (args.some(arg => arg !== '--development')) { console.error('Usage: node tests/Navigation.UiEvidence.mjs [--development]'); process.exitCode = 1; }
-    else collect({ development: args.includes('--development') }).catch(error => {
-        // Known errors are deliberately free of provider output and submitted values.
+    const verifying = args.includes('--verify'), development = args.includes('--development');
+    if (new Set(args).size !== args.length || args.some(arg => arg !== '--development' && arg !== '--verify') ||
+        (verifying && !development)) {
+        console.error('Usage: node tests/Navigation.UiEvidence.mjs [--development [--verify]]');
+        process.exitCode = 1;
+    } else (verifying ? verify().then(code => { process.exitCode = code; }) : collect({ development })).catch(error => {
+        // Native provider output and command arguments never reach this handler.
         console.error(`Navigation UI evidence failed: ${error.message}`); process.exitCode = 1;
     });
 }
