@@ -184,6 +184,72 @@ pwsh -NoProfile -File tests/Deployment.Tests.ps1
 
 These checks mock external operations.
 
+### Navigation UI evidence (pi-factory)
+
+`tests/Navigation.UiEvidence.mjs` is a dependency-free, opt-in collector for the actual
+interactive application, not a static HTML fixture. Prerequisites are Node 24+, the SDK
+in `global.json`, a running Podman machine, and installed Chromium. On Windows it finds
+Edge or Chrome in their standard locations; elsewhere set `RETRAVION_TEST_BROWSER` to
+an absolute browser executable path. Do not expose browser debugging ports remotely.
+
+The collector builds the target Web project, starts a uniquely named PostgreSQL 17
+Podman container on IPv4 loopback with an ephemeral port, and starts the built app on
+another ephemeral loopback port. It uses generated credentials through the normal
+login and required password-replacement forms, then creates two synthetic products
+through the actual UI. It never accepts a production database or pre-existing app URL.
+Existing application write and audit behavior remains in place in this disposable environment.
+
+Merge this fragment into a **new** operator-owned factory configuration (with the
+collector present in the target checkout):
+
+```json
+"uiEvidence": {
+  "command": {
+    "executable": "node",
+    "args": ["tests/Navigation.UiEvidence.mjs", "--development"],
+    "timeoutMs": 480000
+  }
+}
+```
+
+`--development` requires the per-product Development/Specifications implementation.
+Without it, the collector checks existing product navigation only, and explicitly
+records that Development-specific checks were not requested. This focused collector
+does not verify arbitrary pages changed by future tasks; extend its approved scope
+before relying on it for unrelated UI acceptance criteria. Keep an enabled,
+vision-capable UI reviewer to inspect screenshots.
+
+Pi-factory supplies `FACTORY_TASK_ID`, `FACTORY_ATTEMPT`, `FACTORY_SOURCE_FINGERPRINT`,
+and a fresh external `FACTORY_UI_EVIDENCE_DIRECTORY`. The collector validates these,
+then writes `manifest.json`, screenshots, and Chromium accessibility trees for light
+and dark themes at 1280px and 390px. Checks cover independent mouse and native keyboard
+toggling, expanded/hidden state, unchanged links and selection, and (with
+`--development`) noninteractive Specifications semantics and rendered foreground
+contrast. These are focused checks, not comprehensive accessibility certification.
+Do not substitute a screenshot of the login page for authenticated navigation evidence.
+
+Failed assertions produce a failed-check manifest and diagnostic screenshot/tree;
+bootstrap or capture failures exit nonzero. The factory must validate the manifest,
+source freshness, and artifact hashes before accepting evidence. The collector removes
+its app, browser/profile, and container in cleanup, including ordinary error paths.
+Forced process termination can prevent cleanup: inspect only `retravion-ui-evidence-*`
+containers and `retravion-ui-browser-*` profiles belonging to that invocation; never
+use a global prune or stop unrelated review resources. Evidence contains synthetic data
+only; authentication screens, passwords and raw provider logs are not recorded.
+
+Run the collector's dependency-free unit tests with:
+
+```sh
+node --test tests/Navigation.UiEvidence.Tests.mjs
+```
+
+Include that command as a named factory verification check when changing the collector.
+UI evidence collection is separate from named criterion-to-verification mappings:
+configure appropriate named checks for each future plan criterion; screenshots alone
+do not repair an omitted mapping. Completed runs pin their configuration: retain the
+original configuration for resume/integration, and use the opt-in configuration for a
+new run. Do not edit completed run state to claim newly captured evidence.
+
 ### PostgreSQL integration tests
 
 Local development and agent database tests must use a disposable PostgreSQL Podman
