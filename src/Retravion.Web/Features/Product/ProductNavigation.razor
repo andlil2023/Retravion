@@ -28,6 +28,8 @@
             var selected = IsSelected(product.Id);
             var expanded = !_collapsedProducts.Contains(product.InternalId);
             var childrenId = $"product-navigation-children-{Uri.EscapeDataString(product.Id)}";
+            var developmentExpanded = _expandedDevelopment.Contains(product.InternalId);
+            var developmentId = $"product-navigation-development-{product.InternalId:N}";
             <div class="product-navigation-product" @key="product.InternalId">
                 <div class="product-navigation-heading">
                     <button type="button" class="product-node-toggle" aria-label="@($"{(expanded ? "Collapse" : "Expand")} {product.Id} – {product.Name}")" aria-expanded="@(expanded ? "true" : "false")" aria-controls="@childrenId" @onclick="() => Toggle(product.InternalId)"><MudIcon Icon="@(expanded ? Icons.Material.Outlined.ExpandMore : Icons.Material.Outlined.ChevronRight)" /></button>
@@ -40,6 +42,10 @@
                     <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/test-cases?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Test Cases for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.FactCheck" /><span>Test Cases</span></a>
                     <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/features?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Features for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.Extension" /><span>Features</span></a>
                     <a class="navigation-node product-navigation-item product-navigation-child" href="@($"/revisions?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Revisions for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.History" /><span>Revisions</span></a>
+                    <button type="button" class="navigation-node product-navigation-item product-navigation-child" aria-label="@($"Development for {product.Id} – {product.Name}")" aria-expanded="@(developmentExpanded ? "true" : "false")" aria-controls="@developmentId" @onclick="() => ToggleDevelopment(product.InternalId)"><MudIcon Icon="@Icons.Material.Outlined.Code" /><span>Development</span></button>
+                    <div id="@developmentId" hidden="@(!developmentExpanded)">
+                        <span class="product-navigation-item product-navigation-specifications" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Description" /><span>Specifications</span></span>
+                    </div>
                 </div>
             </div>
         }
@@ -49,6 +55,7 @@
 @code {
     private IReadOnlyList<Retravion.Domain.Product.Product> _products = [];
     private readonly HashSet<Guid> _collapsedProducts = [];
+    private readonly HashSet<Guid> _expandedDevelopment = [];
     private string? _error;
     private bool _loading = true, _disposed;
     private int _loadVersion;
@@ -111,6 +118,11 @@
     private void Toggle(Guid productId)
     {
         if (!_collapsedProducts.Add(productId)) _collapsedProducts.Remove(productId);
+    }
+
+    private void ToggleDevelopment(Guid productId)
+    {
+        if (!_expandedDevelopment.Add(productId)) _expandedDevelopment.Remove(productId);
     }
 
     public void Dispose() { _disposed = true; Navigation.LocationChanged -= LocationChanged; }
