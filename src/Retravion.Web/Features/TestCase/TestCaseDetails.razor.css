@@ -13,12 +13,21 @@
     text-transform: uppercase;
 }
 
-.test-case-versions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .5rem;
-    margin-bottom: 1rem;
-}
+.test-case-context { margin: 0 0 1rem; color: var(--mud-palette-text-secondary); font-size: .875rem; overflow-wrap: anywhere; }
+.test-case-context span { margin: 0 .4rem; }
+.test-case-heading { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .75rem 1.5rem; }
+.test-case-identity { flex: 1 1 26rem; min-width: 0; max-width: 48rem; }
+.test-case-id { color: var(--mud-palette-text-secondary); font-size: .875rem; font-weight: 600; margin: 0 0 .375rem; overflow-wrap: anywhere; }
+.test-case-identity h2 { margin: 0; font-size: 1.3rem; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.test-case-metadata { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .5rem; }
+.test-case-badges { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
+.test-case-metadata ::deep .mud-chip { margin: 0; }
+.test-case-metadata ::deep .test-case-status { background: var(--mud-palette-primary-hover); }
+.test-case-versions { font-size: .875rem; color: var(--mud-palette-primary); }
+.test-case-versions summary { cursor: pointer; min-height: 44px; align-content: center; }
+.test-case-versions summary:focus-visible { outline: 2px solid var(--mud-palette-primary); outline-offset: 3px; }
+.test-case-versions nav { display: flex; flex-direction: column; gap: .5rem; padding: .5rem 0; }
+@media (max-width: 540px) { .test-case-metadata { width: 100%; } }
 
 .test-case-requirements ::deep .mud-table-root {
     table-layout: fixed;

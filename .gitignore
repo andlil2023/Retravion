@@ -28,5 +28,8 @@ artifacts/
 .DS_Store
 Thumbs.db
 
-# pi-factory
+# Factory files
 .factory/
+node_modules/
+package-lock.json
+package.json
