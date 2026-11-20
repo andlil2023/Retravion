@@ -27,3 +27,6 @@ artifacts/
 **/appsettings.Local.json
 .DS_Store
 Thumbs.db
+
+# pi-factory
+.factory/
