@@ -366,6 +366,15 @@ public sealed partial class SpecificationReadTests
             DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
             inner.SubmitForReview(productInternalId, internalId, actor, occurredAt, authorized, cancellationToken);
 
+        public Task<Result<Retravion.Application.Specification.SpecificationApproval>> Approve(Guid productInternalId, Guid internalId,
+            AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
+            inner.Approve(productInternalId, internalId, actor, occurredAt, authorized, cancellationToken);
+
+        public Task<Result<DraftSpecification>> Reopen(Guid productInternalId, Guid internalId, string? reason,
+            bool noActiveOrUncertainRunAttested, AuditActor.Identified actor, DateTimeOffset occurredAt,
+            Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
+            inner.Reopen(productInternalId, internalId, reason, noActiveOrUncertainRunAttested, actor, occurredAt, authorized, cancellationToken);
+
         public Task<Result<DraftSpecification>> ReturnToDraft(Guid productInternalId, Guid internalId, string? reason,
             AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
             CancellationToken cancellationToken = default) =>

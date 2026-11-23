@@ -32,6 +32,15 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
                     ADD CONSTRAINT specification_review_description_check
                         CHECK (status <> 'In Review' OR length(btrim(description, {Whitespace})) > 0);
             END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'retravion_specification.specification'::regclass
+                AND conname = 'specification_approved_description_check') THEN
+                ALTER TABLE retravion_specification.specification
+                    DROP CONSTRAINT specification_status_check,
+                    ADD CONSTRAINT specification_status_check CHECK (status IN ('Draft', 'In Review', 'Approved')),
+                    ADD CONSTRAINT specification_approved_description_check
+                        CHECK (status <> 'Approved' OR length(btrim(description, {Whitespace})) > 0);
+            END IF;
         END $$;
         CREATE UNIQUE INDEX IF NOT EXISTS specification_product_id_unique ON retravion_specification.specification
             (product_internal_id, (btrim(id, {Whitespace})) COLLATE retravion_specification.specification_case_fold);
@@ -108,6 +117,7 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         {
             "Draft" => Result.Success<DevelopmentSpecification>(draft.Value),
             "In Review" when draft.Value.SubmitForReview().TryGetValue(out var review) => Result.Success<DevelopmentSpecification>(review),
+            "Approved" when draft.Value.SubmitForReview().TryGetValue(out var reviewed) => Result.Success<DevelopmentSpecification>(reviewed.Approve()),
             _ => Result.Failure<DevelopmentSpecification>(InvalidRecord)
         };
     }
@@ -158,7 +168,7 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         await using var exists = new NpgsqlCommand("""
             SELECT to_regclass('retravion_specification.link') IS NOT NULL AND EXISTS (
                 SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('retravion_specification.specification')
-                AND conname = 'specification_review_description_check')
+                AND conname = 'specification_approved_description_check')
             """, connection, transaction);
         return await exists.ExecuteScalarAsync(cancellationToken) is true;
     }

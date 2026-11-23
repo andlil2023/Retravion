@@ -135,6 +135,7 @@ public sealed partial class SpecificationReadTests
         await connection.OpenAsync();
         await using (var legacy = new NpgsqlCommand("""
             ALTER TABLE retravion_specification.specification DROP CONSTRAINT specification_review_description_check,
+                DROP CONSTRAINT specification_approved_description_check,
                 DROP CONSTRAINT specification_status_check,
                 ADD CONSTRAINT specification_status_check CHECK (status = 'Draft');
             """, connection))
@@ -145,8 +146,8 @@ public sealed partial class SpecificationReadTests
         Assert.Equal(review, (await operations.Find(principal, product, draft.InternalId)).Value.Value);
         await using (var blank = new NpgsqlCommand("UPDATE retravion_specification.specification SET description = ''", connection))
             Assert.Equal("specification_review_description_check", (await Assert.ThrowsAsync<PostgresException>(() => blank.ExecuteNonQueryAsync())).ConstraintName);
-        await using (var approve = new NpgsqlCommand("UPDATE retravion_specification.specification SET status = 'Approved'", connection))
-            Assert.Equal("specification_status_check", (await Assert.ThrowsAsync<PostgresException>(() => approve.ExecuteNonQueryAsync())).ConstraintName);
+        await using (var implement = new NpgsqlCommand("UPDATE retravion_specification.specification SET status = 'Implemented'", connection))
+            Assert.Equal("specification_status_check", (await Assert.ThrowsAsync<PostgresException>(() => implement.ExecuteNonQueryAsync())).ConstraintName);
 
         // Bypass the protection to verify that the mapper independently validates the In Review invariant.
         await using (var corrupt = new NpgsqlCommand("""

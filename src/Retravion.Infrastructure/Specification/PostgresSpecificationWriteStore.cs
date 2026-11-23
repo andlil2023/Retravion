@@ -122,14 +122,55 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             ReturnToDraftAction, "In Review", "Draft", "Only In Review Specifications can be returned to Draft.",
             review => review.ReturnToDraft(reason), reason, cancellationToken);
 
+    public async Task<Result<SpecificationApproval>> Approve(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
+        DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default)
+    {
+        var result = await Transition<InReviewSpecification, ApprovedSpecification>(productInternalId, internalId, actor,
+            occurredAt, authorized, "specification.approve", "In Review", "Approved",
+            "Only In Review Specifications can be approved.", review => Result.Success(review.Approve()), null,
+            cancellationToken, validate: LockApprovedTargets);
+        return result.Map(approved => new SpecificationApproval(approved,
+            Array.AsReadOnly(Enum.GetValues<SpecificationLinkKind>()
+                .Except(approved.Links.Targets.Select(target => target.Kind)).ToArray())));
+    }
+
+    public Task<Result<DraftSpecification>> Reopen(Guid productInternalId, Guid internalId, string? reason,
+        bool noActiveOrUncertainRunAttested, AuditActor.Identified actor, DateTimeOffset occurredAt,
+        Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
+        Transition<ApprovedSpecification, DraftSpecification>(productInternalId, internalId, actor, occurredAt, authorized,
+            "specification.reopen", "Approved", "Draft", "Only Approved Specifications can be reopened.",
+            approved => approved.Reopen(reason, noActiveOrUncertainRunAttested), reason, cancellationToken,
+            noActiveOrUncertainRunAttested);
+
+    private static async Task<Result> LockApprovedTargets(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        InReviewSpecification review, CancellationToken token)
+    {
+        // SpecificationLinks orders by kind and exact UUID. Keep the same row lock used by each owner reopening guard.
+        foreach (var target in review.Links.Targets)
+        {
+            var found = await PostgresSpecificationVersionSource.For(target.Kind)
+                .Resolve(connection, transaction, review.ProductInternalId, target.VersionId, token, lockVersion: true);
+            if (found.HasNoValue || !found.Value.IsApproved)
+                return Result.Failure($"Every linked {target.Kind} version must be Approved in this Product.");
+        }
+        return Result.Success();
+    }
+
     private Task<Result<TNext>> Transition<TCurrent, TNext>(Guid productId, Guid internalId, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, string action, string before, string after, string invalidState,
-        Func<TCurrent, Result<TNext>> transition, string? reason, CancellationToken token)
+        Func<TCurrent, Result<TNext>> transition, string? reason, CancellationToken token,
+        bool? noActiveOrUncertainRunAttested = null,
+        Func<NpgsqlConnection, NpgsqlTransaction, TCurrent, CancellationToken, Task<Result>>? validate = null)
         where TCurrent : DevelopmentSpecification where TNext : DevelopmentSpecification =>
         Execute(productId, authorized, async (connection, transaction) =>
         {
             var current = await LockSpecification<TCurrent>(connection, transaction, productId, internalId, before, invalidState, token);
             if (current.IsFailure) return Result.Failure<TNext>(current.Error);
+            if (validate is not null)
+            {
+                var valid = await validate(connection, transaction, current.Value, token);
+                if (valid.IsFailure) return Result.Failure<TNext>(valid.Error);
+            }
             var next = transition(current.Value);
             if (next.IsFailure) return next;
 
@@ -145,7 +186,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
                 return Result.Failure<TNext>("The Specification state could not be saved.");
 
             await AuditChange(connection, transaction, actor, occurredAt, action, internalId,
-                Snapshot(current.Value, before), Snapshot(next.Value, after), token, reason);
+                Snapshot(current.Value, before), Snapshot(next.Value, after), token, reason, noActiveOrUncertainRunAttested);
             return next;
         }, token);
 
@@ -195,10 +236,11 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
 
     private static Task AuditChange(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor.Identified actor,
         DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues after,
-        CancellationToken cancellationToken, string? reason = null) =>
+        CancellationToken cancellationToken, string? reason = null, bool? noActiveOrUncertainRunAttested = null) =>
         PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
             new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(internalId.ToString()),
-                AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after, reason)),
+                AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after, reason,
+                    noActiveOrUncertainRunAttested)),
             cancellationToken);
 
     private static async Task<Result> SaveContent(NpgsqlCommand command, CancellationToken cancellationToken)
@@ -229,7 +271,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         {
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(cancellationToken);
-            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, cancellationToken);
             await PostgresSpecificationReadStore.EnsureSchema(connection, transaction, cancellationToken);
 
             // Product owns the active flag. Hold a row lock through commit so retirement cannot race a write.

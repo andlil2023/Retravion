@@ -178,11 +178,11 @@ public sealed partial class SpecificationReadTests
 
     private sealed record ReopenResults(Result<UserNeedSnapshot> Need, Result<RequirementSnapshot> Requirement, Result<TestCaseSnapshot> Case);
 
-    private sealed class ReopenOwners(string connectionString)
+    private sealed class ReopenOwners(string connectionString, Func<NpgsqlTransaction, CancellationToken, Task>? commit = null)
     {
-        private readonly PostgresUserNeedStore needs = new(connectionString);
-        private readonly PostgresRequirementStore requirements = new(connectionString);
-        private readonly PostgresTestCaseStore cases = new(connectionString);
+        private readonly PostgresUserNeedStore needs = new(connectionString, commit);
+        private readonly PostgresRequirementStore requirements = new(connectionString, commit);
+        private readonly PostgresTestCaseStore cases = new(connectionString, commit);
 
         public async Task<OwnerVersions> Create(Guid product)
         {
@@ -219,6 +219,20 @@ public sealed partial class SpecificationReadTests
 
         public Task<Result<UserNeedSnapshot>> ReopenNeed(UserNeedSnapshot need, CancellationToken token = default) =>
             needs.Update(need, need.Need.Reopen(ReopenReason).Value, CreateActor, CreateTime, "Reopened", ReopenReason, token);
+
+        public async Task<string?> ReopenTarget(SpecificationLinkKind kind, OwnerVersions versions, CancellationToken token)
+        {
+            static string? Error<T>(Result<T> result) => result.IsSuccess ? null : result.Error;
+            return kind switch
+            {
+                SpecificationLinkKind.UserNeed => Error(await ReopenNeed(versions.Need, token)),
+                SpecificationLinkKind.Requirement => Error(await requirements.Update(versions.Requirement,
+                    versions.Requirement.Requirement.Reopen(ReopenReason).Value, CreateActor, CreateTime,
+                    "Reopened", ReopenReason, token)),
+                SpecificationLinkKind.TestCase => Error(await cases.Reopen(versions.Case, ReopenReason, CreateActor, CreateTime, token)),
+                _ => throw new ArgumentOutOfRangeException(nameof(kind))
+            };
+        }
 
         public async Task<ReopenResults> Reopen(OwnerVersions versions) => new(await ReopenNeed(versions.Need),
             await requirements.Update(versions.Requirement, versions.Requirement.Requirement.Reopen(ReopenReason).Value,

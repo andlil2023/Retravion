@@ -1,4 +1,3 @@
-using System.Text;
 using CSharpFunctionalExtensions;
 
 namespace Retravion.Domain.Specification;
@@ -13,15 +12,9 @@ public sealed record InReviewSpecification : DevelopmentSpecification
             ? Result.Failure<InReviewSpecification>("A Specification description is required to submit for review.")
             : Result.Success(new InReviewSpecification(draft));
 
-    public Result<DraftSpecification> ReturnToDraft(string? reason = null)
-    {
-        const string invalidReason = "The return reason must contain valid UTF-8 text without NUL characters.";
-        if (reason is not null)
-        {
-            if (reason.Contains('\0')) return Result.Failure<DraftSpecification>(invalidReason);
-            try { _ = Utf8.GetByteCount(reason); }
-            catch (EncoderFallbackException) { return Result.Failure<DraftSpecification>(invalidReason); }
-        }
-        return Result.Success(DraftSpecification.FromReview(this));
-    }
+    // Link approval is a live cross-record invariant enforced by the write transaction.
+    public ApprovedSpecification Approve() => new(this);
+
+    public Result<DraftSpecification> ReturnToDraft(string? reason = null) =>
+        ValidateReturnReason(reason).Map(() => DraftSpecification.FromReturned(this));
 }

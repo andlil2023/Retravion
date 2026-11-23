@@ -24,6 +24,15 @@ public interface ISpecificationWriteStore
     Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
 
+    /// <summary>Approves an In Review specification and reports missing link types after commit. Exact versions are locked through commit.</summary>
+    Task<Result<SpecificationApproval>> Approve(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
+        DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
+
+    /// <summary>Returns an Approved specification to Draft and audits the reason and affirmative human run attestation.</summary>
+    Task<Result<DraftSpecification>> Reopen(Guid productInternalId, Guid internalId, string? reason,
+        bool noActiveOrUncertainRunAttested, AuditActor.Identified actor, DateTimeOffset occurredAt,
+        Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
+
     /// <summary>Returns a persisted In Review specification to Draft and audits the state change and optional reason.</summary>
     Task<Result<DraftSpecification>> ReturnToDraft(Guid productInternalId, Guid internalId, string? reason,
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,

@@ -12,8 +12,9 @@ public sealed record DraftSpecification : DevelopmentSpecification
 
     public Result<InReviewSpecification> SubmitForReview() => InReviewSpecification.FromDraft(this);
 
-    internal static DraftSpecification FromReview(InReviewSpecification review) =>
-        new(review.InternalId, review.ProductInternalId, review.Id, review.Title, review.Description, review.Links);
+    internal static DraftSpecification FromReturned(DevelopmentSpecification specification) =>
+        new(specification.InternalId, specification.ProductInternalId, specification.Id, specification.Title,
+            specification.Description, specification.Links);
 
     public static Result<DraftSpecification> Create(Guid productInternalId, string? id, string? title, string? description) =>
         Restore(Guid.NewGuid(), productInternalId, id, title, description ?? string.Empty);

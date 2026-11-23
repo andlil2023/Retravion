@@ -36,6 +36,17 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
         Change(principal, "specification.submit-for-review", (actor, now, authorized) =>
             writes.SubmitForReview(productInternalId, internalId, actor, now, authorized, cancellationToken), cancellationToken);
 
+    public Task<Result<SpecificationApproval>> Approve(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.approve", (actor, now, authorized) =>
+            writes.Approve(productInternalId, internalId, actor, now, authorized, cancellationToken), cancellationToken);
+
+    public Task<Result<DraftSpecification>> Reopen(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        string? reason, bool noActiveOrUncertainRunAttested, CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.reopen", (actor, now, authorized) =>
+            writes.Reopen(productInternalId, internalId, reason, noActiveOrUncertainRunAttested, actor, now, authorized, cancellationToken),
+            cancellationToken);
+
     public Task<Result<DraftSpecification>> ReturnToDraft(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
         string? reason = null, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.return-to-draft", (actor, now, authorized) =>

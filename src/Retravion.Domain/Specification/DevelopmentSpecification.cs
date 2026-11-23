@@ -1,4 +1,5 @@
 using System.Text;
+using CSharpFunctionalExtensions;
 
 namespace Retravion.Domain.Specification;
 
@@ -22,5 +23,17 @@ public abstract record DevelopmentSpecification
         Title = title;
         Description = description;
         Links = links;
+    }
+
+    private protected static Result ValidateReturnReason(string? reason)
+    {
+        const string invalidReason = "The return reason must contain valid UTF-8 text without NUL characters.";
+        if (reason is not null)
+        {
+            if (reason.Contains('\0')) return Result.Failure(invalidReason);
+            try { _ = Utf8.GetByteCount(reason); }
+            catch (EncoderFallbackException) { return Result.Failure(invalidReason); }
+        }
+        return Result.Success();
     }
 }
