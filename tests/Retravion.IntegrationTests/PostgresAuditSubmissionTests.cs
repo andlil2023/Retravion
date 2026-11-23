@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -321,6 +322,117 @@ public sealed class PostgresAuditSubmissionTests
         await Check(new AuditFilter(Target: new AuditTarget.NotApplicable()), events[2]);
         await Check(new AuditFilter(time, time, new AuditActor.Identified("alice"), "edit", AuditActionOutcome.Success, new AuditTarget.Identified("item")), events[0]);
         await Check(new AuditFilter(Action: "edit' OR true --"));
+    }
+
+    [PostgresFact]
+    public async Task SpecificationAuditPayloadPersistsCreationAndReplacementInCallerTransaction()
+    {
+        await using var database = await TestDatabase.Create();
+        var submission = new PostgresAuditSubmission(database.ConnectionString);
+        Assert.Equal(AuditSubmissionResult.Success, await submission.SubmitAsync(Information("existing")));
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        // Simulate the audit schema from before Specification details were introduced.
+        await using (var previousSchema = new NpgsqlCommand(
+            "ALTER TABLE retravion_audit.event DROP COLUMN specification_change", connection))
+            await previousSchema.ExecuteNonQueryAsync();
+
+        var productId = Guid.NewGuid();
+        var time = new DateTimeOffset(2026, 2, 3, 4, 5, 6, TimeSpan.FromHours(2)).AddTicks(1234567);
+        var creation = SpecificationEvent("specification.create", time, new SpecificationAuditDetails(Guid.NewGuid(),
+            Before: null, After: new SpecificationAuditValues(productId, "SPEC-1", "New specification", "# Draft — résumé", "Draft")));
+        var before = new SpecificationAuditValues(productId, "SPEC-2", "Approved specification", "# Approved", "Approved",
+            AttachmentIds: [Guid.NewGuid()]);
+        var replacement = SpecificationEvent("specification.replace-attachment", time.AddTicks(1),
+            new SpecificationAuditDetails(Guid.NewGuid(), before, before with { AttachmentIds = [Guid.NewGuid()] }));
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction, creation);
+            await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction, replacement);
+            await transaction.CommitAsync();
+        }
+
+        await using var observer = new NpgsqlConnection(database.ConnectionString);
+        await observer.OpenAsync();
+        await using var query = new NpgsqlCommand("""
+            SELECT actor_kind, actor_identifier, occurred_at_utc_ticks, action, target_kind, target_identifier,
+                outcome, specification_change
+            FROM retravion_audit.event ORDER BY id
+            """, observer);
+        await using var reader = await query.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("existing", reader.GetString(3));
+        Assert.True(reader.IsDBNull(7));
+        foreach (var information in new[] { creation, replacement })
+        {
+            var details = information.SpecificationChange!;
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("identified", reader.GetString(0));
+            Assert.Equal("specification-editor", reader.GetString(1));
+            Assert.Equal(information.OccurredAt.UtcTicks, reader.GetInt64(2));
+            Assert.Equal(information.Action, reader.GetString(3));
+            Assert.Equal("identified", reader.GetString(4));
+            Assert.Equal(details.InternalId.ToString(), reader.GetString(5));
+            Assert.Equal("success", reader.GetString(6));
+            using var payload = JsonDocument.Parse(reader.GetString(7));
+            var root = payload.RootElement;
+            Assert.Equal(new[] { "After", "Before", "InternalId" }, root.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            Assert.Equal(details.InternalId, root.GetProperty("InternalId").GetGuid());
+            AssertSpecificationValues(details.Before, root.GetProperty("Before"));
+            AssertSpecificationValues(details.After, root.GetProperty("After"));
+        }
+        Assert.False(await reader.ReadAsync());
+    }
+
+    [PostgresFact]
+    public async Task SpecificationAuditPayloadRollsBackWithCallerTransaction()
+    {
+        await using var database = await TestDatabase.Create();
+        var existing = Information("existing");
+        Assert.Equal(AuditSubmissionResult.Success,
+            await new PostgresAuditSubmission(database.ConnectionString).SubmitAsync(existing));
+        await using var connection = new NpgsqlConnection(database.ConnectionString);
+        await connection.OpenAsync();
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            var creation = SpecificationEvent("specification.create", DateTimeOffset.UtcNow,
+                new SpecificationAuditDetails(Guid.NewGuid(), Before: null,
+                    After: new SpecificationAuditValues(Guid.NewGuid(), "SPEC-3", "Rolled back draft", "", "Draft")));
+            await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction, creation);
+            await using var query = new NpgsqlCommand(
+                "SELECT count(*) FROM retravion_audit.event WHERE action = 'specification.create' AND outcome = 'success'",
+                connection, transaction);
+            Assert.Equal(1L, await query.ExecuteScalarAsync());
+            await transaction.RollbackAsync();
+        }
+        await AssertRows(database.ConnectionString, [existing]);
+    }
+
+    private static AuditInformation SpecificationEvent(string action, DateTimeOffset time, SpecificationAuditDetails details) =>
+        new(new AuditActor.Identified("specification-editor"), time, action, new AuditTarget.Identified(details.InternalId.ToString()),
+            AuditActionOutcome.Success, specificationChange: details);
+
+    private static void AssertSpecificationValues(SpecificationAuditValues? expected, JsonElement values)
+    {
+        if (expected is null)
+        {
+            Assert.Equal(JsonValueKind.Null, values.ValueKind);
+            return;
+        }
+
+        // Assert the complete shape, including that attachments are UUIDs, not image data or objects.
+        Assert.Equal(new[] { "AttachmentIds", "Description", "Id", "ProductInternalId", "Status", "Title" },
+            values.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(expected.ProductInternalId, values.GetProperty("ProductInternalId").GetGuid());
+        Assert.Equal(expected.Id, values.GetProperty("Id").GetString());
+        Assert.Equal(expected.Title, values.GetProperty("Title").GetString());
+        Assert.Equal(expected.Description, values.GetProperty("Description").GetString());
+        Assert.Equal(expected.Status, values.GetProperty("Status").GetString());
+        var attachments = values.GetProperty("AttachmentIds");
+        if (expected.AttachmentIds is null)
+            Assert.Equal(JsonValueKind.Null, attachments.ValueKind);
+        else
+            Assert.Equal(expected.AttachmentIds, attachments.EnumerateArray().Select(id => id.GetGuid()));
     }
 
     private static AuditInformation Information(string action) => new(new AuditActor.Unknown(),
