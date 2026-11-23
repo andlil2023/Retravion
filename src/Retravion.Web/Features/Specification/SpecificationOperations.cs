@@ -20,6 +20,12 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             return draft.IsSuccess ? await writes.Create(draft.Value, actor, now, authorized, cancellationToken) : draft;
         }, cancellationToken);
 
+    public Task<Result<DraftSpecification>> EditContent(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        string? id, string? title, string? description, CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.edit-content", (actor, now, authorized) =>
+            writes.EditContent(productInternalId, internalId, id, title, description, actor, now, authorized, cancellationToken),
+            cancellationToken);
+
     private async Task<Result<T>> Change<T>(ClaimsPrincipal principal, string action,
         Func<AuditActor.Identified, DateTimeOffset, Func<Task<bool>>, Task<Result<T>>> change, CancellationToken cancellationToken)
     {

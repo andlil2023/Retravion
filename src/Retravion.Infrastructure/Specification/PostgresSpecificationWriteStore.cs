@@ -25,24 +25,85 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             insert.Parameters.AddWithValue(draft.Id);
             insert.Parameters.AddWithValue(draft.Title);
             insert.Parameters.AddWithValue(draft.Description);
-            try
-            {
-                await insert.ExecuteNonQueryAsync(cancellationToken);
-            }
-            catch (PostgresException exception) when (!cancellationToken.IsCancellationRequested && IsUnindexableId(exception))
-            {
-                return Result.Failure<DraftSpecification>("The Specification ID is too large to store.");
-            }
+            var saved = await SaveContent(insert, cancellationToken);
+            if (saved.IsFailure) return Result.Failure<DraftSpecification>(saved.Error);
 
-            var values = new SpecificationAuditValues(draft.ProductInternalId, draft.Id, draft.Title, draft.Description, "Draft");
-            await PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
-                new AuditInformation(actor, occurredAt, "specification.create", new AuditTarget.Identified(draft.InternalId.ToString()),
-                    AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(draft.InternalId, null, values)),
-                cancellationToken);
+            await AuditContent(connection, transaction, actor, occurredAt, "specification.create", draft.InternalId, null,
+                Snapshot(draft), cancellationToken);
             return Result.Success(draft);
         }, cancellationToken);
 
-    // The ID is the only variable-width index key on this insert. PostgreSQL may reject
+    public Task<Result<DraftSpecification>> EditContent(Guid productInternalId, Guid internalId, string? id, string? title,
+        string? description, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default) =>
+        Execute(productInternalId, authorized, async (connection, transaction) =>
+        {
+            SpecificationAuditValues before;
+            // Lock the persisted row so the eligibility check and audit before-values cannot race another write.
+            await using (var select = new NpgsqlCommand("""
+                SELECT id, title, description, status FROM retravion_specification.specification
+                WHERE product_internal_id = $1 AND internal_id = $2 FOR UPDATE
+                """, connection, transaction))
+            {
+                select.Parameters.AddWithValue(productInternalId);
+                select.Parameters.AddWithValue(internalId);
+                await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                    return Result.Failure<DraftSpecification>("The Specification was not found in this Product.");
+                var status = reader.GetString(3);
+                if (status != "Draft") return Result.Failure<DraftSpecification>("Only Draft Specification content can be edited.");
+                before = new SpecificationAuditValues(productInternalId, reader.GetString(0), reader.GetString(1), reader.GetString(2), status);
+            }
+
+            var current = DraftSpecification.Restore(internalId, productInternalId, before.Id, before.Title, before.Description);
+            if (current.IsFailure) return Result.Failure<DraftSpecification>("The persisted Specification is invalid.");
+            var edit = current.Value.EditContent(id, title, description);
+            if (edit.IsFailure) return edit;
+            var after = Snapshot(edit.Value);
+            if (before == after) return edit;
+
+            await using var update = new NpgsqlCommand("""
+                UPDATE retravion_specification.specification SET id = $3, title = $4, description = $5
+                WHERE product_internal_id = $1 AND internal_id = $2 AND status = 'Draft'
+                """, connection, transaction);
+            update.Parameters.AddWithValue(productInternalId);
+            update.Parameters.AddWithValue(internalId);
+            update.Parameters.AddWithValue(after.Id);
+            update.Parameters.AddWithValue(after.Title);
+            update.Parameters.AddWithValue(after.Description);
+            var saved = await SaveContent(update, cancellationToken);
+            if (saved.IsFailure) return Result.Failure<DraftSpecification>(saved.Error);
+
+            await AuditContent(connection, transaction, actor, occurredAt, "specification.edit-content", internalId, before, after,
+                cancellationToken);
+            return edit;
+        }, cancellationToken);
+
+    private static SpecificationAuditValues Snapshot(DraftSpecification draft) =>
+        new(draft.ProductInternalId, draft.Id, draft.Title, draft.Description, "Draft");
+
+    private static Task AuditContent(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor.Identified actor,
+        DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues after,
+        CancellationToken cancellationToken) =>
+        PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
+            new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(internalId.ToString()),
+                AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after)),
+            cancellationToken);
+
+    private static async Task<Result> SaveContent(NpgsqlCommand command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await command.ExecuteNonQueryAsync(cancellationToken) == 1
+                ? Result.Success() : Result.Failure("The Specification operation could not be completed.");
+        }
+        catch (PostgresException exception) when (!cancellationToken.IsCancellationRequested && IsUnindexableId(exception))
+        {
+            return Result.Failure("The Specification ID is too large to store.");
+        }
+    }
+
+    // The ID is the only variable-width index key on a content write. PostgreSQL may reject
     // the tuple before the B-tree size check, in which case it does not report an index name.
     private static bool IsUnindexableId(PostgresException exception) =>
         exception.SqlState == PostgresErrorCodes.ProgramLimitExceeded && exception is

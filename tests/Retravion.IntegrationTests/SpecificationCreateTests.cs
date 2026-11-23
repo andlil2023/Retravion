@@ -351,16 +351,24 @@ public sealed partial class SpecificationReadTests
                 if (++AccessChecks == 2) clock.Now = CreateTime.AddMinutes(11);
                 return authorized();
             }, cancellationToken);
+
+        public Task<Result<DraftSpecification>> EditContent(Guid productInternalId, Guid internalId, string? id,
+            string? title, string? description, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+            CancellationToken cancellationToken = default) =>
+            inner.EditContent(productInternalId, internalId, id, title, description, actor, occurredAt, authorized, cancellationToken);
     }
 
-    private static async Task<List<CreateEvent>> CreateEvents(Database db)
+    private static Task<List<CreateEvent>> CreateEvents(Database db) => SpecificationEvents(db, "specification.create");
+
+    private static async Task<List<CreateEvent>> SpecificationEvents(Database db, string action)
     {
         await using var connection = new NpgsqlConnection(db.ConnectionString);
         await connection.OpenAsync();
         await using var query = new NpgsqlCommand("""
             SELECT actor_identifier, occurred_at_utc_ticks, target_kind, target_identifier, outcome, specification_change
-            FROM retravion_audit.event WHERE action = 'specification.create' ORDER BY id
+            FROM retravion_audit.event WHERE action = $1 ORDER BY id
             """, connection);
+        query.Parameters.AddWithValue(action);
         await using var reader = await query.ExecuteReaderAsync();
         var events = new List<CreateEvent>();
         while (await reader.ReadAsync())

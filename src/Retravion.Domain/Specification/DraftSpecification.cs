@@ -26,6 +26,9 @@ public sealed record DraftSpecification
     public static Result<DraftSpecification> Create(Guid productInternalId, string? id, string? title, string? description) =>
         Restore(Guid.NewGuid(), productInternalId, id, title, description ?? string.Empty);
 
+    public Result<DraftSpecification> EditContent(string? id, string? title, string? description) =>
+        Restore(InternalId, ProductInternalId, id, title, description ?? string.Empty);
+
     public static Result<DraftSpecification> Restore(Guid internalId, Guid productInternalId, string? id, string? title, string description)
     {
         if (internalId == Guid.Empty || productInternalId == Guid.Empty)
