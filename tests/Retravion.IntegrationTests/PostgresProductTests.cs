@@ -261,11 +261,13 @@ public sealed partial class PostgresProductTests
             var locale = useCLocale ? " TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'" : "";
             await using var create = new NpgsqlCommand($"CREATE DATABASE {name}{locale}", server);
             await create.ExecuteNonQueryAsync();
-            return new(new NpgsqlConnectionStringBuilder(serverConnection) { Database = name, Pooling = false }.ConnectionString,
+            return new(new NpgsqlConnectionStringBuilder(serverConnection) { Database = name, Pooling = true }.ConnectionString,
                 serverConnection, name);
         }
         public async ValueTask DisposeAsync()
         {
+            await using var pooled = new NpgsqlConnection(ConnectionString);
+            NpgsqlConnection.ClearPool(pooled);
             await using var server = new NpgsqlConnection(serverConnection);
             await server.OpenAsync();
             await using var drop = new NpgsqlCommand($"DROP DATABASE {name} WITH (FORCE)", server);
