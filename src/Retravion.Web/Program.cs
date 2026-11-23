@@ -128,7 +128,9 @@ builder.Services.AddSingleton<Retravion.Application.Specification.ISpecification
 builder.Services.AddSingleton<Retravion.Application.Specification.ISpecificationWriteStore>(_ =>
     new Retravion.Infrastructure.Specification.PostgresSpecificationWriteStore(
         builder.Configuration.GetConnectionString("DefaultConnection")
-            ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+            ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required."),
+        findActiveUsername: (connection, username, token) =>
+            new PostgresAdministratorStore(connection).FindActiveUsernameForAssignment(username, token)));
 builder.Services.AddScoped<Retravion.Web.Features.Specification.SpecificationOperations>();
 builder.Services.AddSingleton<IUserNeedStore>(_ => new PostgresUserNeedStore(
     builder.Configuration.GetConnectionString("DefaultConnection")

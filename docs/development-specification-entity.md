@@ -83,6 +83,10 @@ Approval remains a human-controlled decision. An organization may authorize a di
 
 Assignment is optional and can change in Draft, In Review and Approved. It does not grant or restrict editing rights, and it does not control factory ownership or execution. Permissions govern access. Assignment changes are retained in history.
 
+The Specification owns the assignment ledger. Its latest entry determines the current assignee, including a null assignee after clearing. Detail reads use existing Product access and read the record and ledger in one snapshot. The write locks the Product-scoped Specification row; the Identity-owned lookup resolves a newly selected account by normalized username and holds a shared row lock on the active account in the caller's transaction. Specifications retain canonical usernames, not credentials or a cross-schema foreign key. The ledger append can also clear an assignment in a later finalization transaction without performing a new Identity lookup.
+
+Under REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02, each effective manual change commits its history and `specification.change-assignment` event together, recording actor, time, immutable Specification identity, success and both assignees. No-ops, validation failures and reads emit no business-change event. Unauthorized changes use the common denial event; audit failure rolls back the ledger append, and uncertain outcomes are reported without retry or logging submitted values. Verification covers assignment, reassignment and clearing across the three states, Identity and access rejection, readback, audit values and rollback.
+
 ## Final implementation evidence
 
 The final evidence report is a separate record linked to the specification:

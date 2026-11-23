@@ -362,6 +362,11 @@ public sealed partial class SpecificationReadTests
             CancellationToken cancellationToken = default) =>
             inner.EditLinks(productInternalId, internalId, targets, actor, occurredAt, authorized, cancellationToken);
 
+        public Task<Result> ChangeAssignment(Guid productInternalId, Guid internalId, string? assignee,
+            AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+            CancellationToken cancellationToken = default) =>
+            inner.ChangeAssignment(productInternalId, internalId, assignee, actor, occurredAt, authorized, cancellationToken);
+
         public Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
             DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
             inner.SubmitForReview(productInternalId, internalId, actor, occurredAt, authorized, cancellationToken);

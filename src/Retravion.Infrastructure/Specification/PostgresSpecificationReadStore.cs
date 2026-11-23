@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Npgsql;
 using Retravion.Application.Specification;
@@ -51,13 +52,34 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             PRIMARY KEY (specification_internal_id, kind, version_id)
         );
         CREATE INDEX IF NOT EXISTS specification_link_target ON retravion_specification.link (kind, version_id);
+        CREATE TABLE IF NOT EXISTS retravion_specification.assignment_history (
+            specification_internal_id uuid NOT NULL REFERENCES retravion_specification.specification(internal_id) ON DELETE CASCADE,
+            sequence bigint GENERATED ALWAYS AS IDENTITY,
+            actor text NOT NULL CHECK (length(btrim(actor)) > 0),
+            occurred_at_utc_ticks bigint NOT NULL CHECK (occurred_at_utc_ticks BETWEEN 0 AND 3155378975999999999),
+            old_assignee text CHECK (length(btrim(old_assignee)) > 0),
+            new_assignee text CHECK (length(btrim(new_assignee)) > 0),
+            CHECK (old_assignee IS DISTINCT FROM new_assignee),
+            PRIMARY KEY (specification_internal_id, sequence)
+        );
         """;
-    internal const string Select = """
+    private const string SelectFields = """
         SELECT internal_id, product_internal_id, id, title, description, status,
             ARRAY(SELECT kind FROM retravion_specification.link WHERE specification_internal_id = s.internal_id ORDER BY kind, version_id),
             ARRAY(SELECT version_id FROM retravion_specification.link WHERE specification_internal_id = s.internal_id ORDER BY kind, version_id)
-        FROM retravion_specification.specification s WHERE product_internal_id = $1
         """;
+    private const string From = " FROM retravion_specification.specification s WHERE product_internal_id = $1";
+    internal const string Select = SelectFields + From;
+    private const string SelectDetail = SelectFields + """
+        , (SELECT coalesce(jsonb_agg(jsonb_build_object('Actor', h.actor, 'UtcTicks', h.occurred_at_utc_ticks,
+              'OldAssignee', h.old_assignee, 'NewAssignee', h.new_assignee) ORDER BY h.sequence), '[]'::jsonb)
+           FROM retravion_specification.assignment_history h WHERE h.specification_internal_id = s.internal_id)
+        """ + From;
+
+    private sealed record AssignmentRow(string Actor, long UtcTicks, string? OldAssignee, string? NewAssignee)
+    {
+        public SpecificationAssignmentEntry ToEntry() => new(Actor, new DateTimeOffset(UtcTicks, TimeSpan.Zero), OldAssignee, NewAssignee);
+    }
     private const string InvalidRecord = "The persisted Specification is invalid.";
 
     public Task<Result<IReadOnlyList<DevelopmentSpecification>>> List(Guid productInternalId, CancellationToken cancellationToken = default) =>
@@ -79,6 +101,17 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             if (!await reader.ReadAsync(cancellationToken)) return Result.Success(Maybe<DevelopmentSpecification>.None);
             return Map(reader).Map(Maybe<DevelopmentSpecification>.From);
         }, cancellationToken);
+
+    public Task<Result<Maybe<SpecificationDetail>>> FindDetail(Guid productInternalId, Guid internalId,
+        CancellationToken cancellationToken = default) => Read(productInternalId, internalId, async reader =>
+        {
+            if (!await reader.ReadAsync(cancellationToken)) return Result.Success(Maybe<SpecificationDetail>.None);
+            var mapped = Map(reader);
+            if (mapped.IsFailure) return Result.Failure<Maybe<SpecificationDetail>>(mapped.Error);
+            var history = JsonSerializer.Deserialize<AssignmentRow[]>(reader.GetString(8))!;
+            var detail = new SpecificationDetail(mapped.Value, Array.AsReadOnly(history.Select(row => row.ToEntry()).ToArray()));
+            return Result.Success(Maybe<SpecificationDetail>.From(detail));
+        }, cancellationToken, SelectDetail);
 
     public Task<Result<IReadOnlyList<SpecificationVersionChoice>>> ListVersions(Guid productInternalId, SpecificationLinkKind kind,
         CancellationToken cancellationToken = default) => Enum.IsDefined(kind)
@@ -123,14 +156,14 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
     }
 
     private async Task<Result<T>> Read<T>(Guid productInternalId, Guid? internalId, Func<NpgsqlDataReader, Task<Result<T>>> read,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string select = Select)
     {
         try
         {
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(cancellationToken);
             await EnsureSchema(connection, cancellationToken);
-            await using var command = new NpgsqlCommand(Select + (internalId.HasValue
+            await using var command = new NpgsqlCommand(select + (internalId.HasValue
                 ? " AND internal_id = $2" : " ORDER BY id, internal_id"), connection);
             command.Parameters.AddWithValue(productInternalId);
             if (internalId is { } identity) command.Parameters.AddWithValue(identity);
@@ -166,7 +199,8 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         CancellationToken cancellationToken)
     {
         await using var exists = new NpgsqlCommand("""
-            SELECT to_regclass('retravion_specification.link') IS NOT NULL AND EXISTS (
+            SELECT to_regclass('retravion_specification.link') IS NOT NULL
+            AND to_regclass('retravion_specification.assignment_history') IS NOT NULL AND EXISTS (
                 SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('retravion_specification.specification')
                 AND conname = 'specification_approved_description_check')
             """, connection, transaction);

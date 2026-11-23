@@ -31,6 +31,14 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
         Change(principal, "specification.edit-links", (actor, now, authorized) =>
             writes.EditLinks(productInternalId, internalId, targets, actor, now, authorized, cancellationToken), cancellationToken);
 
+    public async Task<Result> ChangeAssignment(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        string? assignee, CancellationToken cancellationToken = default) =>
+        await Change(principal, "specification.change-assignment", async (actor, now, authorized) =>
+        {
+            var result = await writes.ChangeAssignment(productInternalId, internalId, assignee, actor, now, authorized, cancellationToken);
+            return result.IsSuccess ? Result.Success(true) : Result.Failure<bool>(result.Error);
+        }, cancellationToken);
+
     public Task<Result<InReviewSpecification>> SubmitForReview(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
         CancellationToken cancellationToken = default) =>
         Change(principal, "specification.submit-for-review", (actor, now, authorized) =>
@@ -109,4 +117,9 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
         CancellationToken cancellationToken = default) => await products.CanView(actor)
         ? await store.Find(productInternalId, internalId, cancellationToken)
         : Result.Failure<Maybe<DevelopmentSpecification>>("Access denied.");
+
+    public async Task<Result<Maybe<SpecificationDetail>>> FindDetail(ClaimsPrincipal actor, Guid productInternalId, Guid internalId,
+        CancellationToken cancellationToken = default) => await products.CanView(actor)
+        ? await store.FindDetail(productInternalId, internalId, cancellationToken)
+        : Result.Failure<Maybe<SpecificationDetail>>("Access denied.");
 }

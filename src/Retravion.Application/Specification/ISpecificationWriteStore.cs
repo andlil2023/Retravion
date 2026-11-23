@@ -20,6 +20,11 @@ public interface ISpecificationWriteStore
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Assigns an active account or clears responsibility with null, committing history and audit together.</summary>
+    Task<Result> ChangeAssignment(Guid productInternalId, Guid internalId, string? assignee,
+        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Submits a persisted Draft for review and commits the state change with its audit event.</summary>
     Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default);

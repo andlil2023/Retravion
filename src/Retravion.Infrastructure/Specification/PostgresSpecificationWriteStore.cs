@@ -8,7 +8,8 @@ using Retravion.Infrastructure.AuditTrail;
 namespace Retravion.Infrastructure.Specification;
 
 public sealed class PostgresSpecificationWriteStore(string connectionString,
-    Func<NpgsqlTransaction, CancellationToken, Task>? commit = null) : ISpecificationWriteStore
+    Func<NpgsqlTransaction, CancellationToken, Task>? commit = null,
+    Func<NpgsqlConnection, string, CancellationToken, Task<Maybe<string>>>? findActiveUsername = null) : ISpecificationWriteStore
 {
     private const string ProductIdIndex = "specification_product_id_unique";
     private const string SubmitForReviewAction = "specification.submit-for-review";
@@ -109,6 +110,82 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             return edit;
         }, cancellationToken);
 
+    public async Task<Result> ChangeAssignment(Guid productInternalId, Guid internalId, string? assignee,
+        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default) =>
+        await Execute(productInternalId, authorized, async (connection, transaction) =>
+        {
+            var current = await LockSpecification<DevelopmentSpecification>(connection, transaction, productInternalId, internalId,
+                status => status is "Draft" or "In Review" or "Approved", "Assignment cannot be changed in this Specification state.",
+                cancellationToken);
+            if (current.IsFailure) return Result.Failure<bool>(current.Error);
+
+            var oldAssignee = await ReadAssignee(connection, transaction, internalId, cancellationToken);
+            string? newAssignee = null;
+            if (assignee is not null)
+            {
+                const string invalid = "Select an active user for the Specification assignment.";
+                if (string.IsNullOrWhiteSpace(assignee) || assignee.Contains('\0')) return Result.Failure<bool>(invalid);
+                try { _ = new System.Text.UTF8Encoding(false, true).GetByteCount(assignee); }
+                catch (System.Text.EncoderFallbackException) { return Result.Failure<bool>(invalid); }
+
+                if (oldAssignee is not null && oldAssignee.ToUpperInvariant() == assignee.ToUpperInvariant())
+                    return Result.Success(false);
+                if (findActiveUsername is null) throw new InvalidOperationException("Specification assignment requires an Identity lookup.");
+                var found = await findActiveUsername(connection, assignee, cancellationToken);
+                if (found.HasNoValue) return Result.Failure<bool>(invalid);
+                newAssignee = found.Value;
+            }
+
+            var change = await RecordAssignmentChange(connection, transaction, internalId, actor, occurredAt,
+                oldAssignee, newAssignee, cancellationToken);
+            if (change.HasNoValue) return Result.Success(false);
+            var snapshot = Snapshot(current.Value, current.Value switch
+            {
+                DraftSpecification => "Draft",
+                InReviewSpecification => "In Review",
+                ApprovedSpecification => "Approved",
+                _ => throw new InvalidOperationException("Unexpected Specification assignment state.")
+            });
+            await AuditChange(connection, transaction, actor, occurredAt, "specification.change-assignment", internalId,
+                snapshot, snapshot, cancellationToken, assignment: change.Value);
+            return Result.Success(true);
+        }, cancellationToken);
+
+    // The caller holds the Specification row lock through reading and appending to the ledger.
+    private static async Task<string?> ReadAssignee(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid internalId, CancellationToken token)
+    {
+        await using var read = new NpgsqlCommand("""
+            SELECT new_assignee FROM retravion_specification.assignment_history
+            WHERE specification_internal_id = $1 ORDER BY sequence DESC LIMIT 1
+            """, connection, transaction);
+        read.Parameters.AddWithValue(internalId);
+        return await read.ExecuteScalarAsync(token) as string;
+    }
+
+    // Used for manual changes and available to finalization after it locks the row and reads the current assignee.
+    // The caller includes the returned values in durable audit within this same transaction.
+    private static async Task<Maybe<SpecificationAuditAssignment>> RecordAssignmentChange(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, Guid internalId, AuditActor.Identified actor, DateTimeOffset occurredAt,
+        string? oldAssignee, string? newAssignee, CancellationToken token)
+    {
+        if (oldAssignee == newAssignee) return Maybe<SpecificationAuditAssignment>.None;
+        await using var insert = new NpgsqlCommand("""
+            INSERT INTO retravion_specification.assignment_history
+                (specification_internal_id, actor, occurred_at_utc_ticks, old_assignee, new_assignee)
+            VALUES ($1, $2, $3, $4, $5)
+            """, connection, transaction);
+        insert.Parameters.AddWithValue(internalId);
+        insert.Parameters.AddWithValue(actor.Identifier);
+        insert.Parameters.AddWithValue(occurredAt.UtcTicks);
+        insert.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Text, (object?)oldAssignee ?? DBNull.Value);
+        insert.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Text, (object?)newAssignee ?? DBNull.Value);
+        if (await insert.ExecuteNonQueryAsync(token) != 1)
+            throw new InvalidOperationException("The Specification assignment history could not be saved.");
+        return Maybe<SpecificationAuditAssignment>.From(new SpecificationAuditAssignment(oldAssignee, newAssignee));
+    }
+
     public Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
         Transition<DraftSpecification, InReviewSpecification>(productInternalId, internalId, actor, occurredAt, authorized,
@@ -164,7 +241,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         where TCurrent : DevelopmentSpecification where TNext : DevelopmentSpecification =>
         Execute(productId, authorized, async (connection, transaction) =>
         {
-            var current = await LockSpecification<TCurrent>(connection, transaction, productId, internalId, before, invalidState, token);
+            var current = await LockSpecification<TCurrent>(connection, transaction, productId, internalId, status => status == before, invalidState, token);
             if (current.IsFailure) return Result.Failure<TNext>(current.Error);
             if (validate is not null)
             {
@@ -192,11 +269,11 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
 
     private static Task<Result<DraftSpecification>> LockDraft(NpgsqlConnection connection, NpgsqlTransaction transaction,
         Guid productId, Guid internalId, string field, CancellationToken token) =>
-        LockSpecification<DraftSpecification>(connection, transaction, productId, internalId, "Draft",
+        LockSpecification<DraftSpecification>(connection, transaction, productId, internalId, status => status == "Draft",
             $"Only Draft Specification {field} can be edited.", token);
 
     private static async Task<Result<T>> LockSpecification<T>(NpgsqlConnection connection, NpgsqlTransaction transaction,
-        Guid productId, Guid internalId, string expectedStatus, string invalidState, CancellationToken token)
+        Guid productId, Guid internalId, Func<string, bool> acceptsState, string invalidState, CancellationToken token)
         where T : DevelopmentSpecification
     {
         await using (var locked = new NpgsqlCommand("""
@@ -208,7 +285,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             locked.Parameters.AddWithValue(internalId);
             if (await locked.ExecuteScalarAsync(token) is not string status)
                 return Result.Failure<T>("The Specification was not found in this Product.");
-            if (status != expectedStatus) return Result.Failure<T>(invalidState);
+            if (!acceptsState(status)) return Result.Failure<T>(invalidState);
         }
 
         // Read child rows in a new statement after acquiring the lock, including any just-committed link edits.
@@ -236,11 +313,12 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
 
     private static Task AuditChange(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor.Identified actor,
         DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues after,
-        CancellationToken cancellationToken, string? reason = null, bool? noActiveOrUncertainRunAttested = null) =>
+        CancellationToken cancellationToken, string? reason = null, bool? noActiveOrUncertainRunAttested = null,
+        SpecificationAuditAssignment? assignment = null) =>
         PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
             new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(internalId.ToString()),
                 AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after, reason,
-                    noActiveOrUncertainRunAttested)),
+                    noActiveOrUncertainRunAttested, assignment)),
             cancellationToken);
 
     private static async Task<Result> SaveContent(NpgsqlCommand command, CancellationToken cancellationToken)
