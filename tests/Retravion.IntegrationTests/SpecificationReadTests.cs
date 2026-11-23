@@ -17,7 +17,7 @@ using ProductRecord = Retravion.Domain.Product.Product;
 
 namespace Retravion.IntegrationTests;
 
-public sealed class SpecificationReadTests
+public sealed partial class SpecificationReadTests
 {
     [PostgresFact]
     public async Task StorageEnforcesTrimmedCaseInsensitiveIdentityWithinProductAndRequiresExistingProduct()
@@ -134,12 +134,13 @@ public sealed class SpecificationReadTests
         Assert.Equal("The persisted Specification is invalid.", (await specifications.Find(product.InternalId, id)).Error);
     }
 
-    private static async Task<ClaimsPrincipal> Principal(SessionTicketStore sessions, string role, bool restricted = false)
+    private static async Task<ClaimsPrincipal> Principal(SessionTicketStore sessions, string role, bool restricted = false,
+        DateTimeOffset? now = null)
     {
         var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, role), new Claim(ClaimTypes.Role, role)], "Cookies");
         if (restricted) identity.AddClaim(new Claim(PasswordReplacementEndpoint.RestrictedClaim, "true"));
         var key = await sessions.StoreAsync(new AuthenticationTicket(new ClaimsPrincipal(identity),
-            new AuthenticationProperties { ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(10) }, "Cookies"));
+            new AuthenticationProperties { ExpiresUtc = (now ?? DateTimeOffset.UtcNow).AddMinutes(10) }, "Cookies"));
         return (await sessions.RetrieveAsync(key))!.Principal;
     }
 

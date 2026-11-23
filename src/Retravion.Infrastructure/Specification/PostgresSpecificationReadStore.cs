@@ -82,15 +82,28 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
 
     private static async Task EnsureSchema(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        await using var exists = new NpgsqlCommand("SELECT to_regclass('retravion_specification.specification') IS NOT NULL", connection);
-        if (await exists.ExecuteScalarAsync(cancellationToken) is true) return;
-
+        if (await SchemaExists(connection, null, cancellationToken)) return;
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await EnsureSchema(connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    internal static async Task EnsureSchema(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        if (await SchemaExists(connection, transaction, cancellationToken)) return;
         await using var productExists = new NpgsqlCommand("SELECT to_regclass('retravion_product.product') IS NOT NULL", connection, transaction);
         if (await productExists.ExecuteScalarAsync(cancellationToken) is not true)
             await PostgresProductStore.EnsureSchema(connection, transaction, cancellationToken);
         await using var setup = new NpgsqlCommand(Setup, connection, transaction);
         await setup.ExecuteNonQueryAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task<bool> SchemaExists(NpgsqlConnection connection, NpgsqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var exists = new NpgsqlCommand("SELECT to_regclass('retravion_specification.specification') IS NOT NULL",
+            connection, transaction);
+        return await exists.ExecuteScalarAsync(cancellationToken) is true;
     }
 }
