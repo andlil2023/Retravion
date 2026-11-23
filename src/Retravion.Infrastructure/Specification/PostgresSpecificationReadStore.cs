@@ -62,9 +62,14 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             CHECK (old_assignee IS DISTINCT FROM new_assignee),
             PRIMARY KEY (specification_internal_id, sequence)
         );
+        CREATE TABLE IF NOT EXISTS retravion_specification.ai_review (
+            specification_internal_id uuid PRIMARY KEY REFERENCES retravion_specification.specification(internal_id) ON DELETE CASCADE,
+            markdown text NOT NULL CHECK (octet_length(markdown) <= 1048576 AND length(btrim(markdown, {Whitespace})) > 0),
+            is_outdated boolean NOT NULL
+        );
         """;
     private const string SelectFields = """
-        SELECT internal_id, product_internal_id, id, title, description, status,
+        SELECT s.internal_id, s.product_internal_id, s.id, s.title, s.description, s.status,
             ARRAY(SELECT kind FROM retravion_specification.link WHERE specification_internal_id = s.internal_id ORDER BY kind, version_id),
             ARRAY(SELECT version_id FROM retravion_specification.link WHERE specification_internal_id = s.internal_id ORDER BY kind, version_id)
         """;
@@ -73,8 +78,12 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
     private const string SelectDetail = SelectFields + """
         , (SELECT coalesce(jsonb_agg(jsonb_build_object('Actor', h.actor, 'UtcTicks', h.occurred_at_utc_ticks,
               'OldAssignee', h.old_assignee, 'NewAssignee', h.new_assignee) ORDER BY h.sequence), '[]'::jsonb)
-           FROM retravion_specification.assignment_history h WHERE h.specification_internal_id = s.internal_id)
-        """ + From;
+           FROM retravion_specification.assignment_history h WHERE h.specification_internal_id = s.internal_id),
+          r.specification_internal_id IS NOT NULL, r.markdown, r.is_outdated
+         FROM retravion_specification.specification s
+         LEFT JOIN retravion_specification.ai_review r ON r.specification_internal_id = s.internal_id
+         WHERE s.product_internal_id = $1
+        """;
 
     private sealed record AssignmentRow(string Actor, long UtcTicks, string? OldAssignee, string? NewAssignee)
     {
@@ -109,7 +118,14 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             var mapped = Map(reader);
             if (mapped.IsFailure) return Result.Failure<Maybe<SpecificationDetail>>(mapped.Error);
             var history = JsonSerializer.Deserialize<AssignmentRow[]>(reader.GetString(8))!;
-            var detail = new SpecificationDetail(mapped.Value, Array.AsReadOnly(history.Select(row => row.ToEntry()).ToArray()));
+            SpecificationAiReview? review = null;
+            if (reader.GetBoolean(9))
+            {
+                var mappedReview = MapAiReview(reader, 10);
+                if (mappedReview.IsFailure) return Result.Failure<Maybe<SpecificationDetail>>(mappedReview.Error);
+                review = mappedReview.Value;
+            }
+            var detail = new SpecificationDetail(mapped.Value, Array.AsReadOnly(history.Select(row => row.ToEntry()).ToArray()), review);
             return Result.Success(Maybe<SpecificationDetail>.From(detail));
         }, cancellationToken, SelectDetail);
 
@@ -153,6 +169,16 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             "Approved" when draft.Value.SubmitForReview().TryGetValue(out var reviewed) => Result.Success<DevelopmentSpecification>(reviewed.Approve()),
             _ => Result.Failure<DevelopmentSpecification>(InvalidRecord)
         };
+    }
+
+    internal static Result<SpecificationAiReview> MapAiReview(NpgsqlDataReader reader, int markdownIndex)
+    {
+        if (!reader.IsDBNull(markdownIndex) && !reader.IsDBNull(markdownIndex + 1))
+        {
+            var review = SpecificationAiReview.Restore(reader.GetString(markdownIndex), reader.GetBoolean(markdownIndex + 1));
+            if (review.IsSuccess) return review;
+        }
+        return Result.Failure<SpecificationAiReview>(InvalidRecord);
     }
 
     private async Task<Result<T>> Read<T>(Guid productInternalId, Guid? internalId, Func<NpgsqlDataReader, Task<Result<T>>> read,
@@ -200,7 +226,8 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
     {
         await using var exists = new NpgsqlCommand("""
             SELECT to_regclass('retravion_specification.link') IS NOT NULL
-            AND to_regclass('retravion_specification.assignment_history') IS NOT NULL AND EXISTS (
+            AND to_regclass('retravion_specification.assignment_history') IS NOT NULL
+            AND to_regclass('retravion_specification.ai_review') IS NOT NULL AND EXISTS (
                 SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('retravion_specification.specification')
                 AND conname = 'specification_approved_description_check')
             """, connection, transaction);

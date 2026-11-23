@@ -6,9 +6,15 @@ namespace Retravion.Application.AuditTrail;
 public sealed record SpecificationAuditDetails(Guid InternalId, SpecificationAuditValues? Before, SpecificationAuditValues? After,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? NoActiveOrUncertainRunAttested = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditAssignment? Assignment = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditAssignment? Assignment = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditAiReviewChange? AiReview = null);
 
 public sealed record SpecificationAuditAssignment(string? OldAssignee, string? NewAssignee);
+
+public sealed record SpecificationAuditAiReviewChange(SpecificationAuditAiReviewValue? Before, SpecificationAuditAiReviewValue After,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? UserApproved = null);
+
+public sealed record SpecificationAuditAiReviewValue(string Markdown, bool IsOutdated);
 
 /// <summary>Specification change values. Attachments are represented only by their immutable identifiers.</summary>
 public sealed record SpecificationAuditValues(Guid ProductInternalId, string Id, string Title, string Description, string Status,

@@ -39,6 +39,12 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             return result.IsSuccess ? Result.Success(true) : Result.Failure<bool>(result.Error);
         }, cancellationToken);
 
+    public Task<Result<SpecificationAiReview>> SubmitAiReview(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        SpecificationAiReviewInput input, bool userApproved, CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.submit-ai-review", (actor, now, authorized) =>
+            writes.SubmitAiReview(productInternalId, internalId, input, userApproved, actor, now, authorized, cancellationToken),
+            cancellationToken);
+
     public Task<Result<InReviewSpecification>> SubmitForReview(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
         CancellationToken cancellationToken = default) =>
         Change(principal, "specification.submit-for-review", (actor, now, authorized) =>

@@ -63,8 +63,10 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             var saved = await SaveContent(update, cancellationToken);
             if (saved.IsFailure) return Result.Failure<DraftSpecification>(saved.Error);
 
+            var reviewChange = await InvalidateAiReview(connection, transaction, internalId, cancellationToken);
+            if (reviewChange.IsFailure) return Result.Failure<DraftSpecification>(reviewChange.Error);
             await AuditChange(connection, transaction, actor, occurredAt, "specification.edit-content", internalId, before, after,
-                cancellationToken);
+                cancellationToken, aiReview: reviewChange.Value.GetValueOrDefault());
             return edit;
         }, cancellationToken);
 
@@ -105,8 +107,10 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
                     return Result.Failure<DraftSpecification>("The Specification links could not be saved.");
             }
 
+            var reviewChange = await InvalidateAiReview(connection, transaction, internalId, cancellationToken);
+            if (reviewChange.IsFailure) return Result.Failure<DraftSpecification>(reviewChange.Error);
             await AuditChange(connection, transaction, actor, occurredAt, "specification.edit-links", internalId,
-                LinkSnapshot(current.Value), LinkSnapshot(edit.Value), cancellationToken);
+                LinkSnapshot(current.Value), LinkSnapshot(edit.Value), cancellationToken, aiReview: reviewChange.Value.GetValueOrDefault());
             return edit;
         }, cancellationToken);
 
@@ -186,6 +190,79 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         return Maybe<SpecificationAuditAssignment>.From(new SpecificationAuditAssignment(oldAssignee, newAssignee));
     }
 
+    public Task<Result<SpecificationAiReview>> SubmitAiReview(Guid productInternalId, Guid internalId, SpecificationAiReviewInput input,
+        bool userApproved, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default) =>
+        Execute(productInternalId, authorized, async (connection, transaction) =>
+        {
+            var current = await LockSpecification<DevelopmentSpecification>(connection, transaction, productInternalId, internalId,
+                status => status is "Draft" or "In Review", "AI reviews can only be submitted in Draft or In Review.", cancellationToken);
+            if (current.IsFailure) return Result.Failure<SpecificationAiReview>(current.Error);
+            var submitted = input switch
+            {
+                SpecificationAiReviewInput.Entered entered => SpecificationAiReview.Submit(entered.Markdown, userApproved),
+                SpecificationAiReviewInput.Uploaded uploaded => SpecificationAiReview.SubmitUtf8(uploaded.Utf8Content.Span, userApproved),
+                _ => Result.Failure<SpecificationAiReview>("Supply entered or uploaded Markdown for the Specification AI review.")
+            };
+            if (submitted.IsFailure) return submitted;
+
+            var previous = await ReadAiReview(connection, transaction, internalId, cancellationToken);
+            if (previous.IsFailure) return Result.Failure<SpecificationAiReview>(previous.Error);
+            var before = previous.Value.GetValueOrDefault();
+            var after = submitted.Value;
+            if (before == after) return submitted;
+
+            await using var save = new NpgsqlCommand("""
+                INSERT INTO retravion_specification.ai_review (specification_internal_id, markdown, is_outdated)
+                VALUES ($1, $2, false)
+                ON CONFLICT (specification_internal_id) DO UPDATE SET markdown = EXCLUDED.markdown, is_outdated = false
+                """, connection, transaction);
+            save.Parameters.AddWithValue(internalId);
+            save.Parameters.AddWithValue(after.Markdown);
+            if (await save.ExecuteNonQueryAsync(cancellationToken) != 1)
+                return Result.Failure<SpecificationAiReview>("The Specification AI review could not be saved.");
+
+            var snapshot = Snapshot(current.Value, current.Value is DraftSpecification ? "Draft" : "In Review");
+            await AuditChange(connection, transaction, actor, occurredAt, "specification.submit-ai-review", internalId,
+                snapshot, snapshot, cancellationToken, aiReview: AiReviewChange(before, after, userApproved));
+            return submitted;
+        }, cancellationToken);
+
+    // Every review writer holds the parent Specification row lock, including when no review exists yet.
+    private static async Task<Result<Maybe<SpecificationAiReview>>> ReadAiReview(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, Guid internalId, CancellationToken token)
+    {
+        await using var read = new NpgsqlCommand("""
+            SELECT markdown, is_outdated FROM retravion_specification.ai_review WHERE specification_internal_id = $1
+            """, connection, transaction);
+        read.Parameters.AddWithValue(internalId);
+        await using var reader = await read.ExecuteReaderAsync(token);
+        return await reader.ReadAsync(token)
+            ? PostgresSpecificationReadStore.MapAiReview(reader, 0).Map(Maybe<SpecificationAiReview>.From)
+            : Result.Success(Maybe<SpecificationAiReview>.None);
+    }
+
+    private static async Task<Result<Maybe<SpecificationAuditAiReviewChange>>> InvalidateAiReview(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, Guid internalId, CancellationToken token)
+    {
+        var previous = await ReadAiReview(connection, transaction, internalId, token);
+        if (previous.IsFailure) return Result.Failure<Maybe<SpecificationAuditAiReviewChange>>(previous.Error);
+        if (previous.Value.GetValueOrDefault() is not { IsOutdated: false } before)
+            return Result.Success(Maybe<SpecificationAuditAiReviewChange>.None);
+
+        await using var update = new NpgsqlCommand("""
+            UPDATE retravion_specification.ai_review SET is_outdated = true WHERE specification_internal_id = $1
+            """, connection, transaction);
+        update.Parameters.AddWithValue(internalId);
+        if (await update.ExecuteNonQueryAsync(token) != 1)
+            return Result.Failure<Maybe<SpecificationAuditAiReviewChange>>("The Specification AI review could not be marked outdated.");
+        return Result.Success(Maybe<SpecificationAuditAiReviewChange>.From(AiReviewChange(before, before.MarkOutdated())));
+    }
+
+    private static SpecificationAuditAiReviewChange AiReviewChange(SpecificationAiReview? before, SpecificationAiReview after,
+        bool? userApproved = null) => new(before is null ? null : new(before.Markdown, before.IsOutdated),
+        new(after.Markdown, after.IsOutdated), userApproved);
+
     public Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
         Transition<DraftSpecification, InReviewSpecification>(productInternalId, internalId, actor, occurredAt, authorized,
@@ -217,7 +294,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         Transition<ApprovedSpecification, DraftSpecification>(productInternalId, internalId, actor, occurredAt, authorized,
             "specification.reopen", "Approved", "Draft", "Only Approved Specifications can be reopened.",
             approved => approved.Reopen(reason, noActiveOrUncertainRunAttested), reason, cancellationToken,
-            noActiveOrUncertainRunAttested);
+            noActiveOrUncertainRunAttested, invalidateAiReview: true);
 
     private static async Task<Result> LockApprovedTargets(NpgsqlConnection connection, NpgsqlTransaction transaction,
         InReviewSpecification review, CancellationToken token)
@@ -237,7 +314,8 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, string action, string before, string after, string invalidState,
         Func<TCurrent, Result<TNext>> transition, string? reason, CancellationToken token,
         bool? noActiveOrUncertainRunAttested = null,
-        Func<NpgsqlConnection, NpgsqlTransaction, TCurrent, CancellationToken, Task<Result>>? validate = null)
+        Func<NpgsqlConnection, NpgsqlTransaction, TCurrent, CancellationToken, Task<Result>>? validate = null,
+        bool invalidateAiReview = false)
         where TCurrent : DevelopmentSpecification where TNext : DevelopmentSpecification =>
         Execute(productId, authorized, async (connection, transaction) =>
         {
@@ -262,8 +340,16 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             if (await update.ExecuteNonQueryAsync(token) != 1)
                 return Result.Failure<TNext>("The Specification state could not be saved.");
 
+            SpecificationAuditAiReviewChange? aiReview = null;
+            if (invalidateAiReview)
+            {
+                var reviewChange = await InvalidateAiReview(connection, transaction, internalId, token);
+                if (reviewChange.IsFailure) return Result.Failure<TNext>(reviewChange.Error);
+                aiReview = reviewChange.Value.GetValueOrDefault();
+            }
             await AuditChange(connection, transaction, actor, occurredAt, action, internalId,
-                Snapshot(current.Value, before), Snapshot(next.Value, after), token, reason, noActiveOrUncertainRunAttested);
+                Snapshot(current.Value, before), Snapshot(next.Value, after), token, reason, noActiveOrUncertainRunAttested,
+                aiReview: aiReview);
             return next;
         }, token);
 
@@ -314,11 +400,11 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
     private static Task AuditChange(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor.Identified actor,
         DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues after,
         CancellationToken cancellationToken, string? reason = null, bool? noActiveOrUncertainRunAttested = null,
-        SpecificationAuditAssignment? assignment = null) =>
+        SpecificationAuditAssignment? assignment = null, SpecificationAuditAiReviewChange? aiReview = null) =>
         PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
             new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(internalId.ToString()),
                 AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after, reason,
-                    noActiveOrUncertainRunAttested, assignment)),
+                    noActiveOrUncertainRunAttested, assignment, aiReview)),
             cancellationToken);
 
     private static async Task<Result> SaveContent(NpgsqlCommand command, CancellationToken cancellationToken)
