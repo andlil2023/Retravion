@@ -13,23 +13,30 @@ public sealed record DraftSpecification
     public string Id { get; }
     public string Title { get; }
     public string Description { get; }
+    public SpecificationLinks Links { get; }
 
-    private DraftSpecification(Guid internalId, Guid productInternalId, string id, string title, string description)
+    private DraftSpecification(Guid internalId, Guid productInternalId, string id, string title, string description,
+        SpecificationLinks links)
     {
         InternalId = internalId;
         ProductInternalId = productInternalId;
         Id = id;
         Title = title;
         Description = description;
+        Links = links;
     }
 
     public static Result<DraftSpecification> Create(Guid productInternalId, string? id, string? title, string? description) =>
         Restore(Guid.NewGuid(), productInternalId, id, title, description ?? string.Empty);
 
     public Result<DraftSpecification> EditContent(string? id, string? title, string? description) =>
-        Restore(InternalId, ProductInternalId, id, title, description ?? string.Empty);
+        Restore(InternalId, ProductInternalId, id, title, description ?? string.Empty, Links);
 
-    public static Result<DraftSpecification> Restore(Guid internalId, Guid productInternalId, string? id, string? title, string description)
+    public Result<DraftSpecification> EditLinks(IEnumerable<SpecificationLink> targets) =>
+        SpecificationLinks.Create(targets).Map(links => new DraftSpecification(InternalId, ProductInternalId, Id, Title, Description, links));
+
+    public static Result<DraftSpecification> Restore(Guid internalId, Guid productInternalId, string? id, string? title,
+        string description, SpecificationLinks? links = null)
     {
         if (internalId == Guid.Empty || productInternalId == Guid.Empty)
             return Result.Failure<DraftSpecification>("Specification and Product identities are required.");
@@ -51,6 +58,6 @@ public sealed record DraftSpecification
         {
             return Result.Failure<DraftSpecification>("Specification fields must contain valid UTF-8 text without NUL characters.");
         }
-        return Result.Success(new DraftSpecification(internalId, productInternalId, id.Trim(), title, description));
+        return Result.Success(new DraftSpecification(internalId, productInternalId, id.Trim(), title, description, links ?? SpecificationLinks.Empty));
     }
 }

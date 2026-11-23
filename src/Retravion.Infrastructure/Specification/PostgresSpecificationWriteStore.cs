@@ -16,6 +16,8 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
         Execute(draft.ProductInternalId, authorized, async (connection, transaction) =>
         {
+            if (draft.Links.Targets.Count != 0)
+                return Result.Failure<DraftSpecification>("Set links after creating the Draft Specification.");
             await using var insert = new NpgsqlCommand("""
                 INSERT INTO retravion_specification.specification (internal_id, product_internal_id, id, title, description, status)
                 VALUES ($1, $2, $3, $4, $5, 'Draft')
@@ -28,7 +30,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             var saved = await SaveContent(insert, cancellationToken);
             if (saved.IsFailure) return Result.Failure<DraftSpecification>(saved.Error);
 
-            await AuditContent(connection, transaction, actor, occurredAt, "specification.create", draft.InternalId, null,
+            await AuditChange(connection, transaction, actor, occurredAt, "specification.create", draft.InternalId, null,
                 Snapshot(draft), cancellationToken);
             return Result.Success(draft);
         }, cancellationToken);
@@ -38,25 +40,9 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         CancellationToken cancellationToken = default) =>
         Execute(productInternalId, authorized, async (connection, transaction) =>
         {
-            SpecificationAuditValues before;
-            // Lock the persisted row so the eligibility check and audit before-values cannot race another write.
-            await using (var select = new NpgsqlCommand("""
-                SELECT id, title, description, status FROM retravion_specification.specification
-                WHERE product_internal_id = $1 AND internal_id = $2 FOR UPDATE
-                """, connection, transaction))
-            {
-                select.Parameters.AddWithValue(productInternalId);
-                select.Parameters.AddWithValue(internalId);
-                await using var reader = await select.ExecuteReaderAsync(cancellationToken);
-                if (!await reader.ReadAsync(cancellationToken))
-                    return Result.Failure<DraftSpecification>("The Specification was not found in this Product.");
-                var status = reader.GetString(3);
-                if (status != "Draft") return Result.Failure<DraftSpecification>("Only Draft Specification content can be edited.");
-                before = new SpecificationAuditValues(productInternalId, reader.GetString(0), reader.GetString(1), reader.GetString(2), status);
-            }
-
-            var current = DraftSpecification.Restore(internalId, productInternalId, before.Id, before.Title, before.Description);
-            if (current.IsFailure) return Result.Failure<DraftSpecification>("The persisted Specification is invalid.");
+            var current = await LockDraft(connection, transaction, productInternalId, internalId, "content", cancellationToken);
+            if (current.IsFailure) return current;
+            var before = Snapshot(current.Value);
             var edit = current.Value.EditContent(id, title, description);
             if (edit.IsFailure) return edit;
             var after = Snapshot(edit.Value);
@@ -74,15 +60,86 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             var saved = await SaveContent(update, cancellationToken);
             if (saved.IsFailure) return Result.Failure<DraftSpecification>(saved.Error);
 
-            await AuditContent(connection, transaction, actor, occurredAt, "specification.edit-content", internalId, before, after,
+            await AuditChange(connection, transaction, actor, occurredAt, "specification.edit-content", internalId, before, after,
                 cancellationToken);
             return edit;
         }, cancellationToken);
 
+    public Task<Result<DraftSpecification>> EditLinks(Guid productInternalId, Guid internalId, IEnumerable<SpecificationLink> targets,
+        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default) =>
+        Execute(productInternalId, authorized, async (connection, transaction) =>
+        {
+            var current = await LockDraft(connection, transaction, productInternalId, internalId, "links", cancellationToken);
+            if (current.IsFailure) return current;
+            var edit = current.Value.EditLinks(targets);
+            if (edit.IsFailure || current.Value.Links.Equals(edit.Value.Links)) return edit;
+
+            foreach (var target in edit.Value.Links.Targets)
+            {
+                var found = await PostgresSpecificationVersionSource.For(target.Kind)
+                    .Resolve(connection, transaction, productInternalId, target.VersionId, cancellationToken);
+                if (found.HasNoValue)
+                    return Result.Failure<DraftSpecification>($"The selected {target.Kind} version was not found in this Product.");
+            }
+
+            await using (var remove = new NpgsqlCommand("""
+                DELETE FROM retravion_specification.link WHERE specification_internal_id = $1
+                """, connection, transaction))
+            {
+                remove.Parameters.AddWithValue(internalId);
+                await remove.ExecuteNonQueryAsync(cancellationToken);
+            }
+            await using (var insert = new NpgsqlCommand("""
+                INSERT INTO retravion_specification.link (specification_internal_id, kind, version_id)
+                SELECT $1, kind, version_id FROM unnest($2::smallint[], $3::uuid[]) AS targets(kind, version_id)
+                """, connection, transaction))
+            {
+                insert.Parameters.AddWithValue(internalId);
+                insert.Parameters.AddWithValue(edit.Value.Links.Targets.Select(link => (short)link.Kind).ToArray());
+                insert.Parameters.AddWithValue(edit.Value.Links.Targets.Select(link => link.VersionId).ToArray());
+                if (await insert.ExecuteNonQueryAsync(cancellationToken) != edit.Value.Links.Targets.Count)
+                    return Result.Failure<DraftSpecification>("The Specification links could not be saved.");
+            }
+
+            await AuditChange(connection, transaction, actor, occurredAt, "specification.edit-links", internalId,
+                LinkSnapshot(current.Value), LinkSnapshot(edit.Value), cancellationToken);
+            return edit;
+        }, cancellationToken);
+
+    private static async Task<Result<DraftSpecification>> LockDraft(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid productId, Guid internalId, string field, CancellationToken token)
+    {
+        await using (var locked = new NpgsqlCommand("""
+            SELECT status FROM retravion_specification.specification
+            WHERE product_internal_id = $1 AND internal_id = $2 FOR UPDATE
+            """, connection, transaction))
+        {
+            locked.Parameters.AddWithValue(productId);
+            locked.Parameters.AddWithValue(internalId);
+            if (await locked.ExecuteScalarAsync(token) is not string status)
+                return Result.Failure<DraftSpecification>("The Specification was not found in this Product.");
+            if (status != "Draft") return Result.Failure<DraftSpecification>($"Only Draft Specification {field} can be edited.");
+        }
+
+        // Read child rows in a new statement after acquiring the lock, including any just-committed link edits.
+        await using var read = new NpgsqlCommand(PostgresSpecificationReadStore.Select + " AND internal_id = $2", connection, transaction);
+        read.Parameters.AddWithValue(productId);
+        read.Parameters.AddWithValue(internalId);
+        await using var reader = await read.ExecuteReaderAsync(token);
+        return await reader.ReadAsync(token) ? PostgresSpecificationReadStore.Map(reader)
+            : Result.Failure<DraftSpecification>("The persisted Specification is invalid.");
+    }
+
+    private static SpecificationAuditValues LinkSnapshot(DraftSpecification draft) => Snapshot(draft) with
+    {
+        Links = draft.Links.Targets.Select(link => new SpecificationAuditLink(link.Kind.ToString(), link.VersionId)).ToArray()
+    };
+
     private static SpecificationAuditValues Snapshot(DraftSpecification draft) =>
         new(draft.ProductInternalId, draft.Id, draft.Title, draft.Description, "Draft");
 
-    private static Task AuditContent(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor.Identified actor,
+    private static Task AuditChange(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor.Identified actor,
         DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues after,
         CancellationToken cancellationToken) =>
         PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,

@@ -29,6 +29,14 @@ The first release supports creating, listing, viewing, editing, reviewing, appro
 
 Configurable description templates are deferred.
 
+### Exact-version persistence and coordination
+
+The User Need, Requirement and Test Case stores each expose a minimal Product-scoped projection of their exact version rows. The projection returns the owning record identity for navigation and the version identity, label, version number and approval status; it never follows the default-version projection. An uninitialized owner has no available versions. Specification reads apply existing Product view access and emit no business-change audit.
+
+The Specification owns its link rows, keyed by specification, target kind and exact version UUID. UUIDs are unique within each owning version table. Draft replacement validates the complete set against the owning stores in the caller's transaction; owner version rows are retained when successors are created. The cross-slice check is application-owned, not a cross-schema foreign key. A link replacement locks the Specification row before reading the old set. Its success event (`specification.edit-links`) records the actor, occurrence time, immutable Specification identity, outcome and old/new sets of target kinds and exact version UUIDs in the same transaction (REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02). Validation failures and no-ops emit no success event. Denials and failed/uncertain writes use the common Specification path, without submitted values in operational logs or automatic retry.
+
+For approval and owner reopening, share the owner projection's `FOR NO KEY UPDATE` lock on the exact version row, through commit in the caller's transaction. Approval takes the Specification row first, then exact rows in kind/UUID order, and checks Product and status after obtaining each lock. Reopening takes that same exact row lock **before** checking for Approved or Implemented references, using a new statement under Read Committed; it must not lock Specification rows or read through the default-version projection. Neither side acquires another slice's schema/owner-wide locks for this check. This per-version boundary leaves unrelated versions and successor creation outside the reopening guard. The approval and reopening commands are separate work; Draft link editing imposes no approval requirement or reopening guard.
+
 ## Lifecycle
 
 ### Draft

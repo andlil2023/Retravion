@@ -356,6 +356,11 @@ public sealed partial class SpecificationReadTests
             string? title, string? description, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
             CancellationToken cancellationToken = default) =>
             inner.EditContent(productInternalId, internalId, id, title, description, actor, occurredAt, authorized, cancellationToken);
+
+        public Task<Result<DraftSpecification>> EditLinks(Guid productInternalId, Guid internalId, IEnumerable<SpecificationLink> targets,
+            AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+            CancellationToken cancellationToken = default) =>
+            inner.EditLinks(productInternalId, internalId, targets, actor, occurredAt, authorized, cancellationToken);
     }
 
     private static Task<List<CreateEvent>> CreateEvents(Database db) => SpecificationEvents(db, "specification.create");

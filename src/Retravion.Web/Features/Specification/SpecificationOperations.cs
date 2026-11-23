@@ -26,6 +26,21 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             writes.EditContent(productInternalId, internalId, id, title, description, actor, now, authorized, cancellationToken),
             cancellationToken);
 
+    public Task<Result<DraftSpecification>> EditLinks(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        IEnumerable<SpecificationLink> targets, CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.edit-links", (actor, now, authorized) =>
+            writes.EditLinks(productInternalId, internalId, targets, actor, now, authorized, cancellationToken), cancellationToken);
+
+    public async Task<Result<IReadOnlyList<SpecificationVersionChoice>>> ListVersions(ClaimsPrincipal actor, Guid productInternalId,
+        SpecificationLinkKind kind, CancellationToken cancellationToken = default) => await products.CanView(actor)
+        ? await store.ListVersions(productInternalId, kind, cancellationToken)
+        : Result.Failure<IReadOnlyList<SpecificationVersionChoice>>("Access denied.");
+
+    public async Task<Result<Maybe<SpecificationVersionChoice>>> ResolveVersion(ClaimsPrincipal actor, Guid productInternalId,
+        SpecificationLink target, CancellationToken cancellationToken = default) => await products.CanView(actor)
+        ? await store.ResolveVersion(productInternalId, target, cancellationToken)
+        : Result.Failure<Maybe<SpecificationVersionChoice>>("Access denied.");
+
     private async Task<Result<T>> Change<T>(ClaimsPrincipal principal, string action,
         Func<AuditActor.Identified, DateTimeOffset, Func<Task<bool>>, Task<Result<T>>> change, CancellationToken cancellationToken)
     {

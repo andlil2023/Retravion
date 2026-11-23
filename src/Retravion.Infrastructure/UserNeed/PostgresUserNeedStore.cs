@@ -6,6 +6,8 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.UserNeed;
 using Retravion.Domain.UserNeed;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Infrastructure.Specification;
+using Retravion.Domain.Specification;
 using Need = Retravion.Domain.UserNeed.UserNeed;
 
 namespace Retravion.Infrastructure.UserNeed;
@@ -13,6 +15,9 @@ namespace Retravion.Infrastructure.UserNeed;
 public sealed class PostgresUserNeedStore(string connectionString,
     Func<NpgsqlTransaction, CancellationToken, Task>? commit = null) : IUserNeedStore, IUserNeedChangeTransaction
 {
+    internal static readonly PostgresSpecificationVersionSource SpecificationVersions =
+        new(SpecificationLinkKind.UserNeed, "retravion_need.need_version", "id", "status = 2");
+
     // The entity row remains the default-version projection and the Product-scoped ID reservation.
     // Existing review snapshots are evidence, not reconstructed historical versions.
     private const string Setup = """

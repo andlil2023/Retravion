@@ -6,6 +6,8 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.Requirement;
 using Retravion.Domain.Requirement;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Infrastructure.Specification;
+using Retravion.Domain.Specification;
 using Retravion.Infrastructure.Product;
 using Retravion.Domain.Product;
 using RequirementState = Retravion.Domain.Requirement.Requirement;
@@ -15,6 +17,9 @@ namespace Retravion.Infrastructure.Requirement;
 public sealed partial class PostgresRequirementStore(string connectionString,
     Func<NpgsqlTransaction, CancellationToken, Task>? commit = null) : IRequirementStore, IRequirementChangeTransaction, IRequirementLinkStore
 {
+    internal static readonly PostgresSpecificationVersionSource SpecificationVersions =
+        new(SpecificationLinkKind.Requirement, "retravion_requirement.requirement_version", "id", "status = 2");
+
     // Keep the entity row as the default-version projection and Product-scoped ID reservation.
     // Legacy decision snapshots are evidence, not a source for invented historical versions.
     private const string Setup = """

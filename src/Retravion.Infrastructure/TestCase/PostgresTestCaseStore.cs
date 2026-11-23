@@ -6,6 +6,8 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.TestCase;
 using Retravion.Domain.TestCase;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Infrastructure.Specification;
+using Retravion.Domain.Specification;
 using Retravion.Infrastructure.Product;
 using Retravion.Domain.Product;
 using Case = Retravion.Domain.TestCase.TestCase;
@@ -15,6 +17,10 @@ namespace Retravion.Infrastructure.TestCase;
 public sealed partial class PostgresTestCaseStore(string connectionString,
     Func<NpgsqlTransaction, CancellationToken, Task>? commit = null) : ITestCaseStore, ITestCaseChangeTransaction
 {
+    internal static readonly PostgresSpecificationVersionSource SpecificationVersions =
+        new(SpecificationLinkKind.TestCase, "retravion_test_case.test_case_version",
+            "'TC-' || lpad(number::text, greatest(3, length(number::text)), '0')", "status = 'Approved'");
+
     private const string Setup = """
         SELECT pg_advisory_xact_lock(821749620114);
         CREATE SCHEMA IF NOT EXISTS retravion_test_case;
