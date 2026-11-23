@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Npgsql;
@@ -271,6 +272,12 @@ public sealed class PostgresUserNeedStore(string connectionString,
             command.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)before.SourceVersionId ?? DBNull.Value);
             var revision = await command.ExecuteScalarAsync(token);
             if (revision is null) return Result.Failure<UserNeedSnapshot>("The User Need changed or a newer version exists. Retrieve it again.");
+            if (decision == "Reopened")
+            {
+                var protection = await PostgresSpecificationReopenProtection.Check(connection, transaction, SpecificationVersions,
+                    before.ProductInternalId, before.InternalId, before.VersionId, token);
+                if (protection.IsFailure) return Result.Failure<UserNeedSnapshot>(protection.Error);
+            }
             if (!await SaveVersion(connection, transaction, before.InternalId, token))
                 return Result.Failure<UserNeedSnapshot>("The User Need version identity is already in use.");
             if (decision is not null)
@@ -347,7 +354,7 @@ public sealed class PostgresUserNeedStore(string connectionString,
         {
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(token);
-            await using var transaction = await connection.BeginTransactionAsync(token);
+            await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
             await using (var setup = new NpgsqlCommand(Setup, connection, transaction)) await setup.ExecuteNonQueryAsync(token);
             var result = await operation(connection, transaction);
             if (result.IsSuccess)

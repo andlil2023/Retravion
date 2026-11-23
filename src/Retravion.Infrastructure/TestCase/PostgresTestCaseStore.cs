@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Npgsql;
@@ -268,6 +269,12 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
                 if (await protection.ExecuteScalarAsync(token) is true)
                     return Result.Failure<TestCaseSnapshot>("This exact version and its owned links are permanently protected by a Released revision. Create a successor for changes.");
             }
+            if (decision == "Reopened")
+            {
+                var protection = await PostgresSpecificationReopenProtection.Check(connection, transaction, SpecificationVersions,
+                    before.ProductInternalId, before.InternalId, before.VersionId, token);
+                if (protection.IsFailure) return Result.Failure<TestCaseSnapshot>(protection.Error);
+            }
             await using var update = new NpgsqlCommand("""
                 UPDATE retravion_test_case.test_case SET title=$1,description=$2,preconditions=$3,steps=$4,
                     status=$5,version_id=$6,version_number=$7,creation_reason=$8,source_version_id=$9,links=$10,area_id=$12,revision=revision+1
@@ -366,7 +373,7 @@ public sealed partial class PostgresTestCaseStore(string connectionString,
         {
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(token);
-            await using var transaction = await connection.BeginTransactionAsync(token);
+            await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
             // Same lock order as Requirement -> User Need operations. Exact target checks cannot race their mutations.
             await using (var targets = new NpgsqlCommand("SELECT pg_advisory_xact_lock(821749620111); SELECT pg_advisory_xact_lock(821749620112)", connection, transaction))
                 await targets.ExecuteNonQueryAsync(token);
