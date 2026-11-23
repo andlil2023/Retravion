@@ -31,6 +31,16 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
         Change(principal, "specification.edit-links", (actor, now, authorized) =>
             writes.EditLinks(productInternalId, internalId, targets, actor, now, authorized, cancellationToken), cancellationToken);
 
+    public Task<Result<InReviewSpecification>> SubmitForReview(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.submit-for-review", (actor, now, authorized) =>
+            writes.SubmitForReview(productInternalId, internalId, actor, now, authorized, cancellationToken), cancellationToken);
+
+    public Task<Result<DraftSpecification>> ReturnToDraft(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        string? reason = null, CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.return-to-draft", (actor, now, authorized) =>
+            writes.ReturnToDraft(productInternalId, internalId, reason, actor, now, authorized, cancellationToken), cancellationToken);
+
     public async Task<Result<IReadOnlyList<SpecificationVersionChoice>>> ListVersions(ClaimsPrincipal actor, Guid productInternalId,
         SpecificationLinkKind kind, CancellationToken cancellationToken = default) => await products.CanView(actor)
         ? await store.ListVersions(productInternalId, kind, cancellationToken)
@@ -79,13 +89,13 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
         return Result.Failure<T>(denied);
     }
 
-    public async Task<Result<IReadOnlyList<DraftSpecification>>> List(ClaimsPrincipal actor, Guid productInternalId,
+    public async Task<Result<IReadOnlyList<DevelopmentSpecification>>> List(ClaimsPrincipal actor, Guid productInternalId,
         CancellationToken cancellationToken = default) => await products.CanView(actor)
         ? await store.List(productInternalId, cancellationToken)
-        : Result.Failure<IReadOnlyList<DraftSpecification>>("Access denied.");
+        : Result.Failure<IReadOnlyList<DevelopmentSpecification>>("Access denied.");
 
-    public async Task<Result<Maybe<DraftSpecification>>> Find(ClaimsPrincipal actor, Guid productInternalId, Guid internalId,
+    public async Task<Result<Maybe<DevelopmentSpecification>>> Find(ClaimsPrincipal actor, Guid productInternalId, Guid internalId,
         CancellationToken cancellationToken = default) => await products.CanView(actor)
         ? await store.Find(productInternalId, internalId, cancellationToken)
-        : Result.Failure<Maybe<DraftSpecification>>("Access denied.");
+        : Result.Failure<Maybe<DevelopmentSpecification>>("Access denied.");
 }

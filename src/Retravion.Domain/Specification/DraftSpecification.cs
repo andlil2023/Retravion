@@ -3,28 +3,17 @@ using CSharpFunctionalExtensions;
 
 namespace Retravion.Domain.Specification;
 
-public sealed record DraftSpecification
+public sealed record DraftSpecification : DevelopmentSpecification
 {
     private const int MaximumDescriptionBytes = 1024 * 1024;
-    private static readonly Encoding Utf8 = new UTF8Encoding(false, true);
-
-    public Guid InternalId { get; }
-    public Guid ProductInternalId { get; }
-    public string Id { get; }
-    public string Title { get; }
-    public string Description { get; }
-    public SpecificationLinks Links { get; }
 
     private DraftSpecification(Guid internalId, Guid productInternalId, string id, string title, string description,
-        SpecificationLinks links)
-    {
-        InternalId = internalId;
-        ProductInternalId = productInternalId;
-        Id = id;
-        Title = title;
-        Description = description;
-        Links = links;
-    }
+        SpecificationLinks links) : base(internalId, productInternalId, id, title, description, links) { }
+
+    public Result<InReviewSpecification> SubmitForReview() => InReviewSpecification.FromDraft(this);
+
+    internal static DraftSpecification FromReview(InReviewSpecification review) =>
+        new(review.InternalId, review.ProductInternalId, review.Id, review.Title, review.Description, review.Links);
 
     public static Result<DraftSpecification> Create(Guid productInternalId, string? id, string? title, string? description) =>
         Restore(Guid.NewGuid(), productInternalId, id, title, description ?? string.Empty);

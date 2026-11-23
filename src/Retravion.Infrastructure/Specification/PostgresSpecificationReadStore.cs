@@ -22,6 +22,17 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             description text NOT NULL DEFAULT '' CHECK (octet_length(description) <= 1048576),
             status text NOT NULL CHECK (status = 'Draft')
         );
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'retravion_specification.specification'::regclass
+                AND conname = 'specification_review_description_check') THEN
+                ALTER TABLE retravion_specification.specification
+                    DROP CONSTRAINT specification_status_check,
+                    ADD CONSTRAINT specification_status_check CHECK (status IN ('Draft', 'In Review')),
+                    ADD CONSTRAINT specification_review_description_check
+                        CHECK (status <> 'In Review' OR length(btrim(description, {Whitespace})) > 0);
+            END IF;
+        END $$;
         CREATE UNIQUE INDEX IF NOT EXISTS specification_product_id_unique ON retravion_specification.specification
             (product_internal_id, (btrim(id, {Whitespace})) COLLATE retravion_specification.specification_case_fold);
         CREATE TABLE IF NOT EXISTS retravion_specification.link (
@@ -40,24 +51,24 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         """;
     private const string InvalidRecord = "The persisted Specification is invalid.";
 
-    public Task<Result<IReadOnlyList<DraftSpecification>>> List(Guid productInternalId, CancellationToken cancellationToken = default) =>
+    public Task<Result<IReadOnlyList<DevelopmentSpecification>>> List(Guid productInternalId, CancellationToken cancellationToken = default) =>
         Read(productInternalId, null, async reader =>
         {
-            var specifications = new List<DraftSpecification>();
+            var specifications = new List<DevelopmentSpecification>();
             while (await reader.ReadAsync(cancellationToken))
             {
                 var mapped = Map(reader);
-                if (mapped.IsFailure) return Result.Failure<IReadOnlyList<DraftSpecification>>(mapped.Error);
+                if (mapped.IsFailure) return Result.Failure<IReadOnlyList<DevelopmentSpecification>>(mapped.Error);
                 specifications.Add(mapped.Value);
             }
-            return Result.Success<IReadOnlyList<DraftSpecification>>(specifications);
+            return Result.Success<IReadOnlyList<DevelopmentSpecification>>(specifications);
         }, cancellationToken);
 
-    public Task<Result<Maybe<DraftSpecification>>> Find(Guid productInternalId, Guid internalId, CancellationToken cancellationToken = default) =>
+    public Task<Result<Maybe<DevelopmentSpecification>>> Find(Guid productInternalId, Guid internalId, CancellationToken cancellationToken = default) =>
         Read(productInternalId, internalId, async reader =>
         {
-            if (!await reader.ReadAsync(cancellationToken)) return Result.Success(Maybe<DraftSpecification>.None);
-            return Map(reader).Map(Maybe<DraftSpecification>.From);
+            if (!await reader.ReadAsync(cancellationToken)) return Result.Success(Maybe<DevelopmentSpecification>.None);
+            return Map(reader).Map(Maybe<DevelopmentSpecification>.From);
         }, cancellationToken);
 
     public Task<Result<IReadOnlyList<SpecificationVersionChoice>>> ListVersions(Guid productInternalId, SpecificationLinkKind kind,
@@ -86,14 +97,19 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         }
     }
 
-    internal static Result<DraftSpecification> Map(NpgsqlDataReader reader)
+    internal static Result<DevelopmentSpecification> Map(NpgsqlDataReader reader)
     {
-        if (reader.GetString(5) != "Draft") return Result.Failure<DraftSpecification>(InvalidRecord);
         var links = SpecificationLinks.Create(reader.GetFieldValue<short[]>(6).Zip(reader.GetFieldValue<Guid[]>(7),
             (kind, versionId) => new SpecificationLink((SpecificationLinkKind)kind, versionId)));
         var draft = links.Bind(value => DraftSpecification.Restore(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2),
             reader.GetString(3), reader.GetString(4), value));
-        return draft.IsSuccess ? draft : Result.Failure<DraftSpecification>(InvalidRecord);
+        if (draft.IsFailure) return Result.Failure<DevelopmentSpecification>(InvalidRecord);
+        return reader.GetString(5) switch
+        {
+            "Draft" => Result.Success<DevelopmentSpecification>(draft.Value),
+            "In Review" when draft.Value.SubmitForReview().TryGetValue(out var review) => Result.Success<DevelopmentSpecification>(review),
+            _ => Result.Failure<DevelopmentSpecification>(InvalidRecord)
+        };
     }
 
     private async Task<Result<T>> Read<T>(Guid productInternalId, Guid? internalId, Func<NpgsqlDataReader, Task<Result<T>>> read,
@@ -139,8 +155,11 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
     private static async Task<bool> SchemaExists(NpgsqlConnection connection, NpgsqlTransaction? transaction,
         CancellationToken cancellationToken)
     {
-        await using var exists = new NpgsqlCommand("SELECT to_regclass('retravion_specification.link') IS NOT NULL",
-            connection, transaction);
+        await using var exists = new NpgsqlCommand("""
+            SELECT to_regclass('retravion_specification.link') IS NOT NULL AND EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('retravion_specification.specification')
+                AND conname = 'specification_review_description_check')
+            """, connection, transaction);
         return await exists.ExecuteScalarAsync(cancellationToken) is true;
     }
 }

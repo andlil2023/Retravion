@@ -52,6 +52,8 @@ For approval and owner reopening, share the owner projection's `FOR NO KEY UPDAT
 - Approval requires every linked User Need, Requirement and Test Case version to be Approved and belong to the same Product.
 - Missing link types produce a non-blocking reminder; no explanation is required.
 
+The Specification slice owns both transitions. `specification.submit-for-review` and `specification.return-to-draft` lock the Product-scoped Specification row, change only its status, and commit with the audit event in the same PostgreSQL transaction. The typed event records actor, time, action, immutable Specification identity, outcome, prior and resulting states, and the exact return reason when supplied (REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02). The reason is audit data, not editable Specification content. Reads, validation failures and ineligible transitions emit no business-change event. Denials, rollback and uncertain commits follow the common Specification write path without logging submitted values or retrying automatically.
+
 ### Approved
 
 - Approved means eligible for implementation; it does not queue or start work.

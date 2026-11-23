@@ -114,7 +114,7 @@ public sealed partial class SpecificationReadTests
         var operations = scope.ServiceProvider.GetRequiredService<SpecificationOperations>();
         var sessions = scope.ServiceProvider.GetRequiredService<SessionTicketStore>();
         var principal = await Principal(sessions, "User", now: CreateTime);
-        var draft = (await operations.Create(principal, product.InternalId, "DEV-1", "Original", null)).Value;
+        var draft = (await operations.Create(principal, product.InternalId, "DEV-1", "Original", "# Description")).Value;
         foreach (var kind in Enum.GetValues<SpecificationLinkKind>())
             Assert.Empty((await operations.ListVersions(principal, product.InternalId, kind)).Value);
 

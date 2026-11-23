@@ -19,4 +19,13 @@ public interface ISpecificationWriteStore
     Task<Result<DraftSpecification>> EditLinks(Guid productInternalId, Guid internalId, IEnumerable<SpecificationLink> targets,
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Submits a persisted Draft for review and commits the state change with its audit event.</summary>
+    Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
+        DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
+
+    /// <summary>Returns a persisted In Review specification to Draft and audits the state change and optional reason.</summary>
+    Task<Result<DraftSpecification>> ReturnToDraft(Guid productInternalId, Guid internalId, string? reason,
+        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default);
 }

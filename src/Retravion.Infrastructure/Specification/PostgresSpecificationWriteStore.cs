@@ -11,6 +11,8 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
     Func<NpgsqlTransaction, CancellationToken, Task>? commit = null) : ISpecificationWriteStore
 {
     private const string ProductIdIndex = "specification_product_id_unique";
+    private const string SubmitForReviewAction = "specification.submit-for-review";
+    private const string ReturnToDraftAction = "specification.return-to-draft";
 
     public Task<Result<DraftSpecification>> Create(DraftSpecification draft, AuditActor.Identified actor, DateTimeOffset occurredAt,
         Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
@@ -107,8 +109,54 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             return edit;
         }, cancellationToken);
 
-    private static async Task<Result<DraftSpecification>> LockDraft(NpgsqlConnection connection, NpgsqlTransaction transaction,
-        Guid productId, Guid internalId, string field, CancellationToken token)
+    public Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
+        DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
+        Transition<DraftSpecification, InReviewSpecification>(productInternalId, internalId, actor, occurredAt, authorized,
+            SubmitForReviewAction, "Draft", "In Review", "Only Draft Specifications can be submitted for review.",
+            draft => draft.SubmitForReview(), null, cancellationToken);
+
+    public Task<Result<DraftSpecification>> ReturnToDraft(Guid productInternalId, Guid internalId, string? reason,
+        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default) =>
+        Transition<InReviewSpecification, DraftSpecification>(productInternalId, internalId, actor, occurredAt, authorized,
+            ReturnToDraftAction, "In Review", "Draft", "Only In Review Specifications can be returned to Draft.",
+            review => review.ReturnToDraft(reason), reason, cancellationToken);
+
+    private Task<Result<TNext>> Transition<TCurrent, TNext>(Guid productId, Guid internalId, AuditActor.Identified actor,
+        DateTimeOffset occurredAt, Func<Task<bool>> authorized, string action, string before, string after, string invalidState,
+        Func<TCurrent, Result<TNext>> transition, string? reason, CancellationToken token)
+        where TCurrent : DevelopmentSpecification where TNext : DevelopmentSpecification =>
+        Execute(productId, authorized, async (connection, transaction) =>
+        {
+            var current = await LockSpecification<TCurrent>(connection, transaction, productId, internalId, before, invalidState, token);
+            if (current.IsFailure) return Result.Failure<TNext>(current.Error);
+            var next = transition(current.Value);
+            if (next.IsFailure) return next;
+
+            await using var update = new NpgsqlCommand("""
+                UPDATE retravion_specification.specification SET status = $3
+                WHERE product_internal_id = $1 AND internal_id = $2 AND status = $4
+                """, connection, transaction);
+            update.Parameters.AddWithValue(productId);
+            update.Parameters.AddWithValue(internalId);
+            update.Parameters.AddWithValue(after);
+            update.Parameters.AddWithValue(before);
+            if (await update.ExecuteNonQueryAsync(token) != 1)
+                return Result.Failure<TNext>("The Specification state could not be saved.");
+
+            await AuditChange(connection, transaction, actor, occurredAt, action, internalId,
+                Snapshot(current.Value, before), Snapshot(next.Value, after), token, reason);
+            return next;
+        }, token);
+
+    private static Task<Result<DraftSpecification>> LockDraft(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid productId, Guid internalId, string field, CancellationToken token) =>
+        LockSpecification<DraftSpecification>(connection, transaction, productId, internalId, "Draft",
+            $"Only Draft Specification {field} can be edited.", token);
+
+    private static async Task<Result<T>> LockSpecification<T>(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid productId, Guid internalId, string expectedStatus, string invalidState, CancellationToken token)
+        where T : DevelopmentSpecification
     {
         await using (var locked = new NpgsqlCommand("""
             SELECT status FROM retravion_specification.specification
@@ -118,8 +166,8 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             locked.Parameters.AddWithValue(productId);
             locked.Parameters.AddWithValue(internalId);
             if (await locked.ExecuteScalarAsync(token) is not string status)
-                return Result.Failure<DraftSpecification>("The Specification was not found in this Product.");
-            if (status != "Draft") return Result.Failure<DraftSpecification>($"Only Draft Specification {field} can be edited.");
+                return Result.Failure<T>("The Specification was not found in this Product.");
+            if (status != expectedStatus) return Result.Failure<T>(invalidState);
         }
 
         // Read child rows in a new statement after acquiring the lock, including any just-committed link edits.
@@ -127,8 +175,12 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         read.Parameters.AddWithValue(productId);
         read.Parameters.AddWithValue(internalId);
         await using var reader = await read.ExecuteReaderAsync(token);
-        return await reader.ReadAsync(token) ? PostgresSpecificationReadStore.Map(reader)
-            : Result.Failure<DraftSpecification>("The persisted Specification is invalid.");
+        if (await reader.ReadAsync(token))
+        {
+            var mapped = PostgresSpecificationReadStore.Map(reader);
+            if (mapped.IsSuccess && mapped.Value is T current) return Result.Success(current);
+        }
+        return Result.Failure<T>("The persisted Specification is invalid.");
     }
 
     private static SpecificationAuditValues LinkSnapshot(DraftSpecification draft) => Snapshot(draft) with
@@ -136,15 +188,17 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         Links = draft.Links.Targets.Select(link => new SpecificationAuditLink(link.Kind.ToString(), link.VersionId)).ToArray()
     };
 
-    private static SpecificationAuditValues Snapshot(DraftSpecification draft) =>
-        new(draft.ProductInternalId, draft.Id, draft.Title, draft.Description, "Draft");
+    private static SpecificationAuditValues Snapshot(DraftSpecification draft) => Snapshot(draft, "Draft");
+
+    private static SpecificationAuditValues Snapshot(DevelopmentSpecification specification, string status) =>
+        new(specification.ProductInternalId, specification.Id, specification.Title, specification.Description, status);
 
     private static Task AuditChange(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor.Identified actor,
         DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues after,
-        CancellationToken cancellationToken) =>
+        CancellationToken cancellationToken, string? reason = null) =>
         PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
             new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(internalId.ToString()),
-                AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after)),
+                AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after, reason)),
             cancellationToken);
 
     private static async Task<Result> SaveContent(NpgsqlCommand command, CancellationToken cancellationToken)
