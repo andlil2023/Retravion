@@ -325,6 +325,8 @@ public sealed partial class SpecificationReadTests
         internal string Id { get; set; } = "";
         internal string Title { get; set; } = "";
         internal bool InvalidMarkdown { get; set; }
+        internal string? UnboundedText { get; set; }
+        internal bool InvalidUnboundedText { get; set; }
         internal string? InvalidHeadingField { get; set; }
         internal HashSet<long> OpenedWithLimits { get; } = [];
 
@@ -340,9 +342,12 @@ public sealed partial class SpecificationReadTests
             if (identifier == "initializeMarkdownInput") _editor = ((DotNetObjectReference<DescriptionEditor>)args![2]!).Value;
             if (identifier == "readMarkdownInput")
             {
-                var result = InvalidMarkdown ? """{"invalidUnicode":true,"content":null}"""
-                    : Markdown.Length == 0 ? """{"content":null}""" : """{"content":{}}""";
-                return StreamResult<T>(result, Encoding.UTF8.GetBytes(Markdown));
+                var unbounded = Equals(args![1], long.MaxValue);
+                var text = unbounded ? UnboundedText ?? Markdown : Markdown;
+                var invalid = unbounded && UnboundedText is not null ? InvalidUnboundedText : InvalidMarkdown;
+                var result = invalid ? """{"invalidUnicode":true,"content":null}"""
+                    : text.Length == 0 ? """{"content":null}""" : """{"content":{}}""";
+                return StreamResult<T>(result, Encoding.UTF8.GetBytes(text));
             }
             if (identifier == "streamSpecificationHeading")
             {

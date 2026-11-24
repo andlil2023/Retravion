@@ -16,7 +16,7 @@
 {
     <p role="status" aria-busy="true">Saving Specification change…</p>
 }
-@if (_mutationError is not null)
+@if (_mutationError is not null && !ShowEvidenceError)
 {
     <MudAlert Severity="Severity.Error" role="alert" Class="mb-4">@_mutationError</MudAlert>
     @if (_uncertain)
@@ -83,6 +83,9 @@ else
                                   Review="_detail.CurrentAiReview" CanEdit="@(CanChange && CanSubmitAiReview)" Busy="_busy" OnSubmit="SubmitAiReview" />
     <SpecificationAssignment @key="(_loadVersion, _detail.Assignee)" Detail="_detail"
                              CanEdit="@(CanChange && CanAssign)" Busy="_busy" OnChange="ChangeAssignment" />
+    <SpecificationEvidenceSection @key="(_loadVersion, _specification.GetType(), _detail.Evidence, _evidenceSaveVersion)"
+                                  Evidence="_detail.Evidence" CanEdit="@(CanChange && CanPrepareEvidence)" Busy="_busy"
+                                  Error="@(ShowEvidenceError ? _mutationError : null)" OnSave="SaveEvidence" OnConfirm="ConfirmEvidence" />
 }
 
 @code {
@@ -93,11 +96,13 @@ else
     private SpecificationDetail? _detail;
     private DevelopmentSpecification? _specification => _detail?.Specification;
     private string? _error, _mutationError, _notice;
-    private bool _busy, _uncertain, _approvalReminder;
-    private int _loadVersion, _reviewSaveVersion;
+    private bool _busy, _uncertain, _approvalReminder, _evidenceMutation;
+    private int _loadVersion, _reviewSaveVersion, _evidenceSaveVersion;
+    private bool ShowEvidenceError => _evidenceMutation && !_uncertain && _error is null && _detail is not null;
     private bool CanChange => _product is { IsActive: true } && !_uncertain;
     private bool CanAssign => _specification is DraftSpecification or InReviewSpecification or ApprovedSpecification;
     private bool CanSubmitAiReview => _specification is DraftSpecification or InReviewSpecification;
+    private bool CanPrepareEvidence => _specification is ApprovedSpecification;
 
     protected override Task OnParametersSetAsync() => Load();
 
@@ -108,7 +113,7 @@ else
         _product = null;
         _detail = null;
         _error = _mutationError = _notice = null;
-        _busy = _uncertain = _approvalReminder = false;
+        _busy = _uncertain = _approvalReminder = _evidenceMutation = false;
         if (!Guid.TryParse(Id, out var id) || id == Guid.Empty) { _error = "Specification not found in this Product."; return; }
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         if (version == _loadVersion) await Read(actor, productId, id, version);
@@ -142,6 +147,19 @@ else
             _reviewSaveVersion++;
             _notice = "AI review saved.";
         })
+        : Task.CompletedTask;
+
+    private Task SaveEvidence((string Markdown, string? PullRequestUrl) input) => CanPrepareEvidence
+        ? Change((actor, product, id) => Operations.SaveEvidence(actor, product, id, input.Markdown, input.PullRequestUrl), evidence =>
+        {
+            _evidenceSaveVersion++;
+            _notice = evidence.IsOutdated ? "Evidence is unchanged and still outdated. Confirm it or save a replacement." : "Evidence saved.";
+        }, evidenceMutation: true)
+        : Task.CompletedTask;
+
+    private Task ConfirmEvidence(bool reviewed) => CanPrepareEvidence && reviewed && _detail?.Evidence is { IsOutdated: true }
+        ? Change((actor, product, id) => Operations.ConfirmEvidenceCurrent(actor, product, id, reviewed),
+            _ => _notice = "Evidence confirmed current.", evidenceMutation: true)
         : Task.CompletedTask;
 
     private Task SaveLinks(SpecificationLink[] targets) => _specification is DraftSpecification
@@ -178,11 +196,13 @@ else
             }, reload: false)
         : Task.CompletedTask;
 
-    private async Task Change<T>(Func<ClaimsPrincipal, Guid, Guid, Task<Result<T>>> operation, Action<T>? apply = null, bool reload = true)
+    private async Task Change<T>(Func<ClaimsPrincipal, Guid, Guid, Task<Result<T>>> operation, Action<T>? apply = null,
+        bool reload = true, bool evidenceMutation = false)
     {
         if (_busy || !CanChange || _product is not { } product || _specification is not { } target) return;
         var version = _loadVersion;
         _busy = true;
+        _evidenceMutation = evidenceMutation;
         _mutationError = _notice = null;
         _approvalReminder = false;
         try
@@ -193,7 +213,7 @@ else
             if (version != _loadVersion) return;
             if (result.IsSuccess)
             {
-                // Refresh the detail snapshot: lifecycle and link changes can also invalidate the retained AI review.
+                // Refresh the detail snapshot: lifecycle changes can also invalidate retained review and evidence.
                 if (reload) await Read(actor, product.Id, target.InternalId, version, product.InternalId);
                 if (version == _loadVersion && _error is null) apply?.Invoke(result.Value);
                 return;
