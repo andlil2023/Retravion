@@ -388,6 +388,42 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             approved => approved.Reopen(reason, noActiveOrUncertainRunAttested), reason, cancellationToken,
             noActiveOrUncertainRunAttested, invalidateRetainedReviewAndEvidence: true);
 
+    public Task<Result<ImplementedSpecification>> Implement(Guid productInternalId, Guid internalId, bool mergeAttested,
+        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default) =>
+        Execute(productInternalId, authorized, async (connection, transaction) =>
+        {
+            var current = await LockSpecification<ApprovedSpecification>(connection, transaction, productInternalId, internalId,
+                status => status == "Approved", "Only Approved Specifications can be implemented.", cancellationToken);
+            if (current.IsFailure) return Result.Failure<ImplementedSpecification>(current.Error);
+            var evidence = await ReadEvidence(connection, transaction, internalId, cancellationToken);
+            if (evidence.IsFailure) return Result.Failure<ImplementedSpecification>(evidence.Error);
+            var next = current.Value.Implement(evidence.Value.GetValueOrDefault(), mergeAttested, actor.Identifier, occurredAt);
+            if (next.IsFailure) return next;
+
+            // Approved and Implemented both protect the same exact links; neither the links nor their owners change here.
+            await using var update = new NpgsqlCommand("""
+                UPDATE retravion_specification.specification
+                SET status = 'Implemented', merge_attested_by = $3, merge_attested_at_utc_ticks = $4
+                WHERE product_internal_id = $1 AND internal_id = $2 AND status = 'Approved'
+                """, connection, transaction);
+            update.Parameters.AddWithValue(productInternalId);
+            update.Parameters.AddWithValue(internalId);
+            update.Parameters.AddWithValue(next.Value.MergeAttestedBy);
+            update.Parameters.AddWithValue(next.Value.MergeAttestedAt.UtcTicks);
+            if (await update.ExecuteNonQueryAsync(cancellationToken) != 1)
+                return Result.Failure<ImplementedSpecification>("The Specification state could not be saved.");
+
+            var oldAssignee = await ReadAssignee(connection, transaction, internalId, cancellationToken);
+            var assignment = await RecordAssignmentChange(connection, transaction, internalId, actor, occurredAt,
+                oldAssignee, null, cancellationToken);
+            // The audit envelope's actor and occurrence time identify this attestation.
+            await AuditChange(connection, transaction, actor, occurredAt, "specification.implement", internalId,
+                Snapshot(current.Value, "Approved"), Snapshot(next.Value, "Implemented"), cancellationToken,
+                assignment: assignment.GetValueOrDefault(), mergeAttested: mergeAttested);
+            return next;
+        }, cancellationToken);
+
     private static async Task<Result> LockApprovedTargets(NpgsqlConnection connection, NpgsqlTransaction transaction,
         InReviewSpecification review, CancellationToken token)
     {
@@ -497,11 +533,11 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues after,
         CancellationToken cancellationToken, string? reason = null, bool? noActiveOrUncertainRunAttested = null,
         SpecificationAuditAssignment? assignment = null, SpecificationAuditAiReviewChange? aiReview = null,
-        SpecificationAuditEvidenceChange? evidence = null) =>
+        SpecificationAuditEvidenceChange? evidence = null, bool? mergeAttested = null) =>
         PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
             new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(internalId.ToString()),
                 AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after, reason,
-                    noActiveOrUncertainRunAttested, assignment, aiReview, evidence)),
+                    noActiveOrUncertainRunAttested, assignment, aiReview, evidence, mergeAttested)),
             cancellationToken);
 
     private static async Task<Result> SaveContent(NpgsqlCommand command, CancellationToken cancellationToken)

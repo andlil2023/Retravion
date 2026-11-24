@@ -137,23 +137,17 @@ public sealed partial class SpecificationReadTests
 
         await using var connection = new NpgsqlConnection(db.ConnectionString);
         await connection.OpenAsync();
-        await using (var enableStates = new NpgsqlCommand("""
-            ALTER TABLE retravion_specification.specification DROP CONSTRAINT specification_status_check
-            """, connection))
-            await enableStates.ExecuteNonQueryAsync();
         foreach (var status in new[] { "In Review", "Approved", "Implemented" })
         {
-            await using var move = new NpgsqlCommand("UPDATE retravion_specification.specification SET status = $1", connection);
-            move.Parameters.AddWithValue(status);
-            await move.ExecuteNonQueryAsync();
+            if (status == "Implemented") await SeedImplemented(connection, draft.InternalId);
+            else await SetReopenSeedStatus(connection, draft.InternalId, status);
             Assert.Equal("Only Draft Specification links can be edited.",
                 (await operations.EditLinks(principal, product.InternalId, draft.InternalId, local)).Error);
         }
-        await using (var restore = new NpgsqlCommand("UPDATE retravion_specification.specification SET status = 'Draft'", connection))
-            await restore.ExecuteNonQueryAsync();
+        var retiring = (await operations.Create(principal, product.InternalId, "DEV-2", "Draft", null)).Value;
         Assert.True((await products.Update(product, product.Retire().Value)).IsSuccess);
-        Assert.Contains("retired", (await operations.EditLinks(principal, product.InternalId, draft.InternalId, local)).Error);
-        Assert.Equal(draft, (await operations.Find(principal, product.InternalId, draft.InternalId)).Value.Value);
+        Assert.Contains("retired", (await operations.EditLinks(principal, product.InternalId, retiring.InternalId, local)).Error);
+        Assert.Equal(retiring, (await operations.Find(principal, product.InternalId, retiring.InternalId)).Value.Value);
         Assert.Empty(await LinkEvents(db));
     }
 

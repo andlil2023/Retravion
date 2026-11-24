@@ -113,19 +113,10 @@ public sealed partial class SpecificationReadTests
 
         await using var connection = new NpgsqlConnection(db.ConnectionString);
         await connection.OpenAsync();
-        // T004 must protect the write even though lifecycle transitions and their schema are not installed yet.
-        await using (var enableStates = new NpgsqlCommand("""
-            ALTER TABLE retravion_specification.specification DROP CONSTRAINT specification_status_check
-            """, connection))
-            await enableStates.ExecuteNonQueryAsync();
         foreach (var status in new[] { "In Review", "Approved", "Implemented" })
         {
-            await using var move = new NpgsqlCommand("""
-                UPDATE retravion_specification.specification SET status = $1 WHERE internal_id = $2
-                """, connection);
-            move.Parameters.AddWithValue(status);
-            move.Parameters.AddWithValue(draft.InternalId);
-            Assert.Equal(1, await move.ExecuteNonQueryAsync());
+            if (status == "Implemented") await SeedImplemented(connection, draft.InternalId);
+            else await SetReopenSeedStatus(connection, draft.InternalId, status);
             Assert.Equal("Only Draft Specification content can be edited.",
                 (await operations.EditContent(principal, product.InternalId, draft.InternalId, "NEW", "Title", null)).Error);
             await using var inspect = new NpgsqlCommand("""

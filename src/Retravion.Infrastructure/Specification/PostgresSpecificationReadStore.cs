@@ -42,6 +42,20 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
                     ADD CONSTRAINT specification_approved_description_check
                         CHECK (status <> 'Approved' OR length(btrim(description, {Whitespace})) > 0);
             END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'retravion_specification.specification'::regclass
+                AND conname = 'specification_implementation_check') THEN
+                ALTER TABLE retravion_specification.specification
+                    DROP CONSTRAINT specification_status_check,
+                    ADD COLUMN merge_attested_by text,
+                    ADD COLUMN merge_attested_at_utc_ticks bigint,
+                    ADD CONSTRAINT specification_status_check CHECK (status IN ('Draft', 'In Review', 'Approved', 'Implemented')),
+                    ADD CONSTRAINT specification_implementation_check CHECK (
+                        (status = 'Implemented' AND length(btrim(description, {Whitespace})) > 0
+                            AND merge_attested_by IS NOT NULL AND length(btrim(merge_attested_by, {Whitespace})) > 0
+                            AND merge_attested_at_utc_ticks IS NOT NULL AND merge_attested_at_utc_ticks BETWEEN 0 AND 3155378975999999999)
+                        OR (status <> 'Implemented' AND merge_attested_by IS NULL AND merge_attested_at_utc_ticks IS NULL));
+            END IF;
         END $$;
         CREATE UNIQUE INDEX IF NOT EXISTS specification_product_id_unique ON retravion_specification.specification
             (product_internal_id, (btrim(id, {Whitespace})) COLLATE retravion_specification.specification_case_fold);
@@ -77,21 +91,32 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
     private const string SelectFields = """
         SELECT s.internal_id, s.product_internal_id, s.id, s.title, s.description, s.status,
             ARRAY(SELECT kind FROM retravion_specification.link WHERE specification_internal_id = s.internal_id ORDER BY kind, version_id),
-            ARRAY(SELECT version_id FROM retravion_specification.link WHERE specification_internal_id = s.internal_id ORDER BY kind, version_id)
+            ARRAY(SELECT version_id FROM retravion_specification.link WHERE specification_internal_id = s.internal_id ORDER BY kind, version_id),
+            s.merge_attested_by, s.merge_attested_at_utc_ticks,
+            e.specification_internal_id IS NOT NULL, e.markdown, e.pull_request_url, e.is_outdated
         """;
-    private const string From = " FROM retravion_specification.specification s WHERE product_internal_id = $1";
-    internal const string Select = SelectFields + From;
+    internal const string Select = SelectFields + """
+         FROM retravion_specification.specification s
+         LEFT JOIN retravion_specification.evidence e ON e.specification_internal_id = s.internal_id AND s.status = 'Implemented'
+         WHERE s.product_internal_id = $1
+        """;
     private const string SelectDetail = SelectFields + """
         , (SELECT coalesce(jsonb_agg(jsonb_build_object('Actor', h.actor, 'UtcTicks', h.occurred_at_utc_ticks,
               'OldAssignee', h.old_assignee, 'NewAssignee', h.new_assignee) ORDER BY h.sequence), '[]'::jsonb)
            FROM retravion_specification.assignment_history h WHERE h.specification_internal_id = s.internal_id),
-          r.specification_internal_id IS NOT NULL, r.markdown, r.is_outdated,
-          e.specification_internal_id IS NOT NULL, e.markdown, e.pull_request_url, e.is_outdated
+          r.specification_internal_id IS NOT NULL, r.markdown, r.is_outdated
          FROM retravion_specification.specification s
          LEFT JOIN retravion_specification.ai_review r ON r.specification_internal_id = s.internal_id
          LEFT JOIN retravion_specification.evidence e ON e.specification_internal_id = s.internal_id
          WHERE s.product_internal_id = $1
         """;
+    private const int AttesterIndex = 8;
+    private const int AttestedAtIndex = 9;
+    private const int EvidencePresentIndex = 10;
+    private const int EvidenceMarkdownIndex = 11;
+    private const int AssignmentHistoryIndex = 14;
+    private const int ReviewPresentIndex = 15;
+    private const int ReviewMarkdownIndex = 16;
 
     private sealed record AssignmentRow(string Actor, long UtcTicks, string? OldAssignee, string? NewAssignee)
     {
@@ -125,18 +150,18 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             if (!await reader.ReadAsync(cancellationToken)) return Result.Success(Maybe<SpecificationDetail>.None);
             var mapped = Map(reader);
             if (mapped.IsFailure) return Result.Failure<Maybe<SpecificationDetail>>(mapped.Error);
-            var history = JsonSerializer.Deserialize<AssignmentRow[]>(reader.GetString(8))!;
+            var history = JsonSerializer.Deserialize<AssignmentRow[]>(reader.GetString(AssignmentHistoryIndex))!;
             SpecificationAiReview? review = null;
-            if (reader.GetBoolean(9))
+            if (reader.GetBoolean(ReviewPresentIndex))
             {
-                var mappedReview = MapAiReview(reader, 10);
+                var mappedReview = MapAiReview(reader, ReviewMarkdownIndex);
                 if (mappedReview.IsFailure) return Result.Failure<Maybe<SpecificationDetail>>(mappedReview.Error);
                 review = mappedReview.Value;
             }
-            SpecificationEvidence? evidence = null;
-            if (reader.GetBoolean(12))
+            var evidence = (mapped.Value as ImplementedSpecification)?.Evidence;
+            if (evidence is null && reader.GetBoolean(EvidencePresentIndex))
             {
-                var mappedEvidence = MapEvidence(reader, 13);
+                var mappedEvidence = MapEvidence(reader, EvidenceMarkdownIndex);
                 if (mappedEvidence.IsFailure ||
                     (mapped.Value is DraftSpecification or InReviewSpecification && !mappedEvidence.Value.IsOutdated))
                     return Result.Failure<Maybe<SpecificationDetail>>(InvalidRecord);
@@ -146,7 +171,9 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             {
                 Evidence = evidence
             };
-            return Result.Success(Maybe<SpecificationDetail>.From(detail));
+            return mapped.Value is ImplementedSpecification && detail.Assignee is not null
+                ? Result.Failure<Maybe<SpecificationDetail>>(InvalidRecord)
+                : Result.Success(Maybe<SpecificationDetail>.From(detail));
         }, cancellationToken, SelectDetail);
 
     public Task<Result<IReadOnlyList<SpecificationVersionChoice>>> ListVersions(Guid productInternalId, SpecificationLinkKind kind,
@@ -182,13 +209,35 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         var draft = links.Bind(value => DraftSpecification.Restore(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2),
             reader.GetString(3), reader.GetString(4), value));
         if (draft.IsFailure) return Result.Failure<DevelopmentSpecification>(InvalidRecord);
-        return reader.GetString(5) switch
+        var status = reader.GetString(5);
+        if (status != "Implemented" && (!reader.IsDBNull(AttesterIndex) || !reader.IsDBNull(AttestedAtIndex)))
+            return Result.Failure<DevelopmentSpecification>(InvalidRecord);
+        if (status == "Draft") return Result.Success<DevelopmentSpecification>(draft.Value);
+        if (!draft.Value.SubmitForReview().TryGetValue(out var review))
+            return Result.Failure<DevelopmentSpecification>(InvalidRecord);
+        if (status == "In Review") return Result.Success<DevelopmentSpecification>(review);
+        var approved = review.Approve();
+        return status switch
         {
-            "Draft" => Result.Success<DevelopmentSpecification>(draft.Value),
-            "In Review" when draft.Value.SubmitForReview().TryGetValue(out var review) => Result.Success<DevelopmentSpecification>(review),
-            "Approved" when draft.Value.SubmitForReview().TryGetValue(out var reviewed) => Result.Success<DevelopmentSpecification>(reviewed.Approve()),
+            "Approved" => Result.Success<DevelopmentSpecification>(approved),
+            "Implemented" => MapImplemented(reader, approved),
             _ => Result.Failure<DevelopmentSpecification>(InvalidRecord)
         };
+    }
+
+    private static Result<DevelopmentSpecification> MapImplemented(NpgsqlDataReader reader, ApprovedSpecification approved)
+    {
+        if (reader.IsDBNull(AttesterIndex) || reader.IsDBNull(AttestedAtIndex) || !reader.GetBoolean(EvidencePresentIndex))
+            return Result.Failure<DevelopmentSpecification>(InvalidRecord);
+        var ticks = reader.GetInt64(AttestedAtIndex);
+        if (ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks ||
+            !MapEvidence(reader, EvidenceMarkdownIndex).TryGetValue(out var evidence))
+            return Result.Failure<DevelopmentSpecification>(InvalidRecord);
+        var implemented = approved.Implement(evidence, mergeAttested: true, reader.GetString(AttesterIndex),
+            new DateTimeOffset(ticks, TimeSpan.Zero));
+        return implemented.IsSuccess
+            ? Result.Success<DevelopmentSpecification>(implemented.Value)
+            : Result.Failure<DevelopmentSpecification>(InvalidRecord);
     }
 
     internal static Result<SpecificationAiReview> MapAiReview(NpgsqlDataReader reader, int markdownIndex)
@@ -261,7 +310,7 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             AND to_regclass('retravion_specification.ai_review') IS NOT NULL
             AND to_regclass('retravion_specification.evidence') IS NOT NULL AND EXISTS (
                 SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('retravion_specification.specification')
-                AND conname = 'specification_approved_description_check')
+                AND conname = 'specification_implementation_check')
             """, connection, transaction);
         return await exists.ExecuteScalarAsync(cancellationToken) is true;
     }

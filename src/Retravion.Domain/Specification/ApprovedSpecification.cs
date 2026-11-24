@@ -7,6 +7,11 @@ public sealed record ApprovedSpecification : DevelopmentSpecification
     internal ApprovedSpecification(InReviewSpecification review)
         : base(review.InternalId, review.ProductInternalId, review.Id, review.Title, review.Description, review.Links) { }
 
+    public Result<ImplementedSpecification> Implement(SpecificationEvidence? evidence, bool mergeAttested,
+        string mergeAttestedBy, DateTimeOffset mergeAttestedAt) => mergeAttested
+        ? ImplementedSpecification.FromApproved(this, evidence, mergeAttestedBy, mergeAttestedAt)
+        : Result.Failure<ImplementedSpecification>("Explicitly attest that the implementation PR was merged.");
+
     public Result<DraftSpecification> Reopen(string? reason, bool noActiveOrUncertainRunAttested)
     {
         if (string.IsNullOrWhiteSpace(reason))

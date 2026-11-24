@@ -34,7 +34,7 @@ public sealed partial class SpecificationReadTests
         await SeedReopenLinks(seed, product, linked, "Draft");
         var specification = await SeedReopenLinks(seed, product, linked, "Approved");
         await AssertReopenBlocked(owners, linked);
-        await SetReopenSeedStatus(seed, specification, "Implemented");
+        await SeedImplemented(seed, specification);
         await AssertReopenBlocked(owners, linked);
         AssertUnchanged(linked, await owners.Find(linked));
         AssertUnchanged(linked, await owners.Find(linked, exact: true));
@@ -129,9 +129,6 @@ public sealed partial class SpecificationReadTests
         Assert.Empty((await new PostgresSpecificationReadStore(db.ConnectionString).List(product)).Value);
         var connection = new NpgsqlConnection(db.ConnectionString);
         await connection.OpenAsync();
-        // Approval and implementation commands and storage constraints are separate tasks.
-        await using var enable = new NpgsqlCommand("ALTER TABLE retravion_specification.specification DROP CONSTRAINT specification_status_check", connection);
-        await enable.ExecuteNonQueryAsync();
         return connection;
     }
 
@@ -157,6 +154,26 @@ public sealed partial class SpecificationReadTests
         update.Parameters.AddWithValue(status);
         update.Parameters.AddWithValue(specification);
         Assert.Equal(1, await update.ExecuteNonQueryAsync());
+    }
+
+    private static async Task SeedImplemented(NpgsqlConnection connection, Guid specification)
+    {
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using var evidence = new NpgsqlCommand("""
+            INSERT INTO retravion_specification.evidence VALUES ($1, '# Seeded report', $2, false)
+            """, connection, transaction);
+        evidence.Parameters.AddWithValue(specification);
+        evidence.Parameters.AddWithValue(EvidenceUrl);
+        Assert.Equal(1, await evidence.ExecuteNonQueryAsync());
+        await using var implement = new NpgsqlCommand("""
+            UPDATE retravion_specification.specification
+            SET status = 'Implemented', merge_attested_by = $2, merge_attested_at_utc_ticks = $3 WHERE internal_id = $1
+            """, connection, transaction);
+        implement.Parameters.AddWithValue(specification);
+        implement.Parameters.AddWithValue(CreateActor.Identifier);
+        implement.Parameters.AddWithValue(CreateTime.UtcTicks);
+        Assert.Equal(1, await implement.ExecuteNonQueryAsync());
+        await transaction.CommitAsync();
     }
 
     private static async Task<long> ReopenEvidenceCount(NpgsqlConnection connection)

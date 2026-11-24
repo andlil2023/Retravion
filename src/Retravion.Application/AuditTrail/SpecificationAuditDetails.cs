@@ -8,7 +8,8 @@ public sealed record SpecificationAuditDetails(Guid InternalId, SpecificationAud
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? NoActiveOrUncertainRunAttested = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditAssignment? Assignment = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditAiReviewChange? AiReview = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditEvidenceChange? Evidence = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditEvidenceChange? Evidence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? MergeAttested = null);
 
 public sealed record SpecificationAuditAssignment(string? OldAssignee, string? NewAssignee);
 

@@ -67,6 +67,11 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
         Change(principal, "specification.approve", (actor, now, authorized) =>
             writes.Approve(productInternalId, internalId, actor, now, authorized, cancellationToken), cancellationToken);
 
+    public Task<Result<ImplementedSpecification>> Implement(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        bool mergeAttested, CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.implement", (actor, now, authorized) =>
+            writes.Implement(productInternalId, internalId, mergeAttested, actor, now, authorized, cancellationToken), cancellationToken);
+
     public Task<Result<DraftSpecification>> Reopen(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
         string? reason, bool noActiveOrUncertainRunAttested, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.reopen", (actor, now, authorized) =>
