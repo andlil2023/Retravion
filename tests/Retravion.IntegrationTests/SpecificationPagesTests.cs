@@ -450,8 +450,16 @@ public sealed partial class SpecificationReadTests
         }
 
         internal Task Submit() => Event(Assert.Single(Elements("form")), "onsubmit", EventArgs.Empty);
+        internal RenderTreeFrame[] Element(string tag, string attribute, string value) =>
+            Assert.Single(Elements(tag), attrs => attrs.Any(frame => frame.AttributeName == attribute && Equals(frame.AttributeValue, value)));
+        internal bool HasButton(string id) => Elements("button").Any(attrs => attrs.Any(frame => frame.AttributeName == "id" && Equals(frame.AttributeValue, id)));
+        internal bool ButtonDisabled(string id) => Element("button", "id", id).Any(frame => frame.AttributeName == "disabled");
+        internal Task Click(string id) => Event(Element("button", "id", id), "onclick", new MouseEventArgs());
+        internal Task Check(string attribute, string value, bool isChecked = true) =>
+            Event(Element("input", attribute, value), "onchange", new ChangeEventArgs { Value = isChecked });
+
         private Task Event(RenderTreeFrame[] attributes, string name, EventArgs args) =>
-            DispatchEventAsync(attributes.Single(frame => frame.AttributeName == name).AttributeEventHandlerId, null, args);
+            DispatchEventAsync(attributes.Single(frame => frame.AttributeName == name).AttributeEventHandlerId, null, args, waitForQuiescence: true);
     }
 }
 #pragma warning restore BL0006

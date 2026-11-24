@@ -1,12 +1,33 @@
 @page "/specifications/details"
+@using CSharpFunctionalExtensions
+@using System.Security.Claims
+@implements IDisposable
 @inject SpecificationOperations Operations
 @inject ProductOperations Products
 @inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
 
 <PageTitle>Specification · Retravion</PageTitle>
 <SectionContent SectionName="product-page-header">
     <PageHeader Title="Specification" BackHref="@SpecificationPresentation.ListPath(_product?.Id ?? ProductId)" BackText="Specifications" />
 </SectionContent>
+@if (_busy)
+{
+    <p role="status" aria-busy="true">Saving Specification change…</p>
+}
+@if (_mutationError is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert" Class="mb-4">@_mutationError</MudAlert>
+    @if (_uncertain)
+    {
+        <p>The details below were last loaded before the operation.</p>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" id="specification-reload" OnClick="Load">Reload Specification</MudButton>
+    }
+}
+@if (_notice is not null)
+{
+    <MudAlert Severity="@(_approvalReminder ? Severity.Info : Severity.Success)" role="status" Class="mb-4">@_notice</MudAlert>
+}
 @if (_error is not null)
 {
     <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
@@ -42,11 +63,20 @@ else
             }
         </section>
     </MudPaper>
-    @if (_product.IsActive && _specification is DraftSpecification)
+    @if (CanChange && _specification is DraftSpecification)
     {
         <div class="product-actions">
-            <MudButton Href="@SpecificationPresentation.EditPath(_product.Id, _specification.InternalId)" Variant="Variant.Filled" Color="Color.Primary" Class="product-button">Edit</MudButton>
+            <MudButton Href="@SpecificationPresentation.EditPath(_product.Id, _specification.InternalId)" Variant="Variant.Filled" Color="Color.Primary" Class="product-button" Disabled="@_busy">Edit</MudButton>
         </div>
+    }
+    <SpecificationTraceability @key="(_loadVersion, _specification.Links)" Specification="_specification"
+                               CanEdit="@(CanChange && _specification is DraftSpecification)" Busy="_busy" OnSave="SaveLinks" />
+    @if (CanChange && _specification is not ImplementedSpecification)
+    {
+        <SpecificationReviewControls @key="(_loadVersion, _specification.GetType())" Specification="_specification"
+                                     Busy="_busy" OnSubmit="Submit" OnApprove="Approve" OnReturn="Return" />
+        <SpecificationDeleteControls @key="(_loadVersion, _specification)" Specification="_specification" ProductId="@_product.Id"
+                                     Busy="_busy" OnConfirm="Delete" />
     }
 }
 
@@ -56,26 +86,103 @@ else
 
     private Retravion.Domain.Product.Product? _product;
     private DevelopmentSpecification? _specification;
-    private string? _error;
+    private string? _error, _mutationError, _notice;
+    private bool _busy, _uncertain, _approvalReminder;
     private int _loadVersion;
+    private bool CanChange => _product is { IsActive: true } && !_uncertain;
 
-    protected override async Task OnParametersSetAsync()
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
     {
         var version = ++_loadVersion;
         var productId = ProductId;
         _product = null;
         _specification = null;
-        _error = null;
+        _error = _mutationError = _notice = null;
+        _busy = _uncertain = _approvalReminder = false;
         if (!Guid.TryParse(Id, out var id) || id == Guid.Empty) { _error = "Specification not found in this Product."; return; }
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        if (version == _loadVersion) await Read(actor, productId, id, version);
+    }
+
+    private async Task Read(ClaimsPrincipal actor, string? productId, Guid id, int version, Guid? expectedProduct = null)
+    {
         var product = await Products.Retrieve(actor, productId);
         if (version != _loadVersion) return;
-        if (product.IsFailure) { _error = product.Error; return; }
+        if (product.IsFailure || (expectedProduct is { } expected && product.Value.InternalId != expected))
+        {
+            (_product, _specification) = (null, null);
+            _error = product.IsFailure ? product.Error : "Specification not found in this Product.";
+            return;
+        }
         var specification = await Operations.Find(actor, product.Value.InternalId, id);
         if (version != _loadVersion) return;
-        if (specification.IsFailure) { _error = specification.Error; return; }
-        if (specification.Value.HasNoValue) { _error = "Specification not found in this Product."; return; }
         _product = product.Value;
-        _specification = specification.Value.Value;
+        _specification = specification.IsSuccess ? specification.Value.GetValueOrDefault() : null;
+        _error = specification.IsFailure ? specification.Error : _specification is null ? "Specification not found in this Product." : null;
     }
+
+    private Task SaveLinks(SpecificationLink[] targets) => _specification is DraftSpecification
+        ? Change((actor, product, id) => Operations.EditLinks(actor, product, id, targets), saved =>
+            { _specification = saved; _notice = "Exact-version links saved."; })
+        : Task.CompletedTask;
+
+    private Task Submit() => _specification is DraftSpecification draft && !string.IsNullOrWhiteSpace(draft.Description)
+        ? Change((actor, product, id) => Operations.SubmitForReview(actor, product, id), submitted => _specification = submitted)
+        : Task.CompletedTask;
+
+    private Task Approve() => _specification is InReviewSpecification
+        ? Change((actor, product, id) => Operations.Approve(actor, product, id), approval =>
+        {
+            _specification = approval.Specification;
+            if (approval.MissingLinkTypes.Count == 0) return;
+            _approvalReminder = true;
+            _notice = $"Specification approved. No exact-version links for: {string.Join(", ", approval.MissingLinkTypes.Select(SpecificationPresentation.LinkKind))}.";
+        }) : Task.CompletedTask;
+
+    private Task Return((string? Reason, bool Attested) input) => _specification switch
+    {
+        InReviewSpecification => Change((actor, product, id) => Operations.ReturnToDraft(actor, product, id, input.Reason),
+            returned => _specification = returned),
+        ApprovedSpecification when input.Attested => Change((actor, product, id) => Operations.Reopen(actor, product, id, input.Reason, input.Attested),
+            returned => _specification = returned),
+        _ => Task.CompletedTask
+    };
+
+    private Task Delete((Guid ConfirmedId, bool Attested) input) => _product is { } product && input.Attested &&
+        _specification is not ImplementedSpecification && _specification?.InternalId == input.ConfirmedId
+        ? Change(async (actor, productId, id) =>
+            (await Operations.Delete(actor, productId, id, input.ConfirmedId, input.Attested)).Map(() => true),
+            _ =>
+            {
+                _specification = null;
+                Navigation.NavigateTo(SpecificationPresentation.ListPath(product.Id));
+            })
+        : Task.CompletedTask;
+
+    private async Task Change<T>(Func<ClaimsPrincipal, Guid, Guid, Task<Result<T>>> operation, Action<T> apply)
+    {
+        if (_busy || !CanChange || _product is not { } product || _specification is not { } target) return;
+        var version = _loadVersion;
+        _busy = true;
+        _mutationError = _notice = null;
+        _approvalReminder = false;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            if (version != _loadVersion) return;
+            var result = await operation(actor, product.InternalId, target.InternalId);
+            if (version != _loadVersion) return;
+            if (result.IsSuccess) { apply(result.Value); return; }
+
+            _mutationError = result.Error;
+            // The existing store has a distinct safe message for an unconfirmed commit, not a typed outcome.
+            _uncertain = result.Error.StartsWith("The Specification operation outcome could not be confirmed.", StringComparison.Ordinal);
+            if (!_uncertain) await Read(actor, product.Id, target.InternalId, version, product.InternalId);
+        }
+        finally { if (version == _loadVersion) _busy = false; }
+    }
+
+    public void Dispose() => _loadVersion++;
 }
