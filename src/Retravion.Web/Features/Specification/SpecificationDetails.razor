@@ -1,0 +1,81 @@
+@page "/specifications/details"
+@inject SpecificationOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Specification · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Specification" BackHref="@SpecificationPresentation.ListPath(_product?.Id ?? ProductId)" BackText="Specifications" />
+</SectionContent>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+}
+else if (_product is null || _specification is null)
+{
+    <p role="status">Loading Specification…</p>
+}
+else
+{
+    <p class="specification-context" aria-label="Product context">@_product.Id · @_product.Name</p>
+    @if (!_product.IsActive)
+    {
+        <p>Product retired: this Specification is read-only.</p>
+    }
+    <MudPaper Class="pa-4" Elevation="0">
+        <div class="specification-heading">
+            <div class="specification-identity">
+                <p class="specification-id">@_specification.Id</p>
+                <h2>@_specification.Title</h2>
+            </div>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary">@SpecificationPresentation.Status(_specification)</MudChip>
+        </div>
+        <section class="specification-description" aria-labelledby="specification-description-heading">
+            <h3 id="specification-description-heading">Description</h3>
+            @if (string.IsNullOrWhiteSpace(_specification.Description))
+            {
+                <p>No description provided.</p>
+            }
+            else
+            {
+                <ProductMarkdownView Markdown="@_specification.Description" />
+            }
+        </section>
+    </MudPaper>
+    @if (_product.IsActive && _specification is DraftSpecification)
+    {
+        <div class="product-actions">
+            <MudButton Href="@SpecificationPresentation.EditPath(_product.Id, _specification.InternalId)" Variant="Variant.Filled" Color="Color.Primary" Class="product-button">Edit</MudButton>
+        </div>
+    }
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public string? Id { get; set; }
+
+    private Retravion.Domain.Product.Product? _product;
+    private DevelopmentSpecification? _specification;
+    private string? _error;
+    private int _loadVersion;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var version = ++_loadVersion;
+        var productId = ProductId;
+        _product = null;
+        _specification = null;
+        _error = null;
+        if (!Guid.TryParse(Id, out var id) || id == Guid.Empty) { _error = "Specification not found in this Product."; return; }
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, productId);
+        if (version != _loadVersion) return;
+        if (product.IsFailure) { _error = product.Error; return; }
+        var specification = await Operations.Find(actor, product.Value.InternalId, id);
+        if (version != _loadVersion) return;
+        if (specification.IsFailure) { _error = specification.Error; return; }
+        if (specification.Value.HasNoValue) { _error = "Specification not found in this Product."; return; }
+        _product = product.Value;
+        _specification = specification.Value.Value;
+    }
+}

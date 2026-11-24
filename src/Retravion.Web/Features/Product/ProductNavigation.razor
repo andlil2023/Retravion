@@ -47,7 +47,7 @@
                         <MudIcon Class="product-navigation-development-code" Icon="@Icons.Material.Outlined.Code" /><span>Development</span>
                     </button>
                     <div id="@developmentId" hidden="@(!developmentExpanded)">
-                        <span class="product-navigation-item product-navigation-specifications" aria-disabled="true"><MudIcon Icon="@Icons.Material.Outlined.Description" /><span>Specifications</span></span>
+                        <a class="navigation-node product-navigation-item product-navigation-specifications" href="@($"/specifications?product={Uri.EscapeDataString(product.Id)}")" aria-label="@($"Specifications for {product.Id} – {product.Name}")"><MudIcon Icon="@Icons.Material.Outlined.Description" /><span>Specifications</span></a>
                     </div>
                 </div>
             </div>

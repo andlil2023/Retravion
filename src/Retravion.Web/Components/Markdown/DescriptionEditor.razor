@@ -1,4 +1,5 @@
 @using Microsoft.JSInterop
+@using System.Text
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 
@@ -13,19 +14,30 @@ else
 {
 <MudPaper Class="product-card" Elevation="0">
     <form id="@FormId" @onsubmit="Save" @onsubmit:preventDefault aria-label="@SubmitText">
-        @ChildContent
+        @if (StreamedInputMaxBytes is not null)
+        {
+            <div inert="@(_readingForSave ? "" : null)">@ChildContent</div>
+        }
+        else
+        {
+            @ChildContent
+        }
         @EditorContent
     </form>
 </MudPaper>
 <div class="product-actions">
     @Actions
     <MudButton ButtonType="ButtonType.Submit" form="@FormId" Variant="Variant.Filled" Color="Color.Primary"
-               Disabled="@(Busy || SaveDisabled)" Class="product-button">@SubmitText</MudButton>
+               Disabled="@(Saving || SaveDisabled)" Class="product-button">@SubmitText</MudButton>
     @if (CancelHref is not null)
     {
         <MudButton Href="@CancelHref" Class="product-button">Cancel</MudButton>
     }
 </div>
+}
+@if (_inputError is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert" Class="mt-4">@_inputError</MudAlert>
 }
 @if (_fullscreenError is not null)
 {
@@ -59,7 +71,15 @@ else
         <div class="description-layout @_arrangement">
             <div class="description-source">
                 <label for="@InputId">@Label (Markdown)</label>
-                <textarea id="@InputId" value="@_markdown" @oninput="Edit" disabled="@(Busy || ReadOnly)" rows="@(FieldOnly ? 6 : 12)" spellcheck="true"></textarea>
+                @if (StreamedInputMaxBytes is not null)
+                {
+                    @* Keep the live value in the browser; ordinary input events would send the entire value. *@
+                    <textarea @ref="_source" id="@InputId" value="@InitialDescription" disabled="@(Saving || ReadOnly)" rows="@(FieldOnly ? 6 : 12)" spellcheck="true"></textarea>
+                }
+                else
+                {
+                    <textarea id="@InputId" value="@_markdown" @oninput="Edit" disabled="@(Saving || ReadOnly)" rows="@(FieldOnly ? 6 : 12)" spellcheck="true"></textarea>
+                }
             </div>
             <div class="description-splitter" role="separator" tabindex="0" aria-orientation="vertical"
                  aria-label="Resize Markdown and preview panes" aria-controls="@InputId"
@@ -74,6 +94,7 @@ else
     </div>;
 
     [Parameter] public bool FieldOnly { get; set; }
+    [Parameter] public int? StreamedInputMaxBytes { get; set; }
     [Parameter] public string InputId { get; set; } = "product-markdown";
     [Parameter, EditorRequired] public string InitialDescription { get; set; } = "";
     [Parameter] public bool Busy { get; set; }
@@ -92,7 +113,12 @@ else
     private string _markdown = "";
     private string _arrangement = "side-by-side";
     private bool _initialized;
-    private ElementReference _dialog;
+    private ElementReference _dialog, _source;
+    private DotNetObjectReference<DescriptionEditor>? _inputCallback;
+    private string? _inputError;
+    private bool _readingForSave;
+    private int _inputVersion;
+    private bool Saving => Busy || _readingForSave;
     private IJSObjectReference? _module;
     private bool _fullscreen;
     private bool _changingMode;
@@ -126,7 +152,15 @@ else
                 await _module.DisposeAsync();
                 return;
             }
-            if (firstRender) await _module.InvokeVoidAsync("initializeSplitter", _dialog);
+            if (firstRender)
+            {
+                await _module.InvokeVoidAsync("initializeSplitter", _dialog);
+                if (!_disposed && StreamedInputMaxBytes is not null)
+                {
+                    _inputCallback = DotNetObjectReference.Create(this);
+                    await _module.InvokeVoidAsync("initializeMarkdownInput", _dialog, _source, _inputCallback);
+                }
+            }
             if (applyMode) await _module.InvokeVoidAsync("setFullscreen", _dialog, _fullscreen);
         }
         catch (JSDisconnectedException) { }
@@ -152,6 +186,7 @@ else
             await _module.DisposeAsync();
         }
         catch (JSDisconnectedException) { }
+        finally { _inputCallback?.Dispose(); }
     }
 
     protected override void OnParametersSet()
@@ -167,9 +202,50 @@ else
         _markdown = args.Value?.ToString() ?? "";
         await DescriptionChanged.InvokeAsync(_markdown);
     }
+    [JSInvokable]
+    public async Task RefreshMarkdownPreview()
+    {
+        if (_disposed || Saving || ReadOnly || StreamedInputMaxBytes is not int maxBytes) return;
+        var version = ++_inputVersion;
+        var (markdown, error) = await ReadMarkdownInput(maxBytes);
+        if (_disposed || version != _inputVersion) return;
+        _inputError = error;
+        if (markdown is not null)
+        {
+            _markdown = markdown;
+            await DescriptionChanged.InvokeAsync(markdown);
+        }
+        StateHasChanged();
+    }
+
+    private async Task<(string? Markdown, string? Error)> ReadMarkdownInput(int maxBytes)
+    {
+        const string readError = "The Markdown could not be read. Try again.";
+        var sizeError = $"{Label} must be at most {maxBytes:N0} bytes of UTF-8 Markdown.";
+        if (_module is null) return (null, readError);
+        try
+        {
+            var input = await _module.InvokeAsync<MarkdownInput>("readMarkdownInput", _source, maxBytes);
+            await using var reference = input.Content;
+            if (input.InvalidUnicode) return (null, $"{Label} contains invalid Unicode. Replace the invalid characters and try again.");
+            if (input.TooLarge || reference?.Length > maxBytes) return (null, sizeError);
+            if (reference is null) return ("", null);
+            await using var stream = await reference.OpenReadStreamAsync(maxBytes);
+            using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false);
+            return (await reader.ReadToEndAsync(), null);
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or IOException
+            or DecoderFallbackException or OperationCanceledException or TimeoutException)
+        {
+            return (null, readError);
+        }
+    }
+
+    private sealed record MarkdownInput(bool TooLarge, bool InvalidUnicode, IJSStreamReference? Content);
+
     private async Task Save()
     {
-        if (Busy || SaveDisabled || _changingMode) return;
+        if (Saving || SaveDisabled || _changingMode) return;
         if (ExitFullscreenOnSave && _fullscreen)
         {
             _changingMode = true;
@@ -188,6 +264,21 @@ else
             }
             finally { _changingMode = false; }
         }
-        await OnSave.InvokeAsync(_markdown);
+        if (StreamedInputMaxBytes is int maxBytes)
+        {
+            _readingForSave = true;
+            ++_inputVersion; // A preview in flight must not overwrite this save's snapshot.
+            try
+            {
+                var (markdown, error) = await ReadMarkdownInput(maxBytes);
+                if (_disposed) return;
+                _inputError = error;
+                if (markdown is null) return;
+                _markdown = markdown;
+                await OnSave.InvokeAsync(markdown);
+            }
+            finally { _readingForSave = false; }
+        }
+        else await OnSave.InvokeAsync(_markdown);
     }
 }
