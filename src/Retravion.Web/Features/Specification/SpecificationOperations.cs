@@ -45,6 +45,18 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             writes.SubmitAiReview(productInternalId, internalId, input, userApproved, actor, now, authorized, cancellationToken),
             cancellationToken);
 
+    public Task<Result<SpecificationEvidence>> SaveEvidence(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        string? markdown, string? pullRequestUrl, CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.save-evidence", (actor, now, authorized) =>
+            writes.SaveEvidence(productInternalId, internalId, markdown, pullRequestUrl, actor, now, authorized, cancellationToken),
+            cancellationToken);
+
+    public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        bool reviewedEvidence, CancellationToken cancellationToken = default) =>
+        Change(principal, "specification.confirm-evidence-current", (actor, now, authorized) =>
+            writes.ConfirmEvidenceCurrent(productInternalId, internalId, reviewedEvidence, actor, now, authorized, cancellationToken),
+            cancellationToken);
+
     public Task<Result<InReviewSpecification>> SubmitForReview(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
         CancellationToken cancellationToken = default) =>
         Change(principal, "specification.submit-for-review", (actor, now, authorized) =>

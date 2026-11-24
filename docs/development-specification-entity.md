@@ -97,6 +97,10 @@ The final evidence report is a separate record linked to the specification:
 - The report should describe outcomes and limitations. It is supporting evidence, not a substitute for final release test approval.
 - Earlier factory review iterations are not required to be stored in Retravion.
 
+For PBI #266, an authorized user can save one non-empty report (at most 1 MB of UTF-8 Markdown) and an optional absolute HTTPS PR URL while Approved. Reopening retains both values and marks the evidence outdated. Reapproval does not refresh it: a user must explicitly confirm that they reviewed the retained evidence or save a replacement. This increment has no screenshot storage or factory integration.
+
+The Specification slice owns the single evidence row, keyed by immutable Specification identity. Save, confirmation and reopening use the same Product-scoped Specification lock and transaction. Under REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02, the save, confirmation or reopen event records actor, time, action, immutable target and outcome, with the initial or prior and resulting report, PR URL and freshness for effective evidence changes. Reads, no-ops and validation failures emit no business-change event. Denials use the common denial event; audit failure rolls back the evidence and any state change, and uncertain commits are reported without logging submitted values or retrying automatically. Focused PostgreSQL checks cover size and URL validation, state and access gates, retention, confirmation, audited values and rollback.
+
 The initial workflow may use a human to mark the specification Implemented after merge. Automating that transition is future work.
 
 ## Deletion

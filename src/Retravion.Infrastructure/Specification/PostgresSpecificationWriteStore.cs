@@ -263,6 +263,98 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         bool? userApproved = null) => new(before is null ? null : new(before.Markdown, before.IsOutdated),
         new(after.Markdown, after.IsOutdated), userApproved);
 
+    public Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, string? markdown,
+        string? pullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default) =>
+        ChangeEvidence(productInternalId, internalId, actor, occurredAt, authorized, "specification.save-evidence", before =>
+        {
+            var prepared = SpecificationEvidence.Prepare(markdown, pullRequestUrl);
+            return before is not null && prepared.IsSuccess &&
+                before.Markdown == prepared.Value.Markdown && before.PullRequestUrl == prepared.Value.PullRequestUrl
+                ? Result.Success(before)
+                : prepared;
+        }, cancellationToken);
+
+    public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, bool reviewedEvidence,
+        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default) =>
+        ChangeEvidence(productInternalId, internalId, actor, occurredAt, authorized, "specification.confirm-evidence-current",
+            before => before is null
+                ? Result.Failure<SpecificationEvidence>("There is no retained Specification evidence to confirm.")
+                : before.ConfirmCurrent(reviewedEvidence), cancellationToken);
+
+    private Task<Result<SpecificationEvidence>> ChangeEvidence(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
+        DateTimeOffset occurredAt, Func<Task<bool>> authorized, string action,
+        Func<SpecificationEvidence?, Result<SpecificationEvidence>> change, CancellationToken token) =>
+        Execute(productInternalId, authorized, async (connection, transaction) =>
+        {
+            var current = await LockSpecification<ApprovedSpecification>(connection, transaction, productInternalId, internalId,
+                status => status == "Approved", "Evidence can only be prepared or confirmed in Approved Specifications.", token);
+            if (current.IsFailure) return Result.Failure<SpecificationEvidence>(current.Error);
+            var previous = await ReadEvidence(connection, transaction, internalId, token);
+            if (previous.IsFailure) return Result.Failure<SpecificationEvidence>(previous.Error);
+            var before = previous.Value.GetValueOrDefault();
+            var updated = change(before);
+            if (updated.IsFailure || updated.Value == before) return updated;
+
+            var after = updated.Value;
+            var saved = await SaveEvidenceRow(connection, transaction, internalId, after, token);
+            if (saved.IsFailure) return Result.Failure<SpecificationEvidence>(saved.Error);
+            var snapshot = Snapshot(current.Value, "Approved");
+            await AuditChange(connection, transaction, actor, occurredAt, action, internalId, snapshot, snapshot, token,
+                evidence: EvidenceChange(before, after));
+            return updated;
+        }, token);
+
+    // Evidence changes and reopen all hold the parent Specification row lock, even when no evidence exists yet.
+    private static async Task<Result<Maybe<SpecificationEvidence>>> ReadEvidence(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, Guid internalId, CancellationToken token)
+    {
+        await using var read = new NpgsqlCommand("""
+            SELECT markdown, pull_request_url, is_outdated FROM retravion_specification.evidence WHERE specification_internal_id = $1
+            """, connection, transaction);
+        read.Parameters.AddWithValue(internalId);
+        await using var reader = await read.ExecuteReaderAsync(token);
+        return await reader.ReadAsync(token)
+            ? PostgresSpecificationReadStore.MapEvidence(reader, 0).Map(Maybe<SpecificationEvidence>.From)
+            : Result.Success(Maybe<SpecificationEvidence>.None);
+    }
+
+    private static async Task<Result> SaveEvidenceRow(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid internalId,
+        SpecificationEvidence evidence, CancellationToken token)
+    {
+        await using var save = new NpgsqlCommand("""
+            INSERT INTO retravion_specification.evidence (specification_internal_id, markdown, pull_request_url, is_outdated)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (specification_internal_id) DO UPDATE SET markdown = EXCLUDED.markdown,
+                pull_request_url = EXCLUDED.pull_request_url, is_outdated = EXCLUDED.is_outdated
+            """, connection, transaction);
+        save.Parameters.AddWithValue(internalId);
+        save.Parameters.AddWithValue(evidence.Markdown);
+        save.Parameters.AddWithValue(NpgsqlTypes.NpgsqlDbType.Text, (object?)evidence.PullRequestUrl ?? DBNull.Value);
+        save.Parameters.AddWithValue(evidence.IsOutdated);
+        return await save.ExecuteNonQueryAsync(token) == 1
+            ? Result.Success() : Result.Failure("The Specification evidence could not be saved.");
+    }
+
+    private static async Task<Result<Maybe<SpecificationAuditEvidenceChange>>> InvalidateEvidence(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, Guid internalId, CancellationToken token)
+    {
+        var previous = await ReadEvidence(connection, transaction, internalId, token);
+        if (previous.IsFailure) return Result.Failure<Maybe<SpecificationAuditEvidenceChange>>(previous.Error);
+        if (previous.Value.GetValueOrDefault() is not { IsOutdated: false } before)
+            return Result.Success(Maybe<SpecificationAuditEvidenceChange>.None);
+
+        var after = before.MarkOutdated();
+        var saved = await SaveEvidenceRow(connection, transaction, internalId, after, token);
+        return saved.IsFailure ? Result.Failure<Maybe<SpecificationAuditEvidenceChange>>(saved.Error)
+            : Result.Success(Maybe<SpecificationAuditEvidenceChange>.From(EvidenceChange(before, after)));
+    }
+
+    private static SpecificationAuditEvidenceChange EvidenceChange(SpecificationEvidence? before, SpecificationEvidence after) =>
+        new(before is null ? null : new(before.Markdown, before.PullRequestUrl, before.IsOutdated),
+            new(after.Markdown, after.PullRequestUrl, after.IsOutdated));
+
     public Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
         Transition<DraftSpecification, InReviewSpecification>(productInternalId, internalId, actor, occurredAt, authorized,
@@ -294,7 +386,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         Transition<ApprovedSpecification, DraftSpecification>(productInternalId, internalId, actor, occurredAt, authorized,
             "specification.reopen", "Approved", "Draft", "Only Approved Specifications can be reopened.",
             approved => approved.Reopen(reason, noActiveOrUncertainRunAttested), reason, cancellationToken,
-            noActiveOrUncertainRunAttested, invalidateAiReview: true);
+            noActiveOrUncertainRunAttested, invalidateRetainedReviewAndEvidence: true);
 
     private static async Task<Result> LockApprovedTargets(NpgsqlConnection connection, NpgsqlTransaction transaction,
         InReviewSpecification review, CancellationToken token)
@@ -315,7 +407,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         Func<TCurrent, Result<TNext>> transition, string? reason, CancellationToken token,
         bool? noActiveOrUncertainRunAttested = null,
         Func<NpgsqlConnection, NpgsqlTransaction, TCurrent, CancellationToken, Task<Result>>? validate = null,
-        bool invalidateAiReview = false)
+        bool invalidateRetainedReviewAndEvidence = false)
         where TCurrent : DevelopmentSpecification where TNext : DevelopmentSpecification =>
         Execute(productId, authorized, async (connection, transaction) =>
         {
@@ -341,15 +433,19 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
                 return Result.Failure<TNext>("The Specification state could not be saved.");
 
             SpecificationAuditAiReviewChange? aiReview = null;
-            if (invalidateAiReview)
+            SpecificationAuditEvidenceChange? evidence = null;
+            if (invalidateRetainedReviewAndEvidence)
             {
                 var reviewChange = await InvalidateAiReview(connection, transaction, internalId, token);
                 if (reviewChange.IsFailure) return Result.Failure<TNext>(reviewChange.Error);
                 aiReview = reviewChange.Value.GetValueOrDefault();
+                var evidenceChange = await InvalidateEvidence(connection, transaction, internalId, token);
+                if (evidenceChange.IsFailure) return Result.Failure<TNext>(evidenceChange.Error);
+                evidence = evidenceChange.Value.GetValueOrDefault();
             }
             await AuditChange(connection, transaction, actor, occurredAt, action, internalId,
                 Snapshot(current.Value, before), Snapshot(next.Value, after), token, reason, noActiveOrUncertainRunAttested,
-                aiReview: aiReview);
+                aiReview: aiReview, evidence: evidence);
             return next;
         }, token);
 
@@ -400,11 +496,12 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
     private static Task AuditChange(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor.Identified actor,
         DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues after,
         CancellationToken cancellationToken, string? reason = null, bool? noActiveOrUncertainRunAttested = null,
-        SpecificationAuditAssignment? assignment = null, SpecificationAuditAiReviewChange? aiReview = null) =>
+        SpecificationAuditAssignment? assignment = null, SpecificationAuditAiReviewChange? aiReview = null,
+        SpecificationAuditEvidenceChange? evidence = null) =>
         PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
             new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(internalId.ToString()),
                 AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after, reason,
-                    noActiveOrUncertainRunAttested, assignment, aiReview)),
+                    noActiveOrUncertainRunAttested, assignment, aiReview, evidence)),
             cancellationToken);
 
     private static async Task<Result> SaveContent(NpgsqlCommand command, CancellationToken cancellationToken)

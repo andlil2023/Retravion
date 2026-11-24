@@ -7,7 +7,8 @@ public sealed record SpecificationAuditDetails(Guid InternalId, SpecificationAud
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? NoActiveOrUncertainRunAttested = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditAssignment? Assignment = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditAiReviewChange? AiReview = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditAiReviewChange? AiReview = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SpecificationAuditEvidenceChange? Evidence = null);
 
 public sealed record SpecificationAuditAssignment(string? OldAssignee, string? NewAssignee);
 
@@ -15,6 +16,10 @@ public sealed record SpecificationAuditAiReviewChange(SpecificationAuditAiReview
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? UserApproved = null);
 
 public sealed record SpecificationAuditAiReviewValue(string Markdown, bool IsOutdated);
+
+public sealed record SpecificationAuditEvidenceChange(SpecificationAuditEvidenceValue? Before, SpecificationAuditEvidenceValue After);
+
+public sealed record SpecificationAuditEvidenceValue(string Markdown, string? PullRequestUrl, bool IsOutdated);
 
 /// <summary>Specification change values. Attachments are represented only by their immutable identifiers.</summary>
 public sealed record SpecificationAuditValues(Guid ProductInternalId, string Id, string Title, string Description, string Status,

@@ -67,6 +67,12 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             markdown text NOT NULL CHECK (octet_length(markdown) <= 1048576 AND length(btrim(markdown, {Whitespace})) > 0),
             is_outdated boolean NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS retravion_specification.evidence (
+            specification_internal_id uuid PRIMARY KEY REFERENCES retravion_specification.specification(internal_id) ON DELETE CASCADE,
+            markdown text NOT NULL CHECK (octet_length(markdown) <= 1048576 AND length(btrim(markdown, {Whitespace})) > 0),
+            pull_request_url text,
+            is_outdated boolean NOT NULL
+        );
         """;
     private const string SelectFields = """
         SELECT s.internal_id, s.product_internal_id, s.id, s.title, s.description, s.status,
@@ -79,9 +85,11 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         , (SELECT coalesce(jsonb_agg(jsonb_build_object('Actor', h.actor, 'UtcTicks', h.occurred_at_utc_ticks,
               'OldAssignee', h.old_assignee, 'NewAssignee', h.new_assignee) ORDER BY h.sequence), '[]'::jsonb)
            FROM retravion_specification.assignment_history h WHERE h.specification_internal_id = s.internal_id),
-          r.specification_internal_id IS NOT NULL, r.markdown, r.is_outdated
+          r.specification_internal_id IS NOT NULL, r.markdown, r.is_outdated,
+          e.specification_internal_id IS NOT NULL, e.markdown, e.pull_request_url, e.is_outdated
          FROM retravion_specification.specification s
          LEFT JOIN retravion_specification.ai_review r ON r.specification_internal_id = s.internal_id
+         LEFT JOIN retravion_specification.evidence e ON e.specification_internal_id = s.internal_id
          WHERE s.product_internal_id = $1
         """;
 
@@ -125,7 +133,19 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
                 if (mappedReview.IsFailure) return Result.Failure<Maybe<SpecificationDetail>>(mappedReview.Error);
                 review = mappedReview.Value;
             }
-            var detail = new SpecificationDetail(mapped.Value, Array.AsReadOnly(history.Select(row => row.ToEntry()).ToArray()), review);
+            SpecificationEvidence? evidence = null;
+            if (reader.GetBoolean(12))
+            {
+                var mappedEvidence = MapEvidence(reader, 13);
+                if (mappedEvidence.IsFailure ||
+                    (mapped.Value is DraftSpecification or InReviewSpecification && !mappedEvidence.Value.IsOutdated))
+                    return Result.Failure<Maybe<SpecificationDetail>>(InvalidRecord);
+                evidence = mappedEvidence.Value;
+            }
+            var detail = new SpecificationDetail(mapped.Value, Array.AsReadOnly(history.Select(row => row.ToEntry()).ToArray()), review)
+            {
+                Evidence = evidence
+            };
             return Result.Success(Maybe<SpecificationDetail>.From(detail));
         }, cancellationToken, SelectDetail);
 
@@ -181,6 +201,17 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         return Result.Failure<SpecificationAiReview>(InvalidRecord);
     }
 
+    internal static Result<SpecificationEvidence> MapEvidence(NpgsqlDataReader reader, int markdownIndex)
+    {
+        if (!reader.IsDBNull(markdownIndex) && !reader.IsDBNull(markdownIndex + 2))
+        {
+            var url = reader.IsDBNull(markdownIndex + 1) ? null : reader.GetString(markdownIndex + 1);
+            var evidence = SpecificationEvidence.Restore(reader.GetString(markdownIndex), url, reader.GetBoolean(markdownIndex + 2));
+            if (evidence.IsSuccess) return evidence;
+        }
+        return Result.Failure<SpecificationEvidence>(InvalidRecord);
+    }
+
     private async Task<Result<T>> Read<T>(Guid productInternalId, Guid? internalId, Func<NpgsqlDataReader, Task<Result<T>>> read,
         CancellationToken cancellationToken, string select = Select)
     {
@@ -227,7 +258,8 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         await using var exists = new NpgsqlCommand("""
             SELECT to_regclass('retravion_specification.link') IS NOT NULL
             AND to_regclass('retravion_specification.assignment_history') IS NOT NULL
-            AND to_regclass('retravion_specification.ai_review') IS NOT NULL AND EXISTS (
+            AND to_regclass('retravion_specification.ai_review') IS NOT NULL
+            AND to_regclass('retravion_specification.evidence') IS NOT NULL AND EXISTS (
                 SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('retravion_specification.specification')
                 AND conname = 'specification_approved_description_check')
             """, connection, transaction);

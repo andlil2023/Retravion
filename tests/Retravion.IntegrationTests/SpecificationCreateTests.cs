@@ -372,6 +372,16 @@ public sealed partial class SpecificationReadTests
             CancellationToken cancellationToken = default) =>
             inner.SubmitAiReview(productInternalId, internalId, input, userApproved, actor, occurredAt, authorized, cancellationToken);
 
+        public Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, string? markdown,
+            string? pullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+            CancellationToken cancellationToken = default) =>
+            inner.SaveEvidence(productInternalId, internalId, markdown, pullRequestUrl, actor, occurredAt, authorized, cancellationToken);
+
+        public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, bool reviewedEvidence,
+            AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+            CancellationToken cancellationToken = default) =>
+            inner.ConfirmEvidenceCurrent(productInternalId, internalId, reviewedEvidence, actor, occurredAt, authorized, cancellationToken);
+
         public Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
             DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
             inner.SubmitForReview(productInternalId, internalId, actor, occurredAt, authorized, cancellationToken);

@@ -30,6 +30,16 @@ public interface ISpecificationWriteStore
         bool userApproved, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Replaces the single Approved evidence report and optional PR URL (null clears it), making the evidence current.</summary>
+    Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, string? markdown,
+        string? pullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Explicitly confirms reviewed evidence after approval without replacing the report or PR URL.</summary>
+    Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, bool reviewedEvidence,
+        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Submits a persisted Draft for review and commits the state change with its audit event.</summary>
     Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
