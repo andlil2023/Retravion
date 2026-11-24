@@ -25,6 +25,17 @@ public abstract record DevelopmentSpecification
         Links = links;
     }
 
+    public Result ConfirmDeletion(Guid? confirmedInternalId, bool noActiveOrUncertainRunAttested)
+    {
+        if (this is not (DraftSpecification or InReviewSpecification or ApprovedSpecification))
+            return Result.Failure("Implemented Specifications cannot be deleted.");
+        if (confirmedInternalId != InternalId)
+            return Result.Failure("Confirm deletion of this specific Specification.");
+        if (!noActiveOrUncertainRunAttested)
+            return Result.Failure("Explicitly attest that no run is active or uncertain before deleting the Specification.");
+        return Result.Success();
+    }
+
     private protected static Result ValidateReturnReason(string? reason)
     {
         const string invalidReason = "The return reason must contain valid UTF-8 text without NUL characters.";

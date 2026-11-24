@@ -59,6 +59,12 @@ public interface ISpecificationWriteStore
         bool noActiveOrUncertainRunAttested, AuditActor.Identified actor, DateTimeOffset occurredAt,
         Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
 
+    /// <summary>Deletes an eligible Specification and its owned rows with a durable audit snapshot.
+    /// A matching confirmed identity and affirmative human run attestation are both required.</summary>
+    Task<Result> Delete(Guid productInternalId, Guid internalId, Guid? confirmedInternalId, bool noActiveOrUncertainRunAttested,
+        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Returns a persisted In Review specification to Draft and audits the state change and optional reason.</summary>
     Task<Result<DraftSpecification>> ReturnToDraft(Guid productInternalId, Guid internalId, string? reason,
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,

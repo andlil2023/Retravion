@@ -78,6 +78,15 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             writes.Reopen(productInternalId, internalId, reason, noActiveOrUncertainRunAttested, actor, now, authorized, cancellationToken),
             cancellationToken);
 
+    public async Task<Result> Delete(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+        Guid? confirmedInternalId, bool noActiveOrUncertainRunAttested, CancellationToken cancellationToken = default) =>
+        await Change(principal, "specification.delete", async (actor, now, authorized) =>
+        {
+            var result = await writes.Delete(productInternalId, internalId, confirmedInternalId, noActiveOrUncertainRunAttested,
+                actor, now, authorized, cancellationToken);
+            return result.IsSuccess ? Result.Success(true) : Result.Failure<bool>(result.Error);
+        }, cancellationToken);
+
     public Task<Result<DraftSpecification>> ReturnToDraft(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
         string? reason = null, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.return-to-draft", (actor, now, authorized) =>

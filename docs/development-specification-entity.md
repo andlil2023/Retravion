@@ -110,6 +110,10 @@ For PBI #266, an authorized user explicitly attests that the implementation PR w
 - The user must confirm deletion after being shown the specification identity and warned that its current review, submitted evidence and associated factory activity history will also be removed.
 - Late events for a deleted run must be rejected rather than recreating its history.
 
+For PBI #266, the delete command requires confirmation of the immutable Specification identity and a separate affirmative human attestation that no run is active or uncertain. Retravion does not verify run state or store factory activity in this increment. The Specification slice locks the current record in its active Product and removes the parent and its owned links, assignment ledger, AI review and evidence in one PostgreSQL transaction. It does not delete linked versions.
+
+Under REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02, `specification.delete` commits in the same transaction and survives cleanup. It records actor, time, action, immutable target, outcome, attestation and the pre-delete content, state, exact link IDs, assignment entries and retained review and evidence values. Review and evidence are identified by the Specification identity; no image bytes are captured. Reads, validation failures, ineligible states and repeated deletes emit no success event. Unauthorized attempts use the common denial event. Cleanup or audit failure rolls back deletion; uncertain commits are reported without logging submitted values or retrying automatically. Focused PostgreSQL tests verify the eligibility and access gates, ownership boundaries, durable snapshot, rollback and uncertain outcomes.
+
 ## Factory and project-management boundary
 
 The intended direction is that a project-management system, such as GitHub or Azure DevOps, signals when work should start. Its PBI can link to a Retravion specification. The control service checks that the specification is Approved before implementation.

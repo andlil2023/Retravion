@@ -399,6 +399,12 @@ public sealed partial class SpecificationReadTests
             Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
             inner.Reopen(productInternalId, internalId, reason, noActiveOrUncertainRunAttested, actor, occurredAt, authorized, cancellationToken);
 
+        public Task<Result> Delete(Guid productInternalId, Guid internalId, Guid? confirmedInternalId, bool noActiveOrUncertainRunAttested,
+            AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+            CancellationToken cancellationToken = default) =>
+            inner.Delete(productInternalId, internalId, confirmedInternalId, noActiveOrUncertainRunAttested,
+                actor, occurredAt, authorized, cancellationToken);
+
         public Task<Result<DraftSpecification>> ReturnToDraft(Guid productInternalId, Guid internalId, string? reason,
             AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
             CancellationToken cancellationToken = default) =>

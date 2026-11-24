@@ -424,6 +424,67 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             return next;
         }, cancellationToken);
 
+    public async Task<Result> Delete(Guid productInternalId, Guid internalId, Guid? confirmedInternalId,
+        bool noActiveOrUncertainRunAttested, AuditActor.Identified actor, DateTimeOffset occurredAt,
+        Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
+        await Execute(productInternalId, authorized, async (connection, transaction) =>
+        {
+            var current = await LockSpecification<DevelopmentSpecification>(connection, transaction, productInternalId, internalId,
+                status => status != "Implemented", "Implemented Specifications cannot be deleted.", cancellationToken);
+            if (current.IsFailure) return Result.Failure<bool>(current.Error);
+            var specification = current.Value;
+            var confirmation = specification.ConfirmDeletion(confirmedInternalId, noActiveOrUncertainRunAttested);
+            if (confirmation.IsFailure) return Result.Failure<bool>(confirmation.Error);
+
+            // Inventory all owned data while holding the parent row lock used by every Specification writer.
+            var status = specification switch
+            {
+                DraftSpecification => "Draft",
+                InReviewSpecification => "In Review",
+                ApprovedSpecification => "Approved",
+                _ => throw new InvalidOperationException("Unexpected Specification deletion state.")
+            };
+            var before = LinkSnapshot(specification, status);
+            var history = await ReadAssignmentAuditHistory(connection, transaction, internalId, cancellationToken);
+            var review = await ReadAiReview(connection, transaction, internalId, cancellationToken);
+            if (review.IsFailure) return Result.Failure<bool>(review.Error);
+            var evidence = await ReadEvidence(connection, transaction, internalId, cancellationToken);
+            if (evidence.IsFailure) return Result.Failure<bool>(evidence.Error);
+            var deletion = new SpecificationAuditDeletion(history,
+                review.Value.GetValueOrDefault() is { } r ? new(r.Markdown, r.IsOutdated) : null,
+                evidence.Value.GetValueOrDefault() is { } e ? new(e.Markdown, e.PullRequestUrl, e.IsOutdated) : null);
+
+            // The owned links, assignment history, AI review and evidence cascade. Linked owner versions and
+            // durable audit events have no cascading relationship to this Specification.
+            await using var remove = new NpgsqlCommand("""
+                DELETE FROM retravion_specification.specification WHERE product_internal_id = $1 AND internal_id = $2
+                """, connection, transaction);
+            remove.Parameters.AddWithValue(productInternalId);
+            remove.Parameters.AddWithValue(internalId);
+            if (await remove.ExecuteNonQueryAsync(cancellationToken) != 1)
+                return Result.Failure<bool>("The Specification could not be deleted.");
+
+            await AuditChange(connection, transaction, actor, occurredAt, "specification.delete", internalId, before, null,
+                cancellationToken, noActiveOrUncertainRunAttested: noActiveOrUncertainRunAttested, deletion: deletion);
+            return Result.Success(true);
+        }, cancellationToken);
+
+    private static async Task<SpecificationAuditAssignmentEntry[]> ReadAssignmentAuditHistory(NpgsqlConnection connection,
+        NpgsqlTransaction transaction, Guid internalId, CancellationToken token)
+    {
+        await using var read = new NpgsqlCommand("""
+            SELECT sequence, actor, occurred_at_utc_ticks, old_assignee, new_assignee
+            FROM retravion_specification.assignment_history WHERE specification_internal_id = $1 ORDER BY sequence
+            """, connection, transaction);
+        read.Parameters.AddWithValue(internalId);
+        var history = new List<SpecificationAuditAssignmentEntry>();
+        await using var reader = await read.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+            history.Add(new(reader.GetInt64(0), reader.GetString(1), new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero),
+                reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4)));
+        return history.ToArray();
+    }
+
     private static async Task<Result> LockApprovedTargets(NpgsqlConnection connection, NpgsqlTransaction transaction,
         InReviewSpecification review, CancellationToken token)
     {
@@ -519,10 +580,11 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         return Result.Failure<T>("The persisted Specification is invalid.");
     }
 
-    private static SpecificationAuditValues LinkSnapshot(DraftSpecification draft) => Snapshot(draft) with
-    {
-        Links = draft.Links.Targets.Select(link => new SpecificationAuditLink(link.Kind.ToString(), link.VersionId)).ToArray()
-    };
+    private static SpecificationAuditValues LinkSnapshot(DevelopmentSpecification specification, string status = "Draft") =>
+        Snapshot(specification, status) with
+        {
+            Links = specification.Links.Targets.Select(link => new SpecificationAuditLink(link.Kind.ToString(), link.VersionId)).ToArray()
+        };
 
     private static SpecificationAuditValues Snapshot(DraftSpecification draft) => Snapshot(draft, "Draft");
 
@@ -530,14 +592,14 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         new(specification.ProductInternalId, specification.Id, specification.Title, specification.Description, status);
 
     private static Task AuditChange(NpgsqlConnection connection, NpgsqlTransaction transaction, AuditActor.Identified actor,
-        DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues after,
+        DateTimeOffset occurredAt, string action, Guid internalId, SpecificationAuditValues? before, SpecificationAuditValues? after,
         CancellationToken cancellationToken, string? reason = null, bool? noActiveOrUncertainRunAttested = null,
         SpecificationAuditAssignment? assignment = null, SpecificationAuditAiReviewChange? aiReview = null,
-        SpecificationAuditEvidenceChange? evidence = null, bool? mergeAttested = null) =>
+        SpecificationAuditEvidenceChange? evidence = null, bool? mergeAttested = null, SpecificationAuditDeletion? deletion = null) =>
         PostgresAuditSubmission.SubmitInTransactionAsync(connection, transaction,
             new AuditInformation(actor, occurredAt, action, new AuditTarget.Identified(internalId.ToString()),
                 AuditActionOutcome.Success, specificationChange: new SpecificationAuditDetails(internalId, before, after, reason,
-                    noActiveOrUncertainRunAttested, assignment, aiReview, evidence, mergeAttested)),
+                    noActiveOrUncertainRunAttested, assignment, aiReview, evidence, mergeAttested, deletion)),
             cancellationToken);
 
     private static async Task<Result> SaveContent(NpgsqlCommand command, CancellationToken cancellationToken)
