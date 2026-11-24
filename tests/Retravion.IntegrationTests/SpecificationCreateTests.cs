@@ -392,8 +392,9 @@ public sealed partial class SpecificationReadTests
             inner.Approve(productInternalId, internalId, actor, occurredAt, authorized, cancellationToken);
 
         public Task<Result<ImplementedSpecification>> Implement(Guid productInternalId, Guid internalId, bool mergeAttested,
-            AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
-            inner.Implement(productInternalId, internalId, mergeAttested, actor, occurredAt, authorized, cancellationToken);
+            string attestedPullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+            CancellationToken cancellationToken = default) =>
+            inner.Implement(productInternalId, internalId, mergeAttested, attestedPullRequestUrl, actor, occurredAt, authorized, cancellationToken);
 
         public Task<Result<DraftSpecification>> Reopen(Guid productInternalId, Guid internalId, string? reason,
             bool noActiveOrUncertainRunAttested, AuditActor.Identified actor, DateTimeOffset occurredAt,

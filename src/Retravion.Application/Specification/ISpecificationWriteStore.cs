@@ -48,10 +48,10 @@ public interface ISpecificationWriteStore
     Task<Result<SpecificationApproval>> Approve(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
 
-    /// <summary>Finalizes an Approved specification with current evidence and affirmative human merge attestation,
-    /// committing the transition, any assignment clearing and audit together.</summary>
+    /// <summary>Finalizes an Approved specification only when the human-attested PR URL matches the current evidence
+    /// under the Specification lock, committing the transition, any assignment clearing and audit together.</summary>
     Task<Result<ImplementedSpecification>> Implement(Guid productInternalId, Guid internalId, bool mergeAttested,
-        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        string attestedPullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns an Approved specification to Draft and audits the reason and affirmative human run attestation.</summary>

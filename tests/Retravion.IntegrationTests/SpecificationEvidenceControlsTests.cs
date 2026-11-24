@@ -245,7 +245,7 @@ public sealed partial class SpecificationReadTests
             return id;
         }
         var implemented = await CreateWithEvidence("DEV-1");
-        Assert.True((await ops.Implement(actor, pid, implemented, true)).IsSuccess);
+        Assert.True((await ops.Implement(actor, pid, implemented, true, EvidenceUrl)).IsSuccess);
         var retired = await CreateWithEvidence("DEV-2");
         Assert.True((await ops.Reopen(actor, pid, retired, "Revise", true)).IsSuccess);
         Assert.True((await ops.SubmitForReview(actor, pid, retired)).IsSuccess);

@@ -75,7 +75,7 @@ public sealed partial class SpecificationReadTests
         Assert.True((await ops.SubmitForReview(user, pid, id)).IsSuccess);
         Assert.True((await ops.Approve(user, pid, id)).IsSuccess);
         Assert.True((await ops.SaveEvidence(user, pid, id, "# Report", EvidenceUrl)).IsSuccess);
-        var implemented = (await ops.Implement(user, pid, id, true)).Value;
+        var implemented = (await ops.Implement(user, pid, id, true, EvidenceUrl)).Value;
 
         Assert.Contains("Implemented", (await ops.Delete(user, pid, id, id, true)).Error);
         Assert.Equal("Access denied.", (await ops.Delete(restricted, pid, draft.InternalId, draft.InternalId, true)).Error);

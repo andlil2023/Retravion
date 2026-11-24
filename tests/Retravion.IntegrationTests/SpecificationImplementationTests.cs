@@ -31,18 +31,18 @@ public sealed partial class SpecificationReadTests
         var user = await Principal(sessions, "User", now: CreateTime);
         var restricted = await Principal(sessions, "Administrator", restricted: true, now: CreateTime);
         var id = (await ops.Create(user, pid, "DEV-1", "Title", "Description")).Value.InternalId;
-        Assert.Contains("Only Approved", (await ops.Implement(user, pid, id, true)).Error);
+        Assert.Contains("Only Approved", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         Assert.True((await ops.SubmitForReview(user, pid, id)).IsSuccess);
-        Assert.Contains("Only Approved", (await ops.Implement(user, pid, id, true)).Error);
+        Assert.Contains("Only Approved", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         Assert.True((await ops.Approve(user, pid, id)).IsSuccess);
-        Assert.Contains("Current evidence", (await ops.Implement(user, pid, id, true)).Error);
+        Assert.Contains("Current evidence", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         Assert.True((await ops.SaveEvidence(user, pid, id, "# Report", null)).IsSuccess);
-        Assert.Contains("HTTPS PR URL", (await ops.Implement(user, pid, id, true)).Error);
+        Assert.Contains("HTTPS PR URL", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         Assert.True((await ops.SaveEvidence(user, pid, id, "# Report", EvidenceUrl)).IsSuccess);
         Assert.True((await ops.Reopen(user, pid, id, "Revise", true)).IsSuccess);
         Assert.True((await ops.SubmitForReview(user, pid, id)).IsSuccess);
         Assert.True((await ops.Approve(user, pid, id)).IsSuccess);
-        Assert.Contains("Current evidence", (await ops.Implement(user, pid, id, true)).Error);
+        Assert.Contains("Current evidence", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         Assert.True((await ops.ConfirmEvidenceCurrent(user, pid, id, true)).IsSuccess);
 
         await using var connection = new NpgsqlConnection(db.ConnectionString);
@@ -51,7 +51,7 @@ public sealed partial class SpecificationReadTests
             UPDATE retravion_specification.evidence SET pull_request_url = 'http://forge.example/pr/42';
             """, connection))
             Assert.Equal(1, await corrupt.ExecuteNonQueryAsync());
-        Assert.Equal("The persisted Specification is invalid.", (await ops.Implement(user, pid, id, true)).Error);
+        Assert.Equal("The persisted Specification is invalid.", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         await using (var blank = new NpgsqlCommand("UPDATE retravion_specification.evidence SET markdown = E' \\t'", connection))
             Assert.Equal(PostgresErrorCodes.CheckViolation, (await Assert.ThrowsAsync<PostgresException>(() => blank.ExecuteNonQueryAsync())).SqlState);
         Assert.True((await ops.SaveEvidence(user, pid, id, "# Report", EvidenceUrl)).IsFailure); // Invalid persisted evidence cannot be hydrated.
@@ -60,11 +60,11 @@ public sealed partial class SpecificationReadTests
             repair.Parameters.AddWithValue(EvidenceUrl);
             Assert.Equal(1, await repair.ExecuteNonQueryAsync());
         }
-        Assert.Contains("Explicitly attest", (await ops.Implement(user, pid, id, false)).Error);
-        Assert.Contains("not found", (await ops.Implement(user, other, id, true)).Error);
-        Assert.Equal("Access denied.", (await ops.Implement(restricted, pid, id, true)).Error);
+        Assert.Contains("Explicitly attest", (await ops.Implement(user, pid, id, false, EvidenceUrl)).Error);
+        Assert.Contains("not found", (await ops.Implement(user, other, id, true, EvidenceUrl)).Error);
+        Assert.Equal("Access denied.", (await ops.Implement(restricted, pid, id, true, EvidenceUrl)).Error);
         Assert.True((await products.Update(product, product.Retire().Value)).IsSuccess);
-        Assert.Contains("retired", (await ops.Implement(user, pid, id, true)).Error);
+        Assert.Contains("retired", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         Assert.IsType<ApprovedSpecification>((await ops.Find(user, pid, id)).Value.Value);
         Assert.Equal(new CreateEvent("Administrator", CreateTime.UtcTicks, "unknown", null, "failure", null),
             Assert.Single(await SpecificationEvents(db, ImplementAction)));
@@ -101,7 +101,7 @@ public sealed partial class SpecificationReadTests
         Assert.Equal(second.Username, before.Assignee);
 
         clock.Now = CreateTime.AddTicks(23);
-        var completed = await ops.Implement(attester, pid, id, true);
+        var completed = await ops.Implement(attester, pid, id, true, EvidenceUrl);
         Assert.True(completed.IsSuccess, completed.IsFailure ? completed.Error : null);
         var implemented = completed.Value;
         Assert.Equal(("Administrator", clock.Now), (implemented.MergeAttestedBy, implemented.MergeAttestedAt));
@@ -138,7 +138,7 @@ public sealed partial class SpecificationReadTests
         Assert.Contains("Only In Review", (await ops.ReturnToDraft(user, pid, id, "Changed")).Error);
         Assert.Contains("Only In Review", (await ops.Approve(user, pid, id)).Error);
         Assert.Contains("Only Approved", (await ops.Reopen(user, pid, id, "Changed", true)).Error);
-        Assert.Contains("Only Approved", (await ops.Implement(user, pid, id, true)).Error);
+        Assert.Contains("Only Approved", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         var afterAttempts = (await ops.FindDetail(user, pid, id)).Value.Value;
         Assert.Equal(detail.Specification, afterAttempts.Specification);
         Assert.Equal(detail.AssignmentHistory, afterAttempts.AssignmentHistory);
@@ -168,7 +168,7 @@ public sealed partial class SpecificationReadTests
         var approved = (await ops.Approve(user, pid, id)).Value.Specification;
         var evidence = (await ops.SaveEvidence(user, pid, id, "# Report", EvidenceUrl)).Value;
         await InstallAuditFault(db, "RAISE insufficient_privilege USING MESSAGE = 'private provider details';");
-        Assert.Equal("The Specification operation could not be completed.", (await ops.Implement(user, pid, id, true)).Error);
+        Assert.Equal("The Specification operation could not be completed.", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         var detail = (await ops.FindDetail(user, pid, id)).Value.Value;
         Assert.Equal(approved, detail.Specification); // Mapping also rejects stray attestation fields in Approved.
         Assert.Equal(evidence, detail.Evidence);
@@ -208,7 +208,7 @@ public sealed partial class SpecificationReadTests
         var upgraded = (await reads.FindDetail(pid, id)).Value.Value;
         Assert.Equal(approved, upgraded.Specification);
         Assert.Equal(evidence, upgraded.Evidence);
-        Assert.True((await writes.Implement(pid, id, true, CreateActor, CreateTime, Authorized)).IsSuccess);
+        Assert.True((await writes.Implement(pid, id, true, EvidenceUrl, CreateActor, CreateTime, Authorized)).IsSuccess);
 
         await Execute("UPDATE retravion_specification.evidence SET is_outdated = true");
         const string invalid = "The persisted Specification is invalid.";
@@ -243,7 +243,7 @@ public sealed partial class SpecificationReadTests
                 if (committed) await transaction.CommitAsync(token);
                 throw new IOException("private provider details");
             });
-            var result = await writes.Implement(pid, id, true, CreateActor, CreateTime, Authorized);
+            var result = await writes.Implement(pid, id, true, EvidenceUrl, CreateActor, CreateTime, Authorized);
             Assert.Contains("outcome could not be confirmed", result.Error);
             Assert.DoesNotContain("private", result.Error);
             Assert.Equal(1, attempts);

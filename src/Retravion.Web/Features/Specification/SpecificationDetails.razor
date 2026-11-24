@@ -85,7 +85,8 @@ else
                              CanEdit="@(CanChange && CanAssign)" Busy="_busy" OnChange="ChangeAssignment" />
     <SpecificationEvidenceSection @key="(_loadVersion, _specification.GetType(), _detail.Evidence, _evidenceSaveVersion)"
                                   Evidence="_detail.Evidence" CanEdit="@(CanChange && CanPrepareEvidence)" Busy="_busy"
-                                  Error="@(ShowEvidenceError ? _mutationError : null)" OnSave="SaveEvidence" OnConfirm="ConfirmEvidence" />
+                                  Error="@(ShowEvidenceError ? _mutationError : null)" OnSave="SaveEvidence" OnConfirm="ConfirmEvidence"
+                                  OnImplement="Implement" />
 }
 
 @code {
@@ -160,6 +161,11 @@ else
     private Task ConfirmEvidence(bool reviewed) => CanPrepareEvidence && reviewed && _detail?.Evidence is { IsOutdated: true }
         ? Change((actor, product, id) => Operations.ConfirmEvidenceCurrent(actor, product, id, reviewed),
             _ => _notice = "Evidence confirmed current.", evidenceMutation: true)
+        : Task.CompletedTask;
+
+    private Task Implement(string attestedPullRequestUrl) => CanPrepareEvidence
+        ? Change((actor, product, id) => Operations.Implement(actor, product, id, mergeAttested: true, attestedPullRequestUrl),
+            evidenceMutation: true)
         : Task.CompletedTask;
 
     private Task SaveLinks(SpecificationLink[] targets) => _specification is DraftSpecification

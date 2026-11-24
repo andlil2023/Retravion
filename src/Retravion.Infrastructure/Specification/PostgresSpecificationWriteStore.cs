@@ -389,7 +389,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             noActiveOrUncertainRunAttested, invalidateRetainedReviewAndEvidence: true);
 
     public Task<Result<ImplementedSpecification>> Implement(Guid productInternalId, Guid internalId, bool mergeAttested,
-        AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
+        string attestedPullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default) =>
         Execute(productInternalId, authorized, async (connection, transaction) =>
         {
@@ -400,6 +400,8 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             if (evidence.IsFailure) return Result.Failure<ImplementedSpecification>(evidence.Error);
             var next = current.Value.Implement(evidence.Value.GetValueOrDefault(), mergeAttested, actor.Identifier, occurredAt);
             if (next.IsFailure) return next;
+            if (!string.Equals(next.Value.Evidence.PullRequestUrl, attestedPullRequestUrl, StringComparison.Ordinal))
+                return Result.Failure<ImplementedSpecification>("The implementation PR URL has changed. Review the current PR URL and attest again.");
 
             // Approved and Implemented both protect the same exact links; neither the links nor their owners change here.
             await using var update = new NpgsqlCommand("""

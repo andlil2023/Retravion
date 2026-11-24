@@ -33,6 +33,31 @@
                 I reviewed the retained evidence and confirm it is current for this Specification.
             </label>
         }
+        @if (CanEdit && !_editing)
+        {
+            @if (Evidence is null)
+            {
+                <p>Save a final evidence report and an HTTPS PR URL before marking this Specification implemented.</p>
+            }
+            else if (Evidence.IsOutdated)
+            {
+                <p>Confirm or replace the outdated evidence before marking this Specification implemented.</p>
+            }
+            else if (Evidence.PullRequestUrl is not { } currentUrl)
+            {
+                <p>Add an HTTPS PR URL before marking this Specification implemented.</p>
+            }
+            else
+            {
+                <p>This decision is final and clears the assignment. Retravion does not verify the merge.</p>
+                <label>
+                    <input id="specification-merge-attestation" type="checkbox" disabled="@Disabled"
+                           @bind:get="@(_attestedPullRequestUrl == currentUrl)"
+                           @bind:set="(bool attested) => _attestedPullRequestUrl = attested ? currentUrl : null" />
+                    I attest that the implementation PR was merged.
+                </label>
+            }
+        }
     </MudPaper>
     @if (Error is not null)
     {
@@ -73,6 +98,8 @@
                         Confirm current evidence
                     </MudButton>
                 }
+                <MudButton id="specification-implement" Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@(!CanImplement)" OnClick="Implement">Mark as implemented</MudButton>
             </div>
         }
     }
@@ -85,17 +112,21 @@
     [Parameter] public string? Error { get; set; }
     [Parameter] public EventCallback<(string Markdown, string? PullRequestUrl)> OnSave { get; set; }
     [Parameter] public EventCallback<bool> OnConfirm { get; set; }
+    [Parameter] public EventCallback<string> OnImplement { get; set; }
 
     private ElementReference _urlInput;
     private bool _editing, _reviewed, _readingUrl, _disposed;
-    private string? _inputError;
+    private string? _inputError, _attestedPullRequestUrl;
     private bool Disabled => Busy || _readingUrl;
+    private bool CanImplement => !_disposed && CanEdit && !_editing && !Disabled && _attestedPullRequestUrl is not null &&
+        Evidence is { IsOutdated: false } evidence && evidence.PullRequestUrl == _attestedPullRequestUrl;
 
     private void Open()
     {
         if (!CanEdit || Disabled) return;
         _editing = true;
         _reviewed = false;
+        _attestedPullRequestUrl = null;
     }
 
     private void Cancel()
@@ -111,6 +142,13 @@
             return Task.CompletedTask;
         _reviewed = false;
         return OnConfirm.InvokeAsync(true);
+    }
+
+    private Task Implement()
+    {
+        if (!CanImplement || _attestedPullRequestUrl is not { } url) return Task.CompletedTask;
+        _attestedPullRequestUrl = null;
+        return OnImplement.InvokeAsync(url);
     }
 
     private async Task Save(string markdown)

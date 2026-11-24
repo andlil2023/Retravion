@@ -162,7 +162,7 @@ public sealed partial class SpecificationReadTests
             Assert.True((await operations.Approve(actor, product.InternalId, id)).IsSuccess);
             Assert.True((await operations.SaveEvidence(actor, product.InternalId, id, "Evidence", EvidenceUrl)).IsSuccess);
         }
-        Assert.True((await operations.Implement(actor, product.InternalId, completed.InternalId, true)).IsSuccess);
+        Assert.True((await operations.Implement(actor, product.InternalId, completed.InternalId, true, EvidenceUrl)).IsSuccess);
         var navigation = new PagesNavigation();
         await using var services = PageServices(scope.ServiceProvider, actor, navigation);
         await using var renderer = new PagesRenderer(services);
