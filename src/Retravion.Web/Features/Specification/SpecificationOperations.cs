@@ -3,6 +3,7 @@ using CSharpFunctionalExtensions;
 using Retravion.Application.AuditTrail;
 using Retravion.Application.Specification;
 using Retravion.Domain.Specification;
+using Retravion.Identity.Application;
 using Retravion.Web.Features.Identity.Logout;
 using Retravion.Web.Features.Product;
 
@@ -10,7 +11,7 @@ namespace Retravion.Web.Features.Specification;
 
 internal sealed class SpecificationOperations(ProductOperations products, ISpecificationReadStore store,
     ISpecificationWriteStore writes, SessionTicketStore sessions, IAuditSubmission submission, TimeProvider time,
-    ILogger<SpecificationOperations> logger)
+    ILogger<SpecificationOperations> logger, IAdministratorStore accounts)
 {
     public Task<Result<DraftSpecification>> Create(ClaimsPrincipal principal, Guid productInternalId, string? id,
         string? title, string? description, CancellationToken cancellationToken = default) =>
@@ -30,6 +31,12 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
         IEnumerable<SpecificationLink> targets, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.edit-links", (actor, now, authorized) =>
             writes.EditLinks(productInternalId, internalId, targets, actor, now, authorized, cancellationToken), cancellationToken);
+
+    internal async Task<Result<string[]>> ListActiveAssignees(ClaimsPrincipal actor)
+    {
+        if (!await products.CanView(actor)) return Result.Failure<string[]>("Access denied.");
+        return (await accounts.List()).Map(users => users.Where(user => user.IsActive).Select(user => user.Username).ToArray());
+    }
 
     public async Task<Result> ChangeAssignment(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
         string? assignee, CancellationToken cancellationToken = default) =>

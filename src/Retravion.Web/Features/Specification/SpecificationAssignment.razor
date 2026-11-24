@@ -1,0 +1,87 @@
+@using Retravion.Application.Specification
+@inject SpecificationOperations Operations
+@inject AuthenticationStateProvider Authentication
+
+<section class="mt-6" aria-labelledby="specification-assignment-heading">
+    <MudPaper Class="pa-4" Elevation="0">
+        <h3 id="specification-assignment-heading">Assignment</h3>
+        <p>Assignee: @AssigneeLabel(Detail.Assignee)</p>
+        <p>Assignment indicates responsibility only. It does not grant access or control factory work.</p>
+        @if (CanEdit)
+        {
+            @if (_lookupError is not null)
+            {
+                <MudAlert Severity="Severity.Error" role="alert">@_lookupError</MudAlert>
+            }
+            else if (_users is null)
+            {
+                <p role="status">Loading active users…</p>
+            }
+            else
+            {
+                <label for="specification-assignee">Active user</label>
+                <select id="specification-assignee" @bind="_selected" disabled="@Busy">
+                    <option value="">Select an active user</option>
+                    @foreach (var user in _users)
+                    {
+                        <option value="@user">@user</option>
+                    }
+                </select>
+            }
+        }
+    </MudPaper>
+    @if (CanEdit)
+    {
+        <div class="product-actions">
+            @if (_users is not null)
+            {
+                <MudButton id="specification-assign" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!CanAssign)" OnClick="Assign">Save assignment</MudButton>
+            }
+            @if (Detail.Assignee is not null)
+            {
+                <MudButton id="specification-clear-assignment" Disabled="@Busy" OnClick="Clear">Clear assignment</MudButton>
+            }
+        </div>
+    }
+    <div class="mt-4">
+        <h4>Assignment history</h4>
+        @if (Detail.AssignmentHistory.Count == 0)
+        {
+            <p>No assignment changes yet.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var entry in Detail.AssignmentHistory.Reverse())
+                {
+                    <li><time datetime="@entry.OccurredAt.ToString("O")">@entry.OccurredAt.ToString("u")</time> · @entry.Actor: @AssigneeLabel(entry.OldAssignee) → @AssigneeLabel(entry.NewAssignee)</li>
+                }
+            </ul>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public SpecificationDetail Detail { get; set; } = default!;
+    [Parameter] public bool CanEdit { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<string?> OnChange { get; set; }
+
+    private string[]? _users;
+    private string? _lookupError;
+    private string _selected = "";
+    private bool CanAssign => CanEdit && !Busy && _selected != Detail.Assignee && _users?.Contains(_selected) == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CanEdit) return;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var result = await Operations.ListActiveAssignees(actor);
+        if (result.IsSuccess) _users = result.Value;
+        else _lookupError = result.Error;
+    }
+
+    private static string AssigneeLabel(string? username) => username ?? "Unassigned";
+    private Task Assign() => CanAssign ? OnChange.InvokeAsync(_selected) : Task.CompletedTask;
+    private Task Clear() => CanEdit && !Busy && Detail.Assignee is not null ? OnChange.InvokeAsync(null) : Task.CompletedTask;
+}

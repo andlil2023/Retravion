@@ -239,7 +239,8 @@ public sealed partial class SpecificationReadTests
             var logger = new CreateLogger();
             var fault = new DenialFault(throws);
             var failing = new SpecificationOperations(services.GetRequiredService<ProductOperations>(), reads,
-                new PostgresSpecificationWriteStore(db.ConnectionString), sessions, fault, new CreateClock(), logger);
+                new PostgresSpecificationWriteStore(db.ConnectionString), sessions, fault, new CreateClock(), logger,
+                services.GetRequiredService<Retravion.Identity.Application.IAdministratorStore>());
             Assert.Equal("Access denied.", (await failing.Create(revoked, product.InternalId, "PRIVATE-ID", "PRIVATE-TITLE", "SECRET")).Error);
             Assert.Equal(1, fault.Calls);
             Assert.Equal((LogLevel.Error, "Unauthorized Specification change audit submission failed.", (Exception?)null),

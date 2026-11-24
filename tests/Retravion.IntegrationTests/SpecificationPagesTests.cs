@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Retravion.Web.Components.Markdown;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.RenderTree;
 using Microsoft.AspNetCore.Components.Sections;
 using Microsoft.AspNetCore.Components.Web;
@@ -450,6 +451,10 @@ public sealed partial class SpecificationReadTests
         }
 
         internal Task Submit() => Event(Assert.Single(Elements("form")), "onsubmit", EventArgs.Empty);
+        internal Task Submit(string id) => Event(Element("form", "id", id), "onsubmit", EventArgs.Empty);
+        internal Task Select(string id, string value) => Event(Element("select", "id", id), "onchange", new ChangeEventArgs { Value = value });
+        internal Task SelectFile(IBrowserFile file) => Assert.Single(PageFrames().Where(frame => frame.FrameType == RenderTreeFrameType.Component)
+            .Select(frame => frame.Component).OfType<InputFile>()).OnChange.InvokeAsync(new InputFileChangeEventArgs([file]));
         internal RenderTreeFrame[] Element(string tag, string attribute, string value) =>
             Assert.Single(Elements(tag), attrs => attrs.Any(frame => frame.AttributeName == attribute && Equals(frame.AttributeValue, value)));
         internal bool HasButton(string id) => Elements("button").Any(attrs => attrs.Any(frame => frame.AttributeName == "id" && Equals(frame.AttributeValue, id)));

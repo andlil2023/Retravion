@@ -1,5 +1,6 @@
 @page "/specifications/details"
 @using CSharpFunctionalExtensions
+@using Retravion.Application.Specification
 @using System.Security.Claims
 @implements IDisposable
 @inject SpecificationOperations Operations
@@ -32,7 +33,7 @@
 {
     <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
 }
-else if (_product is null || _specification is null)
+else if (_product is null || _detail is null || _specification is null)
 {
     <p role="status">Loading Specification…</p>
 }
@@ -78,6 +79,10 @@ else
         <SpecificationDeleteControls @key="(_loadVersion, _specification)" Specification="_specification" ProductId="@_product.Id"
                                      Busy="_busy" OnConfirm="Delete" />
     }
+    <SpecificationAiReviewSection @key="(_loadVersion, _specification.GetType(), _detail.CurrentAiReview, _reviewSaveVersion)"
+                                  Review="_detail.CurrentAiReview" CanEdit="@(CanChange && CanSubmitAiReview)" Busy="_busy" OnSubmit="SubmitAiReview" />
+    <SpecificationAssignment @key="(_loadVersion, _detail.Assignee)" Detail="_detail"
+                             CanEdit="@(CanChange && CanAssign)" Busy="_busy" OnChange="ChangeAssignment" />
 }
 
 @code {
@@ -85,11 +90,14 @@ else
     [SupplyParameterFromQuery(Name = "id")] public string? Id { get; set; }
 
     private Retravion.Domain.Product.Product? _product;
-    private DevelopmentSpecification? _specification;
+    private SpecificationDetail? _detail;
+    private DevelopmentSpecification? _specification => _detail?.Specification;
     private string? _error, _mutationError, _notice;
     private bool _busy, _uncertain, _approvalReminder;
-    private int _loadVersion;
+    private int _loadVersion, _reviewSaveVersion;
     private bool CanChange => _product is { IsActive: true } && !_uncertain;
+    private bool CanAssign => _specification is DraftSpecification or InReviewSpecification or ApprovedSpecification;
+    private bool CanSubmitAiReview => _specification is DraftSpecification or InReviewSpecification;
 
     protected override Task OnParametersSetAsync() => Load();
 
@@ -98,7 +106,7 @@ else
         var version = ++_loadVersion;
         var productId = ProductId;
         _product = null;
-        _specification = null;
+        _detail = null;
         _error = _mutationError = _notice = null;
         _busy = _uncertain = _approvalReminder = false;
         if (!Guid.TryParse(Id, out var id) || id == Guid.Empty) { _error = "Specification not found in this Product."; return; }
@@ -112,30 +120,41 @@ else
         if (version != _loadVersion) return;
         if (product.IsFailure || (expectedProduct is { } expected && product.Value.InternalId != expected))
         {
-            (_product, _specification) = (null, null);
+            (_product, _detail) = (null, null);
             _error = product.IsFailure ? product.Error : "Specification not found in this Product.";
             return;
         }
-        var specification = await Operations.Find(actor, product.Value.InternalId, id);
+        var detail = await Operations.FindDetail(actor, product.Value.InternalId, id);
         if (version != _loadVersion) return;
         _product = product.Value;
-        _specification = specification.IsSuccess ? specification.Value.GetValueOrDefault() : null;
-        _error = specification.IsFailure ? specification.Error : _specification is null ? "Specification not found in this Product." : null;
+        _detail = detail.IsSuccess ? detail.Value.GetValueOrDefault() : null;
+        _error = detail.IsFailure ? detail.Error : _detail is null ? "Specification not found in this Product." : null;
     }
 
+    private Task ChangeAssignment(string? assignee) => CanAssign
+        ? Change(async (actor, product, id) => (await Operations.ChangeAssignment(actor, product, id, assignee)).Map(() => true),
+            _ => _notice = assignee is null ? "Assignment cleared." : "Assignment saved.")
+        : Task.CompletedTask;
+
+    private Task SubmitAiReview((SpecificationAiReviewInput Input, bool Approved) review) => CanSubmitAiReview && review.Approved
+        ? Change((actor, product, id) => Operations.SubmitAiReview(actor, product, id, review.Input, review.Approved), _ =>
+        {
+            _reviewSaveVersion++;
+            _notice = "AI review saved.";
+        })
+        : Task.CompletedTask;
+
     private Task SaveLinks(SpecificationLink[] targets) => _specification is DraftSpecification
-        ? Change((actor, product, id) => Operations.EditLinks(actor, product, id, targets), saved =>
-            { _specification = saved; _notice = "Exact-version links saved."; })
+        ? Change((actor, product, id) => Operations.EditLinks(actor, product, id, targets), _ => _notice = "Exact-version links saved.")
         : Task.CompletedTask;
 
     private Task Submit() => _specification is DraftSpecification draft && !string.IsNullOrWhiteSpace(draft.Description)
-        ? Change((actor, product, id) => Operations.SubmitForReview(actor, product, id), submitted => _specification = submitted)
+        ? Change((actor, product, id) => Operations.SubmitForReview(actor, product, id))
         : Task.CompletedTask;
 
     private Task Approve() => _specification is InReviewSpecification
         ? Change((actor, product, id) => Operations.Approve(actor, product, id), approval =>
         {
-            _specification = approval.Specification;
             if (approval.MissingLinkTypes.Count == 0) return;
             _approvalReminder = true;
             _notice = $"Specification approved. No exact-version links for: {string.Join(", ", approval.MissingLinkTypes.Select(SpecificationPresentation.LinkKind))}.";
@@ -143,10 +162,8 @@ else
 
     private Task Return((string? Reason, bool Attested) input) => _specification switch
     {
-        InReviewSpecification => Change((actor, product, id) => Operations.ReturnToDraft(actor, product, id, input.Reason),
-            returned => _specification = returned),
-        ApprovedSpecification when input.Attested => Change((actor, product, id) => Operations.Reopen(actor, product, id, input.Reason, input.Attested),
-            returned => _specification = returned),
+        InReviewSpecification => Change((actor, product, id) => Operations.ReturnToDraft(actor, product, id, input.Reason)),
+        ApprovedSpecification when input.Attested => Change((actor, product, id) => Operations.Reopen(actor, product, id, input.Reason, input.Attested)),
         _ => Task.CompletedTask
     };
 
@@ -156,12 +173,12 @@ else
             (await Operations.Delete(actor, productId, id, input.ConfirmedId, input.Attested)).Map(() => true),
             _ =>
             {
-                _specification = null;
+                _detail = null;
                 Navigation.NavigateTo(SpecificationPresentation.ListPath(product.Id));
-            })
+            }, reload: false)
         : Task.CompletedTask;
 
-    private async Task Change<T>(Func<ClaimsPrincipal, Guid, Guid, Task<Result<T>>> operation, Action<T> apply)
+    private async Task Change<T>(Func<ClaimsPrincipal, Guid, Guid, Task<Result<T>>> operation, Action<T>? apply = null, bool reload = true)
     {
         if (_busy || !CanChange || _product is not { } product || _specification is not { } target) return;
         var version = _loadVersion;
@@ -174,7 +191,13 @@ else
             if (version != _loadVersion) return;
             var result = await operation(actor, product.InternalId, target.InternalId);
             if (version != _loadVersion) return;
-            if (result.IsSuccess) { apply(result.Value); return; }
+            if (result.IsSuccess)
+            {
+                // Refresh the detail snapshot: lifecycle and link changes can also invalidate the retained AI review.
+                if (reload) await Read(actor, product.Id, target.InternalId, version, product.InternalId);
+                if (version == _loadVersion && _error is null) apply?.Invoke(result.Value);
+                return;
+            }
 
             _mutationError = result.Error;
             // The existing store has a distinct safe message for an unconfirmed commit, not a typed outcome.
