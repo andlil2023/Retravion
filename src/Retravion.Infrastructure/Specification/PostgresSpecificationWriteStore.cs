@@ -73,13 +73,14 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             return edit;
         }, cancellationToken);
 
-    public Task<Result<DraftSpecification>> EditLinks(Guid productInternalId, Guid internalId, IEnumerable<SpecificationLink> targets,
+    public Task<Result<DraftSpecification>> EditLinks(Guid productInternalId, Guid internalId, SpecificationLinks expected, IEnumerable<SpecificationLink> targets,
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default) =>
         Execute(productInternalId, authorized, async (connection, transaction) =>
         {
             var current = await LockDraft(connection, transaction, productInternalId, internalId, "links", cancellationToken);
             if (current.IsFailure) return current;
+            if (!current.Value.Links.Equals(expected)) return Result.Failure<DraftSpecification>("Links changed. Review the refreshed selection before saving.");
             var edit = current.Value.EditLinks(targets);
             if (edit.IsFailure || current.Value.Links.Equals(edit.Value.Links)) return edit;
 
@@ -374,12 +375,12 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             ReturnToDraftAction, "In Review", "Draft", "Only In Review Specifications can be returned to Draft.",
             review => review.ReturnToDraft(reason), reason, cancellationToken);
 
-    public async Task<Result<SpecificationApproval>> Approve(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
+    public async Task<Result<SpecificationApproval>> Approve(Guid productInternalId, Guid internalId, InReviewSpecification? displayed, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default)
     {
         var result = await Transition<InReviewSpecification, ApprovedSpecification>(productInternalId, internalId, actor,
             occurredAt, authorized, "specification.approve", "In Review", "Approved",
-            "Only In Review Specifications can be approved.", review => Result.Success(review.Approve()), null,
+            "Only In Review Specifications can be approved.", review => review == displayed ? Result.Success(review.Approve()) : Result.Failure<ApprovedSpecification>("The Specification changed. Review the refreshed content and links before approving."), null,
             cancellationToken, validate: LockApprovedTargets);
         return result.Map(approved => new SpecificationApproval(approved,
             Array.AsReadOnly(Enum.GetValues<SpecificationLinkKind>()

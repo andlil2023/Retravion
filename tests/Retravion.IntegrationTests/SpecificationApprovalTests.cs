@@ -94,7 +94,7 @@ public sealed partial class SpecificationReadTests
             await insert.ExecuteNonQueryAsync();
             await SetReopenSeedStatus(seed, id, "In Review");
             Assert.Contains($"linked {target.Kind} version must be Approved in this Product",
-                (await store.Approve(product, id, CreateActor, CreateTime, ApprovalAuthorized)).Error);
+                (await store.Approve(product, id, Assert.IsType<InReviewSpecification>((await read.Find(product, id)).Value.Value), CreateActor, CreateTime, ApprovalAuthorized)).Error);
             Assert.IsType<InReviewSpecification>((await read.Find(product, id)).Value.Value);
         }
         Assert.Empty(await SpecificationEvents(db, "specification.approve"));
@@ -151,8 +151,8 @@ public sealed partial class SpecificationReadTests
             var versions = await regularOwners.Approve(await regularOwners.Create(product));
             var draft = DraftSpecification.Create(product, "DEV", "Title", "Description").Value;
             Assert.True((await regularWrites.Create(draft, CreateActor, CreateTime, ApprovalAuthorized)).IsSuccess);
-            Assert.True((await regularWrites.EditLinks(product, draft.InternalId, versions.Links, CreateActor, CreateTime, ApprovalAuthorized)).IsSuccess);
-            Assert.True((await regularWrites.SubmitForReview(product, draft.InternalId, CreateActor, CreateTime, ApprovalAuthorized)).IsSuccess);
+            Assert.True((await regularWrites.EditLinks(product, draft.InternalId, draft.Links, versions.Links, CreateActor, CreateTime, ApprovalAuthorized)).IsSuccess);
+            var submitted = (await regularWrites.SubmitForReview(product, draft.InternalId, CreateActor, CreateTime, ApprovalAuthorized)).Value;
 
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             var ready = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -208,10 +208,51 @@ public sealed partial class SpecificationReadTests
             }
 
             Task<Result<SpecificationApproval>> StartApproval() =>
-                writes.Approve(product, draft.InternalId, CreateActor, CreateTime, ApprovalAuthorized, deadline.Token);
+                writes.Approve(product, draft.InternalId, submitted, CreateActor, CreateTime, ApprovalAuthorized, deadline.Token);
             Task<string?> StartReopen() => owners.ReopenTarget(kind, versions, deadline.Token);
         }
         Assert.Equal(3, (await SpecificationEvents(db, "specification.approve")).Count);
+    }
+
+    [PostgresFact]
+    public async Task StaleLinkEditorAndReviewerCannotChangeAnotherSessionsWork()
+    {
+        await using var db = await Database.Create();
+        var pid = (await Product(new PostgresProductStore(db.ConnectionString), "main")).InternalId;
+        var owners = new ReopenOwners(db.ConnectionString);
+        var links = (await owners.Approve(await owners.Create(pid))).Links;
+        await using var factory = CreateFactory(db);
+        using var scope = factory.Services.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<SpecificationOperations>();
+        var sessions = scope.ServiceProvider.GetRequiredService<SessionTicketStore>();
+        var author = await Principal(sessions, "User", now: CreateTime);
+        var reviewer = await Principal(sessions, "Administrator", now: CreateTime);
+        var draft = (await ops.Create(author, pid, "SPEC", "Title", "First description")).Value;
+        var id = draft.InternalId;
+        var initial = (await ops.EditLinks(author, pid, id, draft.Links, links.Take(1))).Value;
+        var opened = (await ops.Find(reviewer, pid, id)).Value.Value.Links;
+        var updated = (await ops.EditLinks(author, pid, id, initial.Links, links.Take(2))).Value;
+        var events = await SpecificationEvents(db, "specification.edit-links");
+        var staleSave = await ops.EditLinks(reviewer, pid, id, opened, [links[0], links[2]]);
+        Assert.Contains("Links changed", staleSave.Error);
+        Assert.Equal(updated.Links, (await ops.Find(author, pid, id)).Value.Value.Links);
+        Assert.Equal(events.Count, (await SpecificationEvents(db, "specification.edit-links")).Count);
+
+        Assert.True((await ops.SubmitForReview(author, pid, id)).IsSuccess);
+        foreach (var changeLinks in new[] { false, true })
+        {
+            var seen = Assert.IsType<InReviewSpecification>((await ops.Find(reviewer, pid, id)).Value.Value);
+            var reopened = (await ops.ReturnToDraft(author, pid, id, null)).Value;
+            if (changeLinks) Assert.True((await ops.EditLinks(author, pid, id, reopened.Links, links)).IsSuccess);
+            else Assert.True((await ops.EditContent(author, pid, reopened, reopened.Id, reopened.Title, "Revised description")).IsSuccess);
+            var resubmitted = (await ops.SubmitForReview(author, pid, id)).Value;
+            Assert.Contains("Review the refreshed", (await ops.Approve(reviewer, pid, id, seen)).Error);
+            Assert.Equal(resubmitted, (await ops.Find(reviewer, pid, id)).Value.Value);
+            Assert.Empty(await SpecificationEvents(db, "specification.approve"));
+        }
+        var refreshed = Assert.IsType<InReviewSpecification>((await ops.Find(reviewer, pid, id)).Value.Value);
+        Assert.True((await ops.Approve(reviewer, pid, id, refreshed)).IsSuccess);
+        Assert.Single(await SpecificationEvents(db, "specification.approve"));
     }
 
     private static Task<bool> ApprovalAuthorized() => Task.FromResult(true);

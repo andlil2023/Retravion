@@ -358,10 +358,10 @@ public sealed partial class SpecificationReadTests
             CancellationToken cancellationToken = default) =>
             inner.EditContent(productInternalId, expected, id, title, description, actor, occurredAt, authorized, cancellationToken);
 
-        public Task<Result<DraftSpecification>> EditLinks(Guid productInternalId, Guid internalId, IEnumerable<SpecificationLink> targets,
+        public Task<Result<DraftSpecification>> EditLinks(Guid productInternalId, Guid internalId, SpecificationLinks expected, IEnumerable<SpecificationLink> targets,
             AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
             CancellationToken cancellationToken = default) =>
-            inner.EditLinks(productInternalId, internalId, targets, actor, occurredAt, authorized, cancellationToken);
+            inner.EditLinks(productInternalId, internalId, expected, targets, actor, occurredAt, authorized, cancellationToken);
 
         public Task<Result> ChangeAssignment(Guid productInternalId, Guid internalId, string? assignee,
             AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
@@ -387,9 +387,9 @@ public sealed partial class SpecificationReadTests
             DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
             inner.SubmitForReview(productInternalId, internalId, actor, occurredAt, authorized, cancellationToken);
 
-        public Task<Result<Retravion.Application.Specification.SpecificationApproval>> Approve(Guid productInternalId, Guid internalId,
+        public Task<Result<Retravion.Application.Specification.SpecificationApproval>> Approve(Guid productInternalId, Guid internalId, InReviewSpecification? displayed,
             AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>
-            inner.Approve(productInternalId, internalId, actor, occurredAt, authorized, cancellationToken);
+            inner.Approve(productInternalId, internalId, displayed, actor, occurredAt, authorized, cancellationToken);
 
         public Task<Result<ImplementedSpecification>> Implement(Guid productInternalId, Guid internalId, bool mergeAttested,
             string attestedPullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,

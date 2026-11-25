@@ -27,10 +27,10 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             writes.EditContent(productInternalId, expected, id, title, description, actor, now, authorized, cancellationToken),
             cancellationToken);
 
-    public Task<Result<DraftSpecification>> EditLinks(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+    public Task<Result<DraftSpecification>> EditLinks(ClaimsPrincipal principal, Guid productInternalId, Guid internalId, SpecificationLinks expected,
         IEnumerable<SpecificationLink> targets, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.edit-links", (actor, now, authorized) =>
-            writes.EditLinks(productInternalId, internalId, targets, actor, now, authorized, cancellationToken), cancellationToken);
+            writes.EditLinks(productInternalId, internalId, expected, targets, actor, now, authorized, cancellationToken), cancellationToken);
 
     internal async Task<Result<string[]>> ListActiveAssignees(ClaimsPrincipal actor)
     {
@@ -69,10 +69,10 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
         Change(principal, "specification.submit-for-review", (actor, now, authorized) =>
             writes.SubmitForReview(productInternalId, internalId, actor, now, authorized, cancellationToken), cancellationToken);
 
-    public Task<Result<SpecificationApproval>> Approve(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+    public Task<Result<SpecificationApproval>> Approve(ClaimsPrincipal principal, Guid productInternalId, Guid internalId, InReviewSpecification? displayed,
         CancellationToken cancellationToken = default) =>
         Change(principal, "specification.approve", (actor, now, authorized) =>
-            writes.Approve(productInternalId, internalId, actor, now, authorized, cancellationToken), cancellationToken);
+            writes.Approve(productInternalId, internalId, displayed, actor, now, authorized, cancellationToken), cancellationToken);
 
     public Task<Result<ImplementedSpecification>> Implement(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
         bool mergeAttested, string attestedPullRequestUrl, CancellationToken cancellationToken = default) =>

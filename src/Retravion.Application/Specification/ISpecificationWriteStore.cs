@@ -16,7 +16,7 @@ public interface ISpecificationWriteStore
         CancellationToken cancellationToken = default);
 
     /// <summary>Replaces the Draft's exact target set and commits its audit event with the change.</summary>
-    Task<Result<DraftSpecification>> EditLinks(Guid productInternalId, Guid internalId, IEnumerable<SpecificationLink> targets,
+    Task<Result<DraftSpecification>> EditLinks(Guid productInternalId, Guid internalId, SpecificationLinks expected, IEnumerable<SpecificationLink> targets,
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 
@@ -45,7 +45,7 @@ public interface ISpecificationWriteStore
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
 
     /// <summary>Approves an In Review specification and reports missing link types after commit. Exact versions are locked through commit.</summary>
-    Task<Result<SpecificationApproval>> Approve(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
+    Task<Result<SpecificationApproval>> Approve(Guid productInternalId, Guid internalId, InReviewSpecification? displayed, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
 
     /// <summary>Finalizes an Approved specification only when the human-attested PR URL matches the current evidence

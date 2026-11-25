@@ -97,11 +97,12 @@
     [Parameter, EditorRequired] public DevelopmentSpecification Specification { get; set; } = default!;
     [Parameter] public bool CanEdit { get; set; }
     [Parameter] public bool Busy { get; set; }
-    [Parameter] public EventCallback<SpecificationLink[]> OnSave { get; set; }
+    [Parameter] public EventCallback<(SpecificationLinks Expected, SpecificationLink[] Targets)> OnSave { get; set; }
 
     private List<(SpecificationLink Target, SpecificationVersionChoice? Version, string? Error)>? _retained;
     private Dictionary<SpecificationLinkKind, IReadOnlyList<SpecificationVersionChoice>>? _choices;
     private readonly HashSet<SpecificationLink> _selection = [];
+    private SpecificationLinks? _openedLinks;
     private SpecificationLink[] _unavailable = [];
     private string? _choiceError;
     private bool _editing, _disposed;
@@ -131,7 +132,8 @@
         _choiceError = null;
         _choices = null;
         _selection.Clear();
-        _selection.UnionWith(Specification.Links.Targets);
+        _openedLinks = Specification.Links;
+        _selection.UnionWith(_openedLinks.Targets);
         var edit = ++_editorVersion;
         var actor = (await Authentication.GetAuthenticationStateAsync()).User;
         var choices = new Dictionary<SpecificationLinkKind, IReadOnlyList<SpecificationVersionChoice>>();
@@ -167,8 +169,8 @@
 
     private bool HasChanges => _choices is not null && !_selection.SetEquals(Specification.Links.Targets);
 
-    private Task Save() => CanEdit && !Busy && _editing && HasChanges
-        ? OnSave.InvokeAsync(_selection.ToArray()) : Task.CompletedTask;
+    private Task Save() => CanEdit && !Busy && _editing && HasChanges && _openedLinks is { } expected
+        ? OnSave.InvokeAsync((expected, _selection.ToArray())) : Task.CompletedTask;
 
     private static string Label(SpecificationVersionChoice choice) => $"{choice.Identifier} · v{choice.VersionNumber} · {choice.Title}";
 
