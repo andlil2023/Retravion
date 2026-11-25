@@ -59,7 +59,7 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             cancellationToken);
 
     public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
-        bool reviewedEvidence, CancellationToken cancellationToken = default) =>
+        SpecificationEvidence? reviewedEvidence, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.confirm-evidence-current", (actor, now, authorized) =>
             writes.ConfirmEvidenceCurrent(productInternalId, internalId, reviewedEvidence, actor, now, authorized, cancellationToken),
             cancellationToken);

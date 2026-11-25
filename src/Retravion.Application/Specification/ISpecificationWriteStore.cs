@@ -36,7 +36,7 @@ public interface ISpecificationWriteStore
         CancellationToken cancellationToken = default);
 
     /// <summary>Explicitly confirms reviewed evidence after approval without replacing the report or PR URL.</summary>
-    Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, bool reviewedEvidence,
+    Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, SpecificationEvidence? reviewedEvidence,
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 

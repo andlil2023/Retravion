@@ -158,7 +158,7 @@ else
         }, evidenceMutation: true)
         : Task.CompletedTask;
 
-    private Task ConfirmEvidence(bool reviewed) => CanPrepareEvidence && reviewed && _detail?.Evidence is { IsOutdated: true }
+    private Task ConfirmEvidence(SpecificationEvidence reviewed) => CanPrepareEvidence && reviewed.IsOutdated && _detail?.Evidence == reviewed
         ? Change((actor, product, id) => Operations.ConfirmEvidenceCurrent(actor, product, id, reviewed),
             _ => _notice = "Evidence confirmed current.", evidenceMutation: true)
         : Task.CompletedTask;

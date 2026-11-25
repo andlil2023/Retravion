@@ -378,7 +378,7 @@ public sealed partial class SpecificationReadTests
             CancellationToken cancellationToken = default) =>
             inner.SaveEvidence(productInternalId, internalId, markdown, pullRequestUrl, actor, occurredAt, authorized, cancellationToken);
 
-        public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, bool reviewedEvidence,
+        public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, SpecificationEvidence? reviewedEvidence,
             AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
             CancellationToken cancellationToken = default) =>
             inner.ConfirmEvidenceCurrent(productInternalId, internalId, reviewedEvidence, actor, occurredAt, authorized, cancellationToken);

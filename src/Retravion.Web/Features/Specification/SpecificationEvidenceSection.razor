@@ -111,11 +111,17 @@
     [Parameter] public bool Busy { get; set; }
     [Parameter] public string? Error { get; set; }
     [Parameter] public EventCallback<(string Markdown, string? PullRequestUrl)> OnSave { get; set; }
-    [Parameter] public EventCallback<bool> OnConfirm { get; set; }
+    [Parameter] public EventCallback<SpecificationEvidence> OnConfirm { get; set; }
     [Parameter] public EventCallback<string> OnImplement { get; set; }
 
     private ElementReference _urlInput;
-    private bool _editing, _reviewed, _readingUrl, _disposed;
+    private bool _editing, _readingUrl, _disposed;
+    private SpecificationEvidence? _reviewedSnapshot;
+    private bool _reviewed
+    {
+        get => _reviewedSnapshot is not null && _reviewedSnapshot == Evidence;
+        set => _reviewedSnapshot = value ? Evidence : null;
+    }
     private string? _inputError, _attestedPullRequestUrl;
     private bool Disabled => Busy || _readingUrl;
     private bool CanImplement => !_disposed && CanEdit && !_editing && !Disabled && _attestedPullRequestUrl is not null &&
@@ -138,10 +144,10 @@
 
     private Task Confirm()
     {
-        if (_disposed || !CanEdit || _editing || Disabled || !_reviewed || Evidence is not { IsOutdated: true })
+        if (_disposed || !CanEdit || _editing || Disabled || !_reviewed || _reviewedSnapshot is not { IsOutdated: true } snapshot)
             return Task.CompletedTask;
         _reviewed = false;
-        return OnConfirm.InvokeAsync(true);
+        return OnConfirm.InvokeAsync(snapshot);
     }
 
     private Task Implement()

@@ -275,13 +275,15 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
                 : prepared;
         }, cancellationToken);
 
-    public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, bool reviewedEvidence,
+    public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, SpecificationEvidence? reviewedEvidence,
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default) =>
         ChangeEvidence(productInternalId, internalId, actor, occurredAt, authorized, "specification.confirm-evidence-current",
             before => before is null
                 ? Result.Failure<SpecificationEvidence>("There is no retained Specification evidence to confirm.")
-                : before.ConfirmCurrent(reviewedEvidence), cancellationToken);
+                : reviewedEvidence is not null && reviewedEvidence != before
+                    ? Result.Failure<SpecificationEvidence>("Evidence changed. Review the refreshed evidence before confirming.")
+                    : before.ConfirmCurrent(reviewedEvidence is not null), cancellationToken);
 
     private Task<Result<SpecificationEvidence>> ChangeEvidence(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, string action,

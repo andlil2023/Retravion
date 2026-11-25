@@ -43,7 +43,7 @@ public sealed partial class SpecificationReadTests
         Assert.True((await ops.SubmitForReview(user, pid, id)).IsSuccess);
         Assert.True((await ops.Approve(user, pid, id)).IsSuccess);
         Assert.Contains("Current evidence", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
-        Assert.True((await ops.ConfirmEvidenceCurrent(user, pid, id, true)).IsSuccess);
+        Assert.True((await ops.ConfirmEvidenceCurrent(user, pid, id, (await ops.FindDetail(user, pid, id)).Value.Value.Evidence)).IsSuccess);
 
         await using var connection = new NpgsqlConnection(db.ConnectionString);
         await connection.OpenAsync();
@@ -133,7 +133,7 @@ public sealed partial class SpecificationReadTests
         Assert.Contains("only be submitted", (await ops.SubmitAiReview(user, pid, id, new SpecificationAiReviewInput.Entered("# Changed"), true)).Error);
         Assert.Contains("only be submitted", (await ops.SubmitAiReview(user, pid, id, new SpecificationAiReviewInput.Uploaded("# Changed"u8.ToArray()), true)).Error);
         Assert.Contains("Approved", (await ops.SaveEvidence(user, pid, id, "# Changed", null)).Error);
-        Assert.Contains("Approved", (await ops.ConfirmEvidenceCurrent(user, pid, id, true)).Error);
+        Assert.Contains("Approved", (await ops.ConfirmEvidenceCurrent(user, pid, id, null)).Error);
         Assert.Contains("Only Draft", (await ops.SubmitForReview(user, pid, id)).Error);
         Assert.Contains("Only In Review", (await ops.ReturnToDraft(user, pid, id, "Changed")).Error);
         Assert.Contains("Only In Review", (await ops.Approve(user, pid, id)).Error);
