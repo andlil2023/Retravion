@@ -150,8 +150,8 @@ else
         })
         : Task.CompletedTask;
 
-    private Task SaveEvidence((string Markdown, string? PullRequestUrl) input) => CanPrepareEvidence
-        ? Change((actor, product, id) => Operations.SaveEvidence(actor, product, id, input.Markdown, input.PullRequestUrl), evidence =>
+    private Task SaveEvidence((SpecificationEvidence? Expected, string Markdown, string? PullRequestUrl) input) => CanPrepareEvidence
+        ? Change((actor, product, id) => Operations.SaveEvidence(actor, product, id, input.Expected, input.Markdown, input.PullRequestUrl), evidence =>
         {
             _evidenceSaveVersion++;
             _notice = evidence.IsOutdated ? "Evidence is unchanged and still outdated. Confirm it or save a replacement." : "Evidence saved.";

@@ -120,7 +120,7 @@ public sealed partial class SpecificationReadTests
         var id = (await ops.Create(actor, pid, "DEV-1", "Finalization", "Ready")).Value.InternalId;
         Assert.True((await ops.SubmitForReview(actor, pid, id)).IsSuccess);
         Assert.True((await ops.Approve(actor, pid, id)).IsSuccess);
-        Assert.True((await ops.SaveEvidence(actor, pid, id, "**Retained evidence**", EvidenceUrl)).IsSuccess);
+        Assert.True((await ops.SaveEvidence(actor, pid, id, null, "**Retained evidence**", EvidenceUrl)).IsSuccess);
         await using var services = PageServices(scope.ServiceProvider, actor, new PagesNavigation());
         await using var renderer = new PagesRenderer(services);
 
@@ -172,7 +172,7 @@ public sealed partial class SpecificationReadTests
         Assert.True((await ops.ChangeAssignment(actor, pid, id, assignee.Username)).IsSuccess);
         Assert.True((await ops.SubmitForReview(actor, pid, id)).IsSuccess);
         Assert.True((await ops.Approve(actor, pid, id)).IsSuccess);
-        Assert.True((await ops.SaveEvidence(actor, pid, id, report, EvidenceUrl)).IsSuccess);
+        Assert.True((await ops.SaveEvidence(actor, pid, id, null, report, EvidenceUrl)).IsSuccess);
         var before = (await ops.FindDetail(actor, pid, id)).Value.Value;
         var path = SpecificationPresentation.DetailsPath(product.Id, id);
         await using var services = PageServices(scope.ServiceProvider, actor, new PagesNavigation());
@@ -253,7 +253,7 @@ public sealed partial class SpecificationReadTests
         var id = (await ops.Create(actor, pid, "DEV-1", "Finalization", "Ready")).Value.InternalId;
         Assert.True((await ops.SubmitForReview(actor, pid, id)).IsSuccess);
         Assert.True((await ops.Approve(actor, pid, id)).IsSuccess);
-        Assert.True((await ops.SaveEvidence(actor, pid, id, "**Final evidence**", EvidenceUrl)).IsSuccess);
+        Assert.True((await ops.SaveEvidence(actor, pid, id, null, "**Final evidence**", EvidenceUrl)).IsSuccess);
         await using var services = PageServices(scope.ServiceProvider, actor, new PagesNavigation());
         await using var renderer = new PagesRenderer(services);
 

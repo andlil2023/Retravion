@@ -67,7 +67,7 @@
     {
         @if (_editing)
         {
-            <DescriptionEditor InitialDescription="@(Evidence?.Markdown ?? string.Empty)" Label="Evidence report"
+            <DescriptionEditor InitialDescription="@(_editingSnapshot?.Markdown ?? string.Empty)" Label="Evidence report"
                                InputId="specification-evidence-markdown" FormId="specification-evidence-form"
                                StreamedInputMaxBytes="@(1024 * 1024)" ExitFullscreenOnSave="true"
                                Busy="Disabled" ReadOnly="Disabled" SubmitText="Save evidence" OnSave="Save">
@@ -76,7 +76,7 @@
                     @* Like the Markdown, read the value on submit instead of sending it in a hub event. *@
                     <input @ref="_urlInput" id="specification-evidence-pr-url" type="text" inputmode="url"
                            class="mud-input-slot" style="display:block;width:100%;border:1px solid var(--mud-palette-lines-inputs)"
-                           value="@Evidence?.PullRequestUrl" aria-describedby="specification-evidence-pr-help" disabled="@Disabled" />
+                           value="@_editingSnapshot?.PullRequestUrl" aria-describedby="specification-evidence-pr-help" disabled="@Disabled" />
                     <p id="specification-evidence-pr-help">Enter an absolute HTTPS URL, or leave it blank.</p>
                     @if (_inputError is not null)
                     {
@@ -110,13 +110,13 @@
     [Parameter] public bool CanEdit { get; set; }
     [Parameter] public bool Busy { get; set; }
     [Parameter] public string? Error { get; set; }
-    [Parameter] public EventCallback<(string Markdown, string? PullRequestUrl)> OnSave { get; set; }
+    [Parameter] public EventCallback<(SpecificationEvidence? Expected, string Markdown, string? PullRequestUrl)> OnSave { get; set; }
     [Parameter] public EventCallback<SpecificationEvidence> OnConfirm { get; set; }
     [Parameter] public EventCallback<string> OnImplement { get; set; }
 
     private ElementReference _urlInput;
     private bool _editing, _readingUrl, _disposed;
-    private SpecificationEvidence? _reviewedSnapshot;
+    private SpecificationEvidence? _reviewedSnapshot, _editingSnapshot;
     private bool _reviewed
     {
         get => _reviewedSnapshot is not null && _reviewedSnapshot == Evidence;
@@ -130,6 +130,7 @@
     private void Open()
     {
         if (!CanEdit || Disabled) return;
+        _editingSnapshot = Evidence;
         _editing = true;
         _reviewed = false;
         _attestedPullRequestUrl = null;
@@ -163,13 +164,13 @@
         _readingUrl = true;
         _inputError = null;
         // A textarea exposes LF line endings. A URL-only edit must not change the stored report.
-        if (Evidence is { } evidence && markdown == evidence.Markdown.Replace("\r\n", "\n").Replace('\r', '\n'))
+        if (_editingSnapshot is { } evidence && markdown == evidence.Markdown.Replace("\r\n", "\n").Replace('\r', '\n'))
             markdown = evidence.Markdown;
         try
         {
             var url = await ReadUrl();
             if (!_disposed && CanEdit && _editing && !Busy && _inputError is null)
-                await OnSave.InvokeAsync((markdown, url));
+                await OnSave.InvokeAsync((_editingSnapshot, markdown, url));
         }
         finally { _readingUrl = false; }
     }

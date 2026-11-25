@@ -110,18 +110,18 @@ public sealed partial class SpecificationReadTests
         var entered = new SpecificationAiReviewInput.Entered(text);
         async Task<SpecificationAiReview> Review() => (await ops.FindDetail(user, product, id)).Value.Value.CurrentAiReview!;
         Assert.True((await ops.SubmitAiReview(user, product, id, entered, true)).IsSuccess);
-        Assert.True((await ops.EditContent(user, product, id, draft.Id, draft.Title, draft.Description)).IsSuccess);
+        Assert.True((await ops.EditContent(user, product, draft, draft.Id, draft.Title, draft.Description)).IsSuccess);
         Assert.True((await ops.EditLinks(user, product, id, [])).IsSuccess);
         Assert.True((await ops.EditLinks(user, product, id, [new(SpecificationLinkKind.UserNeed, Guid.NewGuid())])).IsFailure);
         Assert.False((await Review()).IsOutdated);
         Assert.Empty(await ContentEvents(db));
         Assert.Empty(await LinkEvents(db));
 
-        Assert.True((await ops.EditContent(user, product, id, draft.Id, "Changed", draft.Description)).IsSuccess);
+        var changed = (await ops.EditContent(user, product, draft, draft.Id, "Changed", draft.Description)).Value;
         Assert.Equal((text, true), ((await Review()).Markdown, (await Review()).IsOutdated));
         var invalidation = new SpecificationAuditAiReviewChange(new(text, false), new(text, true));
         Assert.Equal(invalidation, Assert.Single(await ContentEvents(db)).Change!.AiReview);
-        Assert.True((await ops.EditContent(user, product, id, draft.Id, "Changed again", draft.Description)).IsSuccess);
+        Assert.True((await ops.EditContent(user, product, changed, draft.Id, "Changed again", draft.Description)).IsSuccess);
         Assert.Null((await ContentEvents(db))[1].Change!.AiReview);
         Assert.True((await ops.SubmitAiReview(user, product, id, entered, true)).IsSuccess);
         Assert.False((await Review()).IsOutdated);
@@ -170,7 +170,7 @@ public sealed partial class SpecificationReadTests
         await InstallAuditFault(db, "RAISE insufficient_privilege USING MESSAGE = 'private provider details';");
         const string failed = "The Specification operation could not be completed.";
         Assert.Equal(failed, (await ops.SubmitAiReview(user, product, draft.InternalId, new SpecificationAiReviewInput.Entered("New review"), true)).Error);
-        Assert.Equal(failed, (await ops.EditContent(user, product, draft.InternalId, draft.Id, "Changed", draft.Description)).Error);
+        Assert.Equal(failed, (await ops.EditContent(user, product, draft, draft.Id, "Changed", draft.Description)).Error);
         Assert.Equal(failed, (await ops.EditLinks(user, product, draft.InternalId, [target])).Error);
         Assert.Equal(failed, (await ops.Reopen(user, product, approved.InternalId, "Revise", true)).Error);
         foreach (var expected in new DevelopmentSpecification[] { draft, approved })

@@ -160,7 +160,7 @@ public sealed partial class SpecificationReadTests
         {
             Assert.True((await operations.SubmitForReview(actor, product.InternalId, id)).IsSuccess);
             Assert.True((await operations.Approve(actor, product.InternalId, id)).IsSuccess);
-            Assert.True((await operations.SaveEvidence(actor, product.InternalId, id, "Evidence", EvidenceUrl)).IsSuccess);
+            Assert.True((await operations.SaveEvidence(actor, product.InternalId, id, null, "Evidence", EvidenceUrl)).IsSuccess);
         }
         Assert.True((await operations.Implement(actor, product.InternalId, completed.InternalId, true, EvidenceUrl)).IsSuccess);
         var navigation = new PagesNavigation();

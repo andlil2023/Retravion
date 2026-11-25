@@ -106,7 +106,7 @@ public sealed partial class SpecificationReadTests
         Assert.True((await ops.SubmitForReview(actor, pid, id)).IsSuccess);
         Assert.True((await ops.Approve(actor, pid, id)).IsSuccess);
         const string markdown = "**Original results**\r\n\r\nKnown limitations.";
-        var original = (await ops.SaveEvidence(actor, pid, id, markdown, EvidenceUrl)).Value;
+        var original = (await ops.SaveEvidence(actor, pid, id, null, markdown, EvidenceUrl)).Value;
         await using var services = PageServices(scope.ServiceProvider, actor, new PagesNavigation());
         await using var renderer = new PagesRenderer(services);
 
@@ -241,7 +241,7 @@ public sealed partial class SpecificationReadTests
             var id = (await ops.Create(actor, pid, label, "Evidence", "Ready")).Value.InternalId;
             Assert.True((await ops.SubmitForReview(actor, pid, id)).IsSuccess);
             Assert.True((await ops.Approve(actor, pid, id)).IsSuccess);
-            Assert.True((await ops.SaveEvidence(actor, pid, id, "**Read-only report**", EvidenceUrl)).IsSuccess);
+            Assert.True((await ops.SaveEvidence(actor, pid, id, null, "**Read-only report**", EvidenceUrl)).IsSuccess);
             return id;
         }
         var implemented = await CreateWithEvidence("DEV-1");

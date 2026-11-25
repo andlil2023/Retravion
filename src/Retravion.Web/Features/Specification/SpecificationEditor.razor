@@ -112,7 +112,7 @@ else
             if (version != _loadVersion) return;
             var result = draft is null
                 ? await Operations.Create(actor, product.InternalId, heading.Id, heading.Title, description)
-                : await Operations.EditContent(actor, product.InternalId, draft.InternalId,
+                : await Operations.EditContent(actor, product.InternalId, draft,
                     PreserveHeading(draft.Id, heading.Id), PreserveHeading(draft.Title, heading.Title),
                     description == draft.Description.Replace("\r\n", "\n").Replace('\r', '\n') ? draft.Description : description);
             if (version != _loadVersion) return;

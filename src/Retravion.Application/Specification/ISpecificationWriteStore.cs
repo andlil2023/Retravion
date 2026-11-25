@@ -11,7 +11,7 @@ public interface ISpecificationWriteStore
         Func<Task<bool>> authorized, CancellationToken cancellationToken = default);
 
     /// <summary>Edits persisted Draft content in the given Product and commits its audit event with the change.</summary>
-    Task<Result<DraftSpecification>> EditContent(Guid productInternalId, Guid internalId, string? id, string? title,
+    Task<Result<DraftSpecification>> EditContent(Guid productInternalId, DraftSpecification expected, string? id, string? title,
         string? description, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 
@@ -31,7 +31,7 @@ public interface ISpecificationWriteStore
         CancellationToken cancellationToken = default);
 
     /// <summary>Replaces the single Approved evidence report and optional PR URL (null clears it), making the evidence current.</summary>
-    Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, string? markdown,
+    Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, SpecificationEvidence? expected, string? markdown,
         string? pullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 

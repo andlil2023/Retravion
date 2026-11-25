@@ -74,7 +74,7 @@ public sealed partial class SpecificationReadTests
         var id = (await ops.Create(user, pid, "FINAL", "Title", "Description")).Value.InternalId;
         Assert.True((await ops.SubmitForReview(user, pid, id)).IsSuccess);
         Assert.True((await ops.Approve(user, pid, id)).IsSuccess);
-        Assert.True((await ops.SaveEvidence(user, pid, id, "# Report", EvidenceUrl)).IsSuccess);
+        Assert.True((await ops.SaveEvidence(user, pid, id, null, "# Report", EvidenceUrl)).IsSuccess);
         var implemented = (await ops.Implement(user, pid, id, true, EvidenceUrl)).Value;
 
         Assert.Contains("Implemented", (await ops.Delete(user, pid, id, id, true)).Error);
@@ -234,7 +234,7 @@ public sealed partial class SpecificationReadTests
         Assert.True((await ops.ChangeAssignment(user, productId, id, null)).IsSuccess);
         Assert.True((await ops.SubmitForReview(user, productId, id)).IsSuccess);
         Assert.True((await ops.Approve(user, productId, id)).IsSuccess);
-        Assert.True((await ops.SaveEvidence(user, productId, id, "# Report", EvidenceUrl)).IsSuccess);
+        Assert.True((await ops.SaveEvidence(user, productId, id, null, "# Report", EvidenceUrl)).IsSuccess);
         Assert.True((await ops.Reopen(user, productId, id, "Revise", true)).IsSuccess);
         Assert.True((await ops.SubmitForReview(user, productId, id)).IsSuccess);
         Assert.True((await ops.Approve(user, productId, id)).IsSuccess);

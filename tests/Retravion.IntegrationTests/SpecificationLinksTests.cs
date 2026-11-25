@@ -78,7 +78,7 @@ public sealed partial class SpecificationReadTests
             Assert.True(historical.IsApproved);
             Assert.Contains(choices, choice => choice.Target.VersionId == nextIds[i] && choice.VersionNumber == 2 && !choice.IsApproved);
         }
-        var content = (await operations.EditContent(principal, product, draft.InternalId, draft.Id, "Changed title", null)).Value;
+        var content = (await operations.EditContent(principal, product, draft, draft.Id, "Changed title", null)).Value;
         Assert.Equal(saved.Links, content.Links);
         var firstEvent = Assert.Single(await LinkEvents(db));
         Assert.Equal(("User", clock.Now.UtcTicks, "identified", draft.InternalId.ToString(), "success"),

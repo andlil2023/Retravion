@@ -33,41 +33,41 @@ public sealed partial class SpecificationReadTests
         var draft = (await ops.Create(user, pid, "DEV-1", "Title", "Description")).Value;
         var id = draft.InternalId;
         async Task<SpecificationEvidence?> Read() => (await ops.FindDetail(user, pid, id)).Value.Value.Evidence;
-        Assert.Contains("Approved", (await ops.SaveEvidence(user, pid, id, "# Report", null)).Error);
+        Assert.Contains("Approved", (await ops.SaveEvidence(user, pid, id, null, "# Report", null)).Error);
         Assert.True((await ops.SubmitForReview(user, pid, id)).IsSuccess);
-        Assert.Contains("Approved", (await ops.SaveEvidence(user, pid, id, "# Report", null)).Error);
+        Assert.Contains("Approved", (await ops.SaveEvidence(user, pid, id, null, "# Report", null)).Error);
         Assert.True((await ops.Approve(user, pid, id)).IsSuccess);
         Assert.Contains("no retained", (await ops.ConfirmEvidenceCurrent(user, pid, id, null)).Error);
-        Assert.Contains("not found", (await ops.SaveEvidence(user, other, id, "# Report", null)).Error);
+        Assert.Contains("not found", (await ops.SaveEvidence(user, other, id, null, "# Report", null)).Error);
         Assert.True((await ops.FindDetail(user, other, id)).Value.HasNoValue);
 
         var atLimit = new string('é', 512 * 1024);
-        Assert.Contains("1 MB", (await ops.SaveEvidence(user, pid, id, atLimit + "x", null)).Error);
+        Assert.Contains("1 MB", (await ops.SaveEvidence(user, pid, id, null, atLimit + "x", null)).Error);
         foreach (var invalid in new[] { "\uD800", "# Report\0" })
-            Assert.Contains("valid UTF-8", (await ops.SaveEvidence(user, pid, id, invalid, null)).Error);
-        Assert.Contains("Enter Markdown", (await ops.SaveEvidence(user, pid, id, " \t", null)).Error);
+            Assert.Contains("valid UTF-8", (await ops.SaveEvidence(user, pid, id, null, invalid, null)).Error);
+        Assert.Contains("Enter Markdown", (await ops.SaveEvidence(user, pid, id, null, " \t", null)).Error);
         foreach (var invalid in new[] { "", "http://forge.example/pr/42", "/pr/42", "//forge.example/pr/42", "https:pr/42",
                      "https://", "https://forge.example/pr/4 2", "https://forge.example/pr/42\r\n", "javascript:alert(1)" })
-            Assert.Contains("absolute HTTPS", (await ops.SaveEvidence(user, pid, id, "# Report", invalid)).Error);
+            Assert.Contains("absolute HTTPS", (await ops.SaveEvidence(user, pid, id, null, "# Report", invalid)).Error);
         Assert.Null(await Read());
         Assert.Empty(await SpecificationEvents(db, SaveEvidenceAction));
         Assert.Empty(await SpecificationEvents(db, ConfirmEvidenceAction));
 
-        Assert.Equal("Access denied.", (await ops.SaveEvidence(restricted, pid, id, "# Secret", EvidenceUrl)).Error);
+        Assert.Equal("Access denied.", (await ops.SaveEvidence(restricted, pid, id, null, "# Secret", EvidenceUrl)).Error);
         Assert.Equal("Access denied.", (await ops.ConfirmEvidenceCurrent(restricted, pid, id, null)).Error);
         Assert.Equal("Access denied.", (await ops.FindDetail(restricted, pid, id)).Error);
-        Assert.True((await ops.SaveEvidence(user, pid, id, atLimit, null)).IsSuccess);
+        Assert.True((await ops.SaveEvidence(user, pid, id, null, atLimit, null)).IsSuccess);
         Assert.Equal((atLimit, null, false), ((await Read())!.Markdown, (await Read())!.PullRequestUrl, (await Read())!.IsOutdated));
         clock.Now = CreateTime.AddTicks(20);
-        Assert.True((await ops.SaveEvidence(user, pid, id, atLimit, EvidenceUrl)).IsSuccess); // URL-only change.
-        Assert.True((await ops.SaveEvidence(user, pid, id, atLimit, EvidenceUrl)).IsSuccess); // No-op.
+        Assert.True((await ops.SaveEvidence(user, pid, id, await Read(), atLimit, EvidenceUrl)).IsSuccess); // URL-only change.
+        Assert.True((await ops.SaveEvidence(user, pid, id, await Read(), atLimit, EvidenceUrl)).IsSuccess); // No-op.
         const string replacement = "# Outcomes\r\n- Limitations\n";
-        var saved = (await ops.SaveEvidence(user, pid, id, replacement, null)).Value;
+        var saved = (await ops.SaveEvidence(user, pid, id, await Read(), replacement, null)).Value;
         Assert.Equal((replacement, null, false), (saved.Markdown, saved.PullRequestUrl, saved.IsOutdated));
         Assert.Equal(saved, await Read());
 
         Assert.True((await products.Update(product, product.Retire().Value)).IsSuccess);
-        Assert.Contains("retired", (await ops.SaveEvidence(user, pid, id, "# New", EvidenceUrl)).Error);
+        Assert.Contains("retired", (await ops.SaveEvidence(user, pid, id, null, "# New", EvidenceUrl)).Error);
         Assert.Contains("retired", (await ops.ConfirmEvidenceCurrent(user, pid, id, saved)).Error);
         Assert.Equal(saved, await Read());
 
@@ -108,7 +108,7 @@ public sealed partial class SpecificationReadTests
         }
         async Task<SpecificationEvidence> Read() => (await ops.FindDetail(user, pid, id)).Value.Value.Evidence!;
         await Approve();
-        var original = (await ops.SaveEvidence(user, pid, id, "# Original", EvidenceUrl)).Value;
+        var original = (await ops.SaveEvidence(user, pid, id, null, "# Original", EvidenceUrl)).Value;
         var stale = original.MarkOutdated();
         Assert.True((await ops.Reopen(user, pid, id, "Revise", false)).IsFailure);
         Assert.Equal(original, await Read());
@@ -118,7 +118,7 @@ public sealed partial class SpecificationReadTests
         Assert.Contains("Approved", (await ops.ConfirmEvidenceCurrent(user, pid, id, stale)).Error);
         await Approve();
         Assert.Equal(stale, await Read());
-        var unchanged = await ops.SaveEvidence(user, pid, id, original.Markdown, original.PullRequestUrl);
+        var unchanged = await ops.SaveEvidence(user, pid, id, await Read(), original.Markdown, original.PullRequestUrl);
         Assert.Equal(stale, unchanged.Value);
         Assert.Equal(stale, await Read());
         Assert.Single(await SpecificationEvents(db, SaveEvidenceAction)); // Only the original save was audited.
@@ -149,7 +149,7 @@ public sealed partial class SpecificationReadTests
         var displayed = (await ops.FindDetail(reader, pid, id)).Value.Value.Evidence!;
         Assert.Equal(stale, displayed);
         const string replacement = "# Updated report";
-        Assert.False((await ops.SaveEvidence(user, pid, id, replacement, EvidenceUrl)).Value.IsOutdated);
+        Assert.False((await ops.SaveEvidence(user, pid, id, await Read(), replacement, EvidenceUrl)).Value.IsOutdated);
         Assert.Equal(replacement, (await Read()).Markdown);
         Assert.False((await Read()).IsOutdated);
         Assert.Equal(new SpecificationAuditEvidenceChange(staleValue, new(replacement, EvidenceUrl, false)),
@@ -158,6 +158,16 @@ public sealed partial class SpecificationReadTests
         // A second session has replaced the displayed report and reopened it for a new approval.
         Assert.True((await ops.Reopen(user, pid, id, "Revise replacement", true)).IsSuccess);
         await Approve();
+        var beforeSave = (await SpecificationEvents(db, SaveEvidenceAction)).Count;
+        foreach (var expected in new SpecificationEvidence?[] { displayed, null })
+        {
+            var rejected = await ops.SaveEvidence(reader, pid, id, expected, displayed.Markdown, displayed.PullRequestUrl);
+            Assert.Contains("Review the refreshed evidence", rejected.Error);
+            var retained = await Read();
+            Assert.Equal(replacement, retained.Markdown);
+            Assert.True(retained.IsOutdated);
+            Assert.Equal(beforeSave, (await SpecificationEvents(db, SaveEvidenceAction)).Count);
+        }
         var beforeConfirmation = (await SpecificationEvents(db, ConfirmEvidenceAction)).Count;
         Assert.Contains("Review the refreshed evidence", (await ops.ConfirmEvidenceCurrent(reader, pid, id, displayed)).Error);
         var refreshed = (await ops.FindDetail(reader, pid, id)).Value.Value.Evidence!;
@@ -186,14 +196,14 @@ public sealed partial class SpecificationReadTests
         }
         var first = await CreateApproved("DEV-1");
         var second = await CreateApproved("DEV-2");
-        var original = (await ops.SaveEvidence(user, pid, first, "# Original", EvidenceUrl)).Value;
-        Assert.True((await ops.SaveEvidence(user, pid, second, original.Markdown, EvidenceUrl)).IsSuccess);
+        var original = (await ops.SaveEvidence(user, pid, first, null, "# Original", EvidenceUrl)).Value;
+        Assert.True((await ops.SaveEvidence(user, pid, second, null, original.Markdown, EvidenceUrl)).IsSuccess);
         Assert.True((await ops.Reopen(user, pid, second, "Revise", true)).IsSuccess);
         Assert.True((await ops.SubmitForReview(user, pid, second)).IsSuccess);
         Assert.True((await ops.Approve(user, pid, second)).IsSuccess);
         await InstallAuditFault(db, "RAISE insufficient_privilege USING MESSAGE = 'private provider details';");
         const string failed = "The Specification operation could not be completed.";
-        Assert.Equal(failed, (await ops.SaveEvidence(user, pid, first, "# Changed", null)).Error);
+        Assert.Equal(failed, (await ops.SaveEvidence(user, pid, first, original, "# Changed", null)).Error);
         Assert.Equal(failed, (await ops.Reopen(user, pid, first, "Revise", true)).Error);
         Assert.Equal(failed, (await ops.ConfirmEvidenceCurrent(user, pid, second, original.MarkOutdated())).Error);
         var current = (await ops.FindDetail(user, pid, first)).Value.Value;

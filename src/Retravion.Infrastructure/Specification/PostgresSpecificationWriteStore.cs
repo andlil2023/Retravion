@@ -38,13 +38,16 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             return Result.Success(draft);
         }, cancellationToken);
 
-    public Task<Result<DraftSpecification>> EditContent(Guid productInternalId, Guid internalId, string? id, string? title,
+    public Task<Result<DraftSpecification>> EditContent(Guid productInternalId, DraftSpecification expected, string? id, string? title,
         string? description, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default) =>
         Execute(productInternalId, authorized, async (connection, transaction) =>
         {
+            var internalId = expected.InternalId;
             var current = await LockDraft(connection, transaction, productInternalId, internalId, "content", cancellationToken);
             if (current.IsFailure) return current;
+            if ((expected.Id, expected.Title, expected.Description) != (current.Value.Id, current.Value.Title, current.Value.Description))
+                return Result.Failure<DraftSpecification>("Draft content changed. Reload and review the current Draft before saving.");
             var before = Snapshot(current.Value);
             var edit = current.Value.EditContent(id, title, description);
             if (edit.IsFailure) return edit;
@@ -263,11 +266,12 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         bool? userApproved = null) => new(before is null ? null : new(before.Markdown, before.IsOutdated),
         new(after.Markdown, after.IsOutdated), userApproved);
 
-    public Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, string? markdown,
+    public Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, SpecificationEvidence? expected, string? markdown,
         string? pullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default) =>
         ChangeEvidence(productInternalId, internalId, actor, occurredAt, authorized, "specification.save-evidence", before =>
         {
+            if (expected != before) return Result.Failure<SpecificationEvidence>("Evidence changed. Review the refreshed evidence before saving.");
             var prepared = SpecificationEvidence.Prepare(markdown, pullRequestUrl);
             return before is not null && prepared.IsSuccess &&
                 before.Markdown == prepared.Value.Markdown && before.PullRequestUrl == prepared.Value.PullRequestUrl

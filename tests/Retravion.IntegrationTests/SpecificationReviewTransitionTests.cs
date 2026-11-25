@@ -76,7 +76,7 @@ public sealed partial class SpecificationReadTests
         Assert.Contains("not found in this Product", (await operations.ReturnToDraft(principal, other.InternalId, draft.InternalId)).Error);
         foreach (var reason in new[] { "\0", "\uD800" })
             Assert.Contains("valid UTF-8", (await operations.ReturnToDraft(principal, product.InternalId, draft.InternalId, reason)).Error);
-        Assert.Contains("Only Draft", (await operations.EditContent(principal, product.InternalId, draft.InternalId, draft.Id, "Changed", "Changed")).Error);
+        Assert.Contains("Only Draft", (await operations.EditContent(principal, product.InternalId, draft, draft.Id, "Changed", "Changed")).Error);
         Assert.Contains("Only Draft", (await operations.EditLinks(principal, product.InternalId, draft.InternalId, [])).Error);
         Assert.True((await products.Update(product, product.Retire().Value)).IsSuccess);
         Assert.Contains("retired", (await operations.SubmitForReview(principal, product.InternalId, spare.InternalId)).Error);

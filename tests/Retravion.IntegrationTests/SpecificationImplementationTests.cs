@@ -36,9 +36,9 @@ public sealed partial class SpecificationReadTests
         Assert.Contains("Only Approved", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         Assert.True((await ops.Approve(user, pid, id)).IsSuccess);
         Assert.Contains("Current evidence", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
-        Assert.True((await ops.SaveEvidence(user, pid, id, "# Report", null)).IsSuccess);
+        Assert.True((await ops.SaveEvidence(user, pid, id, null, "# Report", null)).IsSuccess);
         Assert.Contains("HTTPS PR URL", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
-        Assert.True((await ops.SaveEvidence(user, pid, id, "# Report", EvidenceUrl)).IsSuccess);
+        Assert.True((await ops.SaveEvidence(user, pid, id, (await ops.FindDetail(user, pid, id)).Value.Value.Evidence, "# Report", EvidenceUrl)).IsSuccess);
         Assert.True((await ops.Reopen(user, pid, id, "Revise", true)).IsSuccess);
         Assert.True((await ops.SubmitForReview(user, pid, id)).IsSuccess);
         Assert.True((await ops.Approve(user, pid, id)).IsSuccess);
@@ -54,7 +54,7 @@ public sealed partial class SpecificationReadTests
         Assert.Equal("The persisted Specification is invalid.", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         await using (var blank = new NpgsqlCommand("UPDATE retravion_specification.evidence SET markdown = E' \\t'", connection))
             Assert.Equal(PostgresErrorCodes.CheckViolation, (await Assert.ThrowsAsync<PostgresException>(() => blank.ExecuteNonQueryAsync())).SqlState);
-        Assert.True((await ops.SaveEvidence(user, pid, id, "# Report", EvidenceUrl)).IsFailure); // Invalid persisted evidence cannot be hydrated.
+        Assert.True((await ops.SaveEvidence(user, pid, id, null, "# Report", EvidenceUrl)).IsFailure); // Invalid persisted evidence cannot be hydrated.
         await using (var repair = new NpgsqlCommand("UPDATE retravion_specification.evidence SET pull_request_url = $1", connection))
         {
             repair.Parameters.AddWithValue(EvidenceUrl);
@@ -96,7 +96,7 @@ public sealed partial class SpecificationReadTests
         Assert.True((await ops.ChangeAssignment(user, pid, id, second.Username)).IsSuccess);
         Assert.True((await ops.SubmitForReview(user, pid, id)).IsSuccess);
         var approved = (await ops.Approve(user, pid, id)).Value.Specification;
-        var evidence = (await ops.SaveEvidence(user, pid, id, "# Final evidence", EvidenceUrl)).Value;
+        var evidence = (await ops.SaveEvidence(user, pid, id, null, "# Final evidence", EvidenceUrl)).Value;
         var before = (await ops.FindDetail(user, pid, id)).Value.Value;
         Assert.Equal(second.Username, before.Assignee);
 
@@ -126,13 +126,13 @@ public sealed partial class SpecificationReadTests
         await using var eventCount = new NpgsqlCommand("SELECT count(*) FROM retravion_audit.event WHERE action LIKE 'specification.%'", connection);
         var beforeAttempts = await eventCount.ExecuteScalarAsync();
         Assert.True((await ops.Create(user, pid, draft.Id, "Duplicate", null)).IsFailure); // New identity only; cannot recreate this ID.
-        Assert.Contains("Only Draft", (await ops.EditContent(user, pid, id, "NEW-ID", "Changed", "New description")).Error);
+        Assert.Contains("Only Draft", (await ops.EditContent(user, pid, draft, "NEW-ID", "Changed", "New description")).Error);
         Assert.Contains("Only Draft", (await ops.EditLinks(user, pid, id, [])).Error);
         Assert.Contains("Assignment cannot", (await ops.ChangeAssignment(user, pid, id, first.Username)).Error);
         Assert.Contains("Assignment cannot", (await ops.ChangeAssignment(user, pid, id, null)).Error);
         Assert.Contains("only be submitted", (await ops.SubmitAiReview(user, pid, id, new SpecificationAiReviewInput.Entered("# Changed"), true)).Error);
         Assert.Contains("only be submitted", (await ops.SubmitAiReview(user, pid, id, new SpecificationAiReviewInput.Uploaded("# Changed"u8.ToArray()), true)).Error);
-        Assert.Contains("Approved", (await ops.SaveEvidence(user, pid, id, "# Changed", null)).Error);
+        Assert.Contains("Approved", (await ops.SaveEvidence(user, pid, id, null, "# Changed", null)).Error);
         Assert.Contains("Approved", (await ops.ConfirmEvidenceCurrent(user, pid, id, null)).Error);
         Assert.Contains("Only Draft", (await ops.SubmitForReview(user, pid, id)).Error);
         Assert.Contains("Only In Review", (await ops.ReturnToDraft(user, pid, id, "Changed")).Error);
@@ -166,7 +166,7 @@ public sealed partial class SpecificationReadTests
         Assert.True((await ops.ChangeAssignment(user, pid, id, account.Username)).IsSuccess);
         Assert.True((await ops.SubmitForReview(user, pid, id)).IsSuccess);
         var approved = (await ops.Approve(user, pid, id)).Value.Specification;
-        var evidence = (await ops.SaveEvidence(user, pid, id, "# Report", EvidenceUrl)).Value;
+        var evidence = (await ops.SaveEvidence(user, pid, id, null, "# Report", EvidenceUrl)).Value;
         await InstallAuditFault(db, "RAISE insufficient_privilege USING MESSAGE = 'private provider details';");
         Assert.Equal("The Specification operation could not be completed.", (await ops.Implement(user, pid, id, true, EvidenceUrl)).Error);
         var detail = (await ops.FindDetail(user, pid, id)).Value.Value;
@@ -190,7 +190,7 @@ public sealed partial class SpecificationReadTests
         Assert.True((await writes.Create(draft, CreateActor, CreateTime, Authorized)).IsSuccess);
         Assert.True((await writes.SubmitForReview(pid, id, CreateActor, CreateTime, Authorized)).IsSuccess);
         var approved = (await writes.Approve(pid, id, CreateActor, CreateTime, Authorized)).Value.Specification;
-        var evidence = (await writes.SaveEvidence(pid, id, "# Report", EvidenceUrl, CreateActor, CreateTime, Authorized)).Value;
+        var evidence = (await writes.SaveEvidence(pid, id, null, "# Report", EvidenceUrl, CreateActor, CreateTime, Authorized)).Value;
 
         await using var connection = new NpgsqlConnection(db.ConnectionString);
         await connection.OpenAsync();
@@ -235,7 +235,7 @@ public sealed partial class SpecificationReadTests
             Assert.True((await setup.Create(draft, CreateActor, CreateTime, Authorized)).IsSuccess);
             Assert.True((await setup.SubmitForReview(pid, id, CreateActor, CreateTime, Authorized)).IsSuccess);
             Assert.True((await setup.Approve(pid, id, CreateActor, CreateTime, Authorized)).IsSuccess);
-            Assert.True((await setup.SaveEvidence(pid, id, "# Report", EvidenceUrl, CreateActor, CreateTime, Authorized)).IsSuccess);
+            Assert.True((await setup.SaveEvidence(pid, id, null, "# Report", EvidenceUrl, CreateActor, CreateTime, Authorized)).IsSuccess);
             var attempts = 0;
             var writes = new PostgresSpecificationWriteStore(db.ConnectionString, async (transaction, token) =>
             {

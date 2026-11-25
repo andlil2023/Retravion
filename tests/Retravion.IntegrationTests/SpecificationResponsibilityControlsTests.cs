@@ -179,10 +179,10 @@ public sealed partial class SpecificationReadTests
         var id = draft.InternalId;
         Assert.True((await ops.ChangeAssignment(actor, product.InternalId, id, assigned.Username)).IsSuccess);
         Assert.True((await ops.SubmitAiReview(actor, product.InternalId, id, new SpecificationAiReviewInput.Entered("**Retained review**"), true)).IsSuccess);
-        Assert.True((await ops.EditContent(actor, product.InternalId, id, draft.Id, draft.Title, "Changed")).IsSuccess);
+        Assert.True((await ops.EditContent(actor, product.InternalId, draft, draft.Id, draft.Title, "Changed")).IsSuccess);
         Assert.True((await ops.SubmitForReview(actor, product.InternalId, id)).IsSuccess);
         Assert.True((await ops.Approve(actor, product.InternalId, id)).IsSuccess);
-        Assert.True((await ops.SaveEvidence(actor, product.InternalId, id, "Evidence", EvidenceUrl)).IsSuccess);
+        Assert.True((await ops.SaveEvidence(actor, product.InternalId, id, null, "Evidence", EvidenceUrl)).IsSuccess);
         Assert.True((await ops.Implement(actor, product.InternalId, id, true, EvidenceUrl)).IsSuccess);
         var other = (await ops.Create(actor, product.InternalId, "DEV-2", "Retired Draft", "Ready")).Value;
         await using var services = PageServices(scope.ServiceProvider, actor, new PagesNavigation());

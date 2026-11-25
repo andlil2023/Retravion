@@ -21,10 +21,10 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             return draft.IsSuccess ? await writes.Create(draft.Value, actor, now, authorized, cancellationToken) : draft;
         }, cancellationToken);
 
-    public Task<Result<DraftSpecification>> EditContent(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+    public Task<Result<DraftSpecification>> EditContent(ClaimsPrincipal principal, Guid productInternalId, DraftSpecification expected,
         string? id, string? title, string? description, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.edit-content", (actor, now, authorized) =>
-            writes.EditContent(productInternalId, internalId, id, title, description, actor, now, authorized, cancellationToken),
+            writes.EditContent(productInternalId, expected, id, title, description, actor, now, authorized, cancellationToken),
             cancellationToken);
 
     public Task<Result<DraftSpecification>> EditLinks(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
@@ -52,10 +52,10 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             writes.SubmitAiReview(productInternalId, internalId, input, userApproved, actor, now, authorized, cancellationToken),
             cancellationToken);
 
-    public Task<Result<SpecificationEvidence>> SaveEvidence(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+    public Task<Result<SpecificationEvidence>> SaveEvidence(ClaimsPrincipal principal, Guid productInternalId, Guid internalId, SpecificationEvidence? expected,
         string? markdown, string? pullRequestUrl, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.save-evidence", (actor, now, authorized) =>
-            writes.SaveEvidence(productInternalId, internalId, markdown, pullRequestUrl, actor, now, authorized, cancellationToken),
+            writes.SaveEvidence(productInternalId, internalId, expected, markdown, pullRequestUrl, actor, now, authorized, cancellationToken),
             cancellationToken);
 
     public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
