@@ -91,7 +91,7 @@ public sealed partial class AccountManagementTests
     }
 
     [Fact]
-    public async Task ProductDevelopmentDisclosure()
+    public async Task SpecificationPagesProductDevelopmentDisclosureLinksToEachProduct()
     {
         var products = new ProductStoreDouble();
         var useCircuitNavigation = false;
@@ -132,7 +132,7 @@ public sealed partial class AccountManagementTests
             var secondGroup = renderer.FindDevelopmentGroup(secondParent, $"Development for {second.Value.Id} – {second.Value.Name}");
             Assert.NotEqual(firstGroup, secondGroup);
             var links = renderer.ProductLinks();
-            Assert.Equal(15, links.Length);
+            Assert.Equal(17, links.Length);
             Assert.Equal((selectedHref, "page"), Assert.Single(links, link => link.Current is not null));
             var location = navigation.Uri;
 
@@ -151,10 +151,10 @@ public sealed partial class AccountManagementTests
             AssertState(false, false);
             await renderer.Toggle(firstGroup);
             AssertState(true, false);
-            renderer.AssertSpecifications(firstGroup);
+            renderer.AssertSpecifications(firstGroup, first.Value.Id, first.Value.Name);
             await renderer.Toggle(secondGroup);
             AssertState(true, true);
-            renderer.AssertSpecifications(secondGroup);
+            renderer.AssertSpecifications(secondGroup, second.Value.Id, second.Value.Name);
             await renderer.Toggle(secondParent);
             AssertState(true, true, secondParentExpanded: false);
             await renderer.Toggle(firstGroup);
@@ -260,17 +260,18 @@ public sealed partial class AccountManagementTests
             }
         }
 
-        internal void AssertSpecifications(string groupId)
+        internal void AssertSpecifications(string groupId, string productId, string productName)
         {
             var group = GroupFrames(groupId);
             var label = SkipWhitespace(group, 1 + ElementAttributes(group, 0).Length);
             Assert.Equal(RenderTreeFrameType.Element, group[label].FrameType);
-            Assert.Equal("span", group[label].ElementName);
+            Assert.Equal("a", group[label].ElementName);
             var labelEnd = label + group[label].ElementSubtreeLength;
             Assert.Equal(group.Length, SkipWhitespace(group, labelEnd));
             var attributes = ElementAttributes(group, label);
-            Assert.Equal("true", Assert.Single(attributes, frame => frame.AttributeName == "aria-disabled").AttributeValue);
-            Assert.All(attributes, frame => Assert.Contains(frame.AttributeName, new[] { "class", "aria-disabled" }));
+            Assert.Equal($"/specifications?product={Uri.EscapeDataString(productId)}", Assert.Single(attributes, frame => frame.AttributeName == "href").AttributeValue);
+            Assert.Equal($"Specifications for {productId} – {productName}", Assert.Single(attributes, frame => frame.AttributeName == "aria-label").AttributeValue);
+            Assert.DoesNotContain(attributes, frame => frame.AttributeName == "aria-disabled");
             var icon = label + 1 + attributes.Length;
             Assert.Equal(RenderTreeFrameType.Component, group[icon].FrameType);
             AssertIcon(group[icon..labelEnd], Icons.Material.Outlined.Description);

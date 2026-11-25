@@ -1,0 +1,112 @@
+@using Microsoft.JSInterop
+@using System.Text
+@implements IDisposable
+@inject IJSRuntime JS
+
+<section class="mt-6" aria-labelledby="specification-review-heading" style="max-width:40rem">
+    <MudPaper Class="pa-4" Elevation="0">
+        <h3 id="specification-review-heading">Review lifecycle</h3>
+        @if (Specification is DraftSpecification)
+        {
+            <p>@(CanSubmit ? "Submit this Draft for a human review decision." : "Add a description before submitting for review.")</p>
+        }
+        else
+        {
+            @if (IsApproved)
+            {
+                <p>Returning to Draft invalidates approval. Retravion does not verify factory run state.</p>
+            }
+            @* Read the reason on submit as a stream; an unbounded paste must not become a single hub event. *@
+            <form id="specification-return-form" @onsubmit="Return" @onsubmit:preventDefault>
+                <MudStack Spacing="2">
+                    <div>
+                        <label for="specification-return-reason">@(IsApproved ? "Return reason (required)" : "Return reason (optional)")</label>
+                        <textarea @ref="_reason" id="specification-return-reason" class="mud-input-slot" rows="3"
+                                  style="display:block;width:100%;border:1px solid var(--mud-palette-lines-inputs)"
+                                  required="@IsApproved" disabled="@Disabled"></textarea>
+                    </div>
+                    @if (IsApproved)
+                    {
+                        <label><input id="specification-reopen-attestation" type="checkbox" @bind="_attested" disabled="@Disabled" /> I attest that no associated factory run is active or uncertain.</label>
+                    }
+                </MudStack>
+            </form>
+            @if (_inputError is not null)
+            {
+                <MudAlert Severity="Severity.Error" role="alert" Class="mt-2">@_inputError</MudAlert>
+            }
+        }
+    </MudPaper>
+    <div class="product-actions">
+        @if (Specification is DraftSpecification)
+        {
+            <MudButton id="specification-submit-review" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(Busy || !CanSubmit)" OnClick="@(() => OnSubmit.InvokeAsync())">Submit for review</MudButton>
+        }
+        else
+        {
+            @if (!IsApproved)
+            {
+                <MudButton id="specification-approve" Variant="Variant.Filled" Color="Color.Primary" Disabled="@Disabled" OnClick="@(() => OnApprove.InvokeAsync())">Approve</MudButton>
+            }
+            <MudButton id="specification-return" ButtonType="ButtonType.Submit" form="specification-return-form"
+                       Variant="@(IsApproved ? Variant.Filled : Variant.Text)" Color="@(IsApproved ? Color.Primary : Color.Default)"
+                       Disabled="@(Disabled || (IsApproved && !_attested))">Return to Draft</MudButton>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public DevelopmentSpecification Specification { get; set; } = default!;
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnSubmit { get; set; }
+    [Parameter] public EventCallback OnApprove { get; set; }
+    [Parameter] public EventCallback<(string? Reason, bool Attested)> OnReturn { get; set; }
+
+    private ElementReference _reason;
+    private bool _attested, _reading, _disposed;
+    private string? _inputError;
+    private bool IsApproved => Specification is ApprovedSpecification;
+    private bool CanSubmit => !string.IsNullOrWhiteSpace(Specification.Description);
+    private bool Disabled => Busy || _reading;
+
+    private async Task Return()
+    {
+        if (Disabled || _disposed || (IsApproved && !_attested)) return;
+        _reading = true;
+        _inputError = null;
+        var attested = IsApproved && _attested;
+        try
+        {
+            string? reason = null;
+            try
+            {
+                await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/markdownFullscreen.js");
+                var input = await module.InvokeAsync<ReasonInput>("readMarkdownInput", _reason, long.MaxValue);
+                await using var content = input.Content;
+                if (input.InvalidUnicode)
+                {
+                    _inputError = "The return reason contains invalid Unicode. Replace the invalid characters and try again.";
+                    return;
+                }
+                if (content is not null)
+                {
+                    await using var stream = await content.OpenReadStreamAsync(long.MaxValue);
+                    using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false);
+                    reason = await reader.ReadToEndAsync();
+                }
+            }
+            catch (Exception exception) when (exception is JSException or JSDisconnectedException or IOException
+                or DecoderFallbackException or OperationCanceledException or TimeoutException)
+            {
+                _inputError = "The return reason could not be read. Try again.";
+                return;
+            }
+            if (!_disposed && !Busy) await OnReturn.InvokeAsync((reason, attested));
+        }
+        finally { _reading = false; }
+    }
+
+    private sealed record ReasonInput(bool InvalidUnicode, IJSStreamReference? Content);
+
+    public void Dispose() => _disposed = true;
+}

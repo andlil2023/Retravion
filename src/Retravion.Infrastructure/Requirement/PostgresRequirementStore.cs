@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Npgsql;
@@ -6,6 +7,8 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.Requirement;
 using Retravion.Domain.Requirement;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Infrastructure.Specification;
+using Retravion.Domain.Specification;
 using Retravion.Infrastructure.Product;
 using Retravion.Domain.Product;
 using RequirementState = Retravion.Domain.Requirement.Requirement;
@@ -15,6 +18,9 @@ namespace Retravion.Infrastructure.Requirement;
 public sealed partial class PostgresRequirementStore(string connectionString,
     Func<NpgsqlTransaction, CancellationToken, Task>? commit = null) : IRequirementStore, IRequirementChangeTransaction, IRequirementLinkStore
 {
+    internal static readonly PostgresSpecificationVersionSource SpecificationVersions =
+        new(SpecificationLinkKind.Requirement, "retravion_requirement.requirement_version", "id", "status = 2");
+
     // Keep the entity row as the default-version projection and Product-scoped ID reservation.
     // Legacy decision snapshots are evidence, not a source for invented historical versions.
     private const string Setup = """
@@ -334,6 +340,12 @@ public sealed partial class PostgresRequirementStore(string connectionString,
             command.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)before.AreaId ?? DBNull.Value);
             var revision = await command.ExecuteScalarAsync(token);
             if (revision is null) return Result.Failure<RequirementSnapshot>("The Requirement changed or a newer version exists. Retrieve it again.");
+            if (decision == "Reopened")
+            {
+                var protection = await PostgresSpecificationReopenProtection.Check(connection, transaction, SpecificationVersions,
+                    before.ProductInternalId, before.InternalId, before.VersionId, token);
+                if (protection.IsFailure) return Result.Failure<RequirementSnapshot>(protection.Error);
+            }
             if (!await SaveVersion(connection, transaction, before.InternalId, token))
                 return Result.Failure<RequirementSnapshot>("The Requirement version identity is already in use.");
             if (decision == "Successor")
@@ -472,7 +484,7 @@ public sealed partial class PostgresRequirementStore(string connectionString,
         {
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(token);
-            await using var transaction = await connection.BeginTransactionAsync(token);
+            await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
             // Product owns its lazy storage; reads on fresh installations must not initialize it here.
             await using (var exists = new NpgsqlCommand("SELECT to_regclass('retravion_product.product') IS NOT NULL", connection, transaction))
                 if (await exists.ExecuteScalarAsync(token) is not true)

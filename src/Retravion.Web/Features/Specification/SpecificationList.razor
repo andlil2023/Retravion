@@ -1,0 +1,68 @@
+@page "/specifications"
+@inject SpecificationOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Specifications · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Specifications" BackHref="@ProductPath" BackText="Product details">
+        <Actions>
+            @if (_product?.IsActive == true)
+            {
+                <MudButton Href="@SpecificationPresentation.CreatePath(_product.Id)" StartIcon="@Icons.Material.Outlined.Add">Create Specification</MudButton>
+            }
+        </Actions>
+    </PageHeader>
+</SectionContent>
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+}
+else if (_product is null)
+{
+    <p role="status">Loading Specifications…</p>
+}
+else
+{
+    <p>@_product.Id · @_product.Name</p>
+    @if (!_product.IsActive)
+    {
+        <p>Product retired: Specifications are read-only.</p>
+    }
+    <MudTable Items="_specifications" Dense="true" Hover="true" Elevation="0" aria-label="Product Specifications">
+        <HeaderContent><MudTh>ID</MudTh><MudTh>Title</MudTh><MudTh>Status</MudTh></HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="ID"><MudLink Href="@SpecificationPresentation.DetailsPath(_product.Id, context.InternalId)">@context.Id</MudLink></MudTd>
+            <MudTd DataLabel="Title">@context.Title</MudTd>
+            <MudTd DataLabel="Status">@SpecificationPresentation.Status(context)</MudTd>
+        </RowTemplate>
+        <NoRecordsContent><p>No Specifications yet.</p></NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+
+    private Retravion.Domain.Product.Product? _product;
+    private IReadOnlyList<DevelopmentSpecification> _specifications = [];
+    private string? _error;
+    private int _loadVersion;
+    private string ProductPath => _product is null ? "/products" : $"/products/details?id={Uri.EscapeDataString(_product.Id)}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var version = ++_loadVersion;
+        var id = ProductId;
+        _product = null;
+        _error = null;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, id);
+        if (version != _loadVersion) return;
+        if (product.IsFailure) { _error = product.Error; return; }
+        var specifications = await Operations.List(actor, product.Value.InternalId);
+        if (version != _loadVersion) return;
+        if (specifications.IsFailure) { _error = specifications.Error; return; }
+        _product = product.Value;
+        _specifications = specifications.Value;
+    }
+}

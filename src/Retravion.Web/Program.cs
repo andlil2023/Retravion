@@ -121,6 +121,17 @@ builder.Services.AddSingleton<IProductAreaStore>(_ => new PostgresProductAreaSto
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
 builder.Services.AddScoped<ProductOperations>();
 builder.Services.AddScoped<ProductAreaOperations>();
+builder.Services.AddSingleton<Retravion.Application.Specification.ISpecificationReadStore>(_ =>
+    new Retravion.Infrastructure.Specification.PostgresSpecificationReadStore(
+        builder.Configuration.GetConnectionString("DefaultConnection")
+            ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
+builder.Services.AddSingleton<Retravion.Application.Specification.ISpecificationWriteStore>(_ =>
+    new Retravion.Infrastructure.Specification.PostgresSpecificationWriteStore(
+        builder.Configuration.GetConnectionString("DefaultConnection")
+            ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required."),
+        findActiveUsername: (connection, username, token) =>
+            new PostgresAdministratorStore(connection).FindActiveUsernameForAssignment(username, token)));
+builder.Services.AddScoped<Retravion.Web.Features.Specification.SpecificationOperations>();
 builder.Services.AddSingleton<IUserNeedStore>(_ => new PostgresUserNeedStore(
     builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.")));
