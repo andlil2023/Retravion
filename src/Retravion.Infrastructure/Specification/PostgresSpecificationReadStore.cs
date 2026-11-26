@@ -57,6 +57,7 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
                         OR (status <> 'Implemented' AND merge_attested_by IS NULL AND merge_attested_at_utc_ticks IS NULL));
             END IF;
         END $$;
+        ALTER TABLE retravion_specification.specification ADD COLUMN IF NOT EXISTS review_basis_revision bigint NOT NULL DEFAULT 0;
         CREATE UNIQUE INDEX IF NOT EXISTS specification_product_id_unique ON retravion_specification.specification
             (product_internal_id, (btrim(id, {Whitespace})) COLLATE retravion_specification.specification_case_fold);
         CREATE TABLE IF NOT EXISTS retravion_specification.link (
@@ -104,7 +105,7 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
         , (SELECT coalesce(jsonb_agg(jsonb_build_object('Actor', h.actor, 'UtcTicks', h.occurred_at_utc_ticks,
               'OldAssignee', h.old_assignee, 'NewAssignee', h.new_assignee) ORDER BY h.sequence), '[]'::jsonb)
            FROM retravion_specification.assignment_history h WHERE h.specification_internal_id = s.internal_id),
-          r.specification_internal_id IS NOT NULL, r.markdown, r.is_outdated
+          r.specification_internal_id IS NOT NULL, r.markdown, r.is_outdated, s.review_basis_revision
          FROM retravion_specification.specification s
          LEFT JOIN retravion_specification.ai_review r ON r.specification_internal_id = s.internal_id
          LEFT JOIN retravion_specification.evidence e ON e.specification_internal_id = s.internal_id
@@ -169,6 +170,7 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             }
             var detail = new SpecificationDetail(mapped.Value, Array.AsReadOnly(history.Select(row => row.ToEntry()).ToArray()), review)
             {
+                ReviewBasisRevision = reader.GetInt64(18),
                 Evidence = evidence
             };
             return mapped.Value is ImplementedSpecification && detail.Assignee is not null
@@ -311,6 +313,8 @@ public sealed class PostgresSpecificationReadStore(string connectionString) : IS
             AND to_regclass('retravion_specification.evidence') IS NOT NULL AND EXISTS (
                 SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('retravion_specification.specification')
                 AND conname = 'specification_implementation_check')
+            AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('retravion_specification.specification')
+                AND attname = 'review_basis_revision' AND NOT attisdropped)
             """, connection, transaction);
         return await exists.ExecuteScalarAsync(cancellationToken) is true;
     }

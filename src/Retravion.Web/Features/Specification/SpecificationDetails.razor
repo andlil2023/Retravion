@@ -79,13 +79,14 @@ else
         <SpecificationDeleteControls @key="(_loadVersion, _specification)" Specification="_specification" ProductId="@_product.Id"
                                      Busy="_busy" OnConfirm="Delete" />
     }
-    <SpecificationAiReviewSection @key="(_loadVersion, _specification.GetType(), _detail.CurrentAiReview, _reviewSaveVersion)"
-                                  Review="_detail.CurrentAiReview" CanEdit="@(CanChange && CanSubmitAiReview)" Busy="_busy" OnSubmit="SubmitAiReview" />
+    var basis = _detail.ReviewBasisRevision;
+    <SpecificationAiReviewSection @key="(_loadVersion, basis, _specification.GetType(), _detail.CurrentAiReview, _reviewSaveVersion)"
+                                  Review="_detail.CurrentAiReview" CanEdit="@(CanChange && CanSubmitAiReview)" Busy="_busy" OnSubmit="input => SubmitAiReview(basis, input)" />
     <SpecificationAssignment @key="(_loadVersion, _detail.Assignee)" Detail="_detail"
                              CanEdit="@(CanChange && CanAssign)" Busy="_busy" OnChange="ChangeAssignment" />
-    <SpecificationEvidenceSection @key="(_loadVersion, _specification.GetType(), _detail.Evidence, _evidenceSaveVersion)"
+    <SpecificationEvidenceSection @key="(_loadVersion, basis, _specification.GetType(), _detail.Evidence, _evidenceSaveVersion)"
                                   Evidence="_detail.Evidence" CanEdit="@(CanChange && CanPrepareEvidence)" Busy="_busy"
-                                  Error="@(ShowEvidenceError ? _mutationError : null)" OnSave="SaveEvidence" OnConfirm="ConfirmEvidence"
+                                  Error="@(ShowEvidenceError ? _mutationError : null)" OnSave="input => SaveEvidence(basis, input)" OnConfirm="reviewed => ConfirmEvidence(basis, reviewed)"
                                   OnImplement="Implement" />
 }
 
@@ -142,24 +143,24 @@ else
             _ => _notice = assignee is null ? "Assignment cleared." : "Assignment saved.")
         : Task.CompletedTask;
 
-    private Task SubmitAiReview((SpecificationAiReviewInput Input, bool Approved) review) => CanSubmitAiReview && review.Approved
-        ? Change((actor, product, id) => Operations.SubmitAiReview(actor, product, id, review.Input, review.Approved), _ =>
+    private Task SubmitAiReview(long basis, (SpecificationAiReviewInput Input, bool Approved) review) => CanSubmitAiReview && review.Approved
+        ? Change((actor, product, id) => Operations.SubmitAiReview(actor, product, id, basis, review.Input, review.Approved), _ =>
         {
             _reviewSaveVersion++;
             _notice = "AI review saved.";
         })
         : Task.CompletedTask;
 
-    private Task SaveEvidence((SpecificationEvidence? Expected, string Markdown, string? PullRequestUrl) input) => CanPrepareEvidence
-        ? Change((actor, product, id) => Operations.SaveEvidence(actor, product, id, input.Expected, input.Markdown, input.PullRequestUrl), evidence =>
+    private Task SaveEvidence(long basis, (SpecificationEvidence? Expected, string Markdown, string? PullRequestUrl) input) => CanPrepareEvidence
+        ? Change((actor, product, id) => Operations.SaveEvidence(actor, product, id, basis, input.Expected, input.Markdown, input.PullRequestUrl), evidence =>
         {
             _evidenceSaveVersion++;
             _notice = evidence.IsOutdated ? "Evidence is unchanged and still outdated. Confirm it or save a replacement." : "Evidence saved.";
         }, evidenceMutation: true)
         : Task.CompletedTask;
 
-    private Task ConfirmEvidence(SpecificationEvidence reviewed) => CanPrepareEvidence && reviewed.IsOutdated && _detail?.Evidence == reviewed
-        ? Change((actor, product, id) => Operations.ConfirmEvidenceCurrent(actor, product, id, reviewed),
+    private Task ConfirmEvidence(long basis, SpecificationEvidence reviewed) => CanPrepareEvidence && reviewed.IsOutdated && _detail?.Evidence == reviewed
+        ? Change((actor, product, id) => Operations.ConfirmEvidenceCurrent(actor, product, id, basis, reviewed),
             _ => _notice = "Evidence confirmed current.", evidenceMutation: true)
         : Task.CompletedTask;
 

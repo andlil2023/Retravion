@@ -5,6 +5,7 @@ namespace Retravion.Application.Specification;
 public sealed record SpecificationDetail(DevelopmentSpecification Specification,
     IReadOnlyList<SpecificationAssignmentEntry> AssignmentHistory, SpecificationAiReview? CurrentAiReview = null)
 {
+    public long ReviewBasisRevision { get; init; }
     public SpecificationEvidence? Evidence { get; init; }
     public string? Assignee => AssignmentHistory.Count == 0 ? null : AssignmentHistory[^1].NewAssignee;
 }

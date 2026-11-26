@@ -190,7 +190,7 @@ public sealed partial class SpecificationReadTests
         Assert.True((await writes.Create(draft, CreateActor, CreateTime, Authorized)).IsSuccess);
         var displayed = (await writes.SubmitForReview(pid, id, CreateActor, CreateTime, Authorized)).Value;
         var approved = (await writes.Approve(pid, id, displayed, CreateActor, CreateTime, Authorized)).Value.Specification;
-        var evidence = (await writes.SaveEvidence(pid, id, null, "# Report", EvidenceUrl, CreateActor, CreateTime, Authorized)).Value;
+        var evidence = (await writes.SaveEvidence(pid, id, (await reads.FindDetail(pid, id)).Value.Value.ReviewBasisRevision, null, "# Report", EvidenceUrl, CreateActor, CreateTime, Authorized)).Value;
 
         await using var connection = new NpgsqlConnection(db.ConnectionString);
         await connection.OpenAsync();
@@ -235,7 +235,7 @@ public sealed partial class SpecificationReadTests
             Assert.True((await setup.Create(draft, CreateActor, CreateTime, Authorized)).IsSuccess);
             var displayed = (await setup.SubmitForReview(pid, id, CreateActor, CreateTime, Authorized)).Value;
             Assert.True((await setup.Approve(pid, id, displayed, CreateActor, CreateTime, Authorized)).IsSuccess);
-            Assert.True((await setup.SaveEvidence(pid, id, null, "# Report", EvidenceUrl, CreateActor, CreateTime, Authorized)).IsSuccess);
+            Assert.True((await setup.SaveEvidence(pid, id, (await reads.FindDetail(pid, id)).Value.Value.ReviewBasisRevision, null, "# Report", EvidenceUrl, CreateActor, CreateTime, Authorized)).IsSuccess);
             var attempts = 0;
             var writes = new PostgresSpecificationWriteStore(db.ConnectionString, async (transaction, token) =>
             {

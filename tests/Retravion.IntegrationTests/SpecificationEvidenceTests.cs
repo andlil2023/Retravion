@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Retravion.Application.AuditTrail;
+using Retravion.Application.Specification;
 using Retravion.Domain.Specification;
 using Retravion.Infrastructure.Product;
 using Retravion.Web.Features.Identity.Logout;
@@ -176,6 +177,53 @@ public sealed partial class SpecificationReadTests
         Assert.Equal(beforeConfirmation, (await SpecificationEvents(db, ConfirmEvidenceAction)).Count);
         Assert.False((await ops.ConfirmEvidenceCurrent(reader, pid, id, refreshed)).Value.IsOutdated);
         Assert.Equal(beforeConfirmation + 1, (await SpecificationEvents(db, ConfirmEvidenceAction)).Count);
+    }
+
+    [PostgresFact]
+    public async Task ReviewAndEvidenceSubmissionsRemainBoundToTheirDisplayedBasis()
+    {
+        await using var db = await Database.Create();
+        var pid = (await Product(new PostgresProductStore(db.ConnectionString), "main")).InternalId;
+        await using var factory = CreateFactory(db);
+        using var scope = factory.Services.CreateScope();
+        var ops = scope.ServiceProvider.GetRequiredService<SpecificationOperations>();
+        var sessions = scope.ServiceProvider.GetRequiredService<SessionTicketStore>();
+        var author = await Principal(sessions, "User", now: CreateTime);
+        var reviewer = await Principal(sessions, "Administrator", now: CreateTime);
+        var draft = (await ops.Create(author, pid, "SPEC", "Title", "First")).Value;
+        var id = draft.InternalId;
+        async Task<SpecificationDetail> Page() => (await ops.FindDetail(reviewer, pid, id)).Value.Value;
+        async Task Approve()
+        {
+            Assert.True((await ops.SubmitForReview(author, pid, id)).IsSuccess);
+            Assert.True((await ops.Approve(reviewer, pid, id)).IsSuccess);
+        }
+        var input = new SpecificationAiReviewInput.Entered("Reviewed");
+        var basis = (await Page()).ReviewBasisRevision;
+        Assert.True((await ops.SubmitAiReview(reviewer, pid, id, basis, input, true)).IsSuccess);
+        Assert.True((await ops.EditContent(author, pid, draft, draft.Id, draft.Title, "Second")).IsSuccess);
+        Assert.Contains("Specification changed", (await ops.SubmitAiReview(reviewer, pid, id, basis, input, true)).Error);
+        var fresh = await Page();
+        Assert.True(fresh.CurrentAiReview!.IsOutdated);
+        Assert.Single(await SpecificationEvents(db, SubmitAiReviewAction));
+        Assert.False((await ops.SubmitAiReview(reviewer, pid, id, fresh.ReviewBasisRevision, input, true)).Value.IsOutdated);
+        await Approve();
+        Assert.True((await ops.SaveEvidence(author, pid, id, null, "Report", EvidenceUrl)).IsSuccess);
+        Assert.True((await ops.Reopen(author, pid, id, "Revisit", true)).IsSuccess);
+        await Approve();
+        var displayed = await Page();
+        Assert.True(displayed.Evidence!.IsOutdated);
+        var reopened = (await ops.Reopen(author, pid, id, "Revise", true)).Value;
+        Assert.True((await ops.EditContent(author, pid, reopened, draft.Id, draft.Title, "Third")).IsSuccess);
+        await Approve();
+        Assert.Contains("Specification changed", (await ops.SaveEvidence(reviewer, pid, id, displayed.ReviewBasisRevision,
+            displayed.Evidence, "Replacement", EvidenceUrl)).Error);
+        Assert.Contains("Specification changed", (await ops.ConfirmEvidenceCurrent(reviewer, pid, id, displayed.ReviewBasisRevision, displayed.Evidence)).Error);
+        var current = await Page();
+        Assert.Equal(displayed.Evidence, current.Evidence);
+        Assert.Empty(await SpecificationEvents(db, ConfirmEvidenceAction));
+        Assert.Single(await SpecificationEvents(db, SaveEvidenceAction));
+        Assert.False((await ops.ConfirmEvidenceCurrent(reviewer, pid, id, current.ReviewBasisRevision, current.Evidence)).Value.IsOutdated);
     }
 
     [PostgresFact]

@@ -368,20 +368,20 @@ public sealed partial class SpecificationReadTests
             CancellationToken cancellationToken = default) =>
             inner.ChangeAssignment(productInternalId, internalId, assignee, actor, occurredAt, authorized, cancellationToken);
 
-        public Task<Result<SpecificationAiReview>> SubmitAiReview(Guid productInternalId, Guid internalId, SpecificationAiReviewInput input,
+        public Task<Result<SpecificationAiReview>> SubmitAiReview(Guid productInternalId, Guid internalId, long expectedRevision, SpecificationAiReviewInput input,
             bool userApproved, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
             CancellationToken cancellationToken = default) =>
-            inner.SubmitAiReview(productInternalId, internalId, input, userApproved, actor, occurredAt, authorized, cancellationToken);
+            inner.SubmitAiReview(productInternalId, internalId, expectedRevision, input, userApproved, actor, occurredAt, authorized, cancellationToken);
 
-        public Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, SpecificationEvidence? expected, string? markdown,
+        public Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, long expectedRevision, SpecificationEvidence? expected, string? markdown,
             string? pullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
             CancellationToken cancellationToken = default) =>
-            inner.SaveEvidence(productInternalId, internalId, expected, markdown, pullRequestUrl, actor, occurredAt, authorized, cancellationToken);
+            inner.SaveEvidence(productInternalId, internalId, expectedRevision, expected, markdown, pullRequestUrl, actor, occurredAt, authorized, cancellationToken);
 
-        public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, SpecificationEvidence? reviewedEvidence,
+        public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, long expectedRevision, SpecificationEvidence? reviewedEvidence,
             AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
             CancellationToken cancellationToken = default) =>
-            inner.ConfirmEvidenceCurrent(productInternalId, internalId, reviewedEvidence, actor, occurredAt, authorized, cancellationToken);
+            inner.ConfirmEvidenceCurrent(productInternalId, internalId, expectedRevision, reviewedEvidence, actor, occurredAt, authorized, cancellationToken);
 
         public Task<Result<InReviewSpecification>> SubmitForReview(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
             DateTimeOffset occurredAt, Func<Task<bool>> authorized, CancellationToken cancellationToken = default) =>

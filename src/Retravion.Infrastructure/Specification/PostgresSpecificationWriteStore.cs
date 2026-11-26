@@ -194,7 +194,7 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         return Maybe<SpecificationAuditAssignment>.From(new SpecificationAuditAssignment(oldAssignee, newAssignee));
     }
 
-    public Task<Result<SpecificationAiReview>> SubmitAiReview(Guid productInternalId, Guid internalId, SpecificationAiReviewInput input,
+    public Task<Result<SpecificationAiReview>> SubmitAiReview(Guid productInternalId, Guid internalId, long expectedRevision, SpecificationAiReviewInput input,
         bool userApproved, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default) =>
         Execute(productInternalId, authorized, async (connection, transaction) =>
@@ -202,6 +202,8 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             var current = await LockSpecification<DevelopmentSpecification>(connection, transaction, productInternalId, internalId,
                 status => status is "Draft" or "In Review", "AI reviews can only be submitted in Draft or In Review.", cancellationToken);
             if (current.IsFailure) return Result.Failure<SpecificationAiReview>(current.Error);
+            if (!await MatchesReviewBasis(connection, transaction, internalId, expectedRevision, cancellationToken))
+                return Result.Failure<SpecificationAiReview>(StaleReviewBasis);
             var submitted = input switch
             {
                 SpecificationAiReviewInput.Entered entered => SpecificationAiReview.Submit(entered.Markdown, userApproved),
@@ -249,6 +251,9 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
     private static async Task<Result<Maybe<SpecificationAuditAiReviewChange>>> InvalidateAiReview(NpgsqlConnection connection,
         NpgsqlTransaction transaction, Guid internalId, CancellationToken token)
     {
+        await using var advance = new NpgsqlCommand("UPDATE retravion_specification.specification SET review_basis_revision = review_basis_revision + 1 WHERE internal_id = $1", connection, transaction);
+        advance.Parameters.AddWithValue(internalId);
+        await advance.ExecuteNonQueryAsync(token);
         var previous = await ReadAiReview(connection, transaction, internalId, token);
         if (previous.IsFailure) return Result.Failure<Maybe<SpecificationAuditAiReviewChange>>(previous.Error);
         if (previous.Value.GetValueOrDefault() is not { IsOutdated: false } before)
@@ -267,10 +272,10 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
         bool? userApproved = null) => new(before is null ? null : new(before.Markdown, before.IsOutdated),
         new(after.Markdown, after.IsOutdated), userApproved);
 
-    public Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, SpecificationEvidence? expected, string? markdown,
+    public Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, long expectedRevision, SpecificationEvidence? expected, string? markdown,
         string? pullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default) =>
-        ChangeEvidence(productInternalId, internalId, actor, occurredAt, authorized, "specification.save-evidence", before =>
+        ChangeEvidence(productInternalId, internalId, expectedRevision, actor, occurredAt, authorized, "specification.save-evidence", before =>
         {
             if (expected != before) return Result.Failure<SpecificationEvidence>("Evidence changed. Review the refreshed evidence before saving.");
             var prepared = SpecificationEvidence.Prepare(markdown, pullRequestUrl);
@@ -280,17 +285,27 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
                 : prepared;
         }, cancellationToken);
 
-    public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, SpecificationEvidence? reviewedEvidence,
+    public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, long expectedRevision, SpecificationEvidence? reviewedEvidence,
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default) =>
-        ChangeEvidence(productInternalId, internalId, actor, occurredAt, authorized, "specification.confirm-evidence-current",
+        ChangeEvidence(productInternalId, internalId, expectedRevision, actor, occurredAt, authorized, "specification.confirm-evidence-current",
             before => before is null
                 ? Result.Failure<SpecificationEvidence>("There is no retained Specification evidence to confirm.")
                 : reviewedEvidence is not null && reviewedEvidence != before
                     ? Result.Failure<SpecificationEvidence>("Evidence changed. Review the refreshed evidence before confirming.")
                     : before.ConfirmCurrent(reviewedEvidence is not null), cancellationToken);
 
-    private Task<Result<SpecificationEvidence>> ChangeEvidence(Guid productInternalId, Guid internalId, AuditActor.Identified actor,
+    private const string StaleReviewBasis = "The Specification changed. Review the refreshed Specification before submitting.";
+
+    // Only used while the caller holds the parent Specification lock.
+    private static async Task<bool> MatchesReviewBasis(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid id, long expected, CancellationToken token)
+    {
+        await using var command = new NpgsqlCommand("SELECT review_basis_revision FROM retravion_specification.specification WHERE internal_id = $1", connection, transaction);
+        command.Parameters.AddWithValue(id);
+        return await command.ExecuteScalarAsync(token) is long revision && revision == expected;
+    }
+
+    private Task<Result<SpecificationEvidence>> ChangeEvidence(Guid productInternalId, Guid internalId, long expectedRevision, AuditActor.Identified actor,
         DateTimeOffset occurredAt, Func<Task<bool>> authorized, string action,
         Func<SpecificationEvidence?, Result<SpecificationEvidence>> change, CancellationToken token) =>
         Execute(productInternalId, authorized, async (connection, transaction) =>
@@ -301,6 +316,8 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             var previous = await ReadEvidence(connection, transaction, internalId, token);
             if (previous.IsFailure) return Result.Failure<SpecificationEvidence>(previous.Error);
             var before = previous.Value.GetValueOrDefault();
+            if (!await MatchesReviewBasis(connection, transaction, internalId, expectedRevision, token))
+                return Result.Failure<SpecificationEvidence>(StaleReviewBasis);
             var updated = change(before);
             if (updated.IsFailure || updated.Value == before) return updated;
 
@@ -528,7 +545,8 @@ public sealed class PostgresSpecificationWriteStore(string connectionString,
             if (next.IsFailure) return next;
 
             await using var update = new NpgsqlCommand("""
-                UPDATE retravion_specification.specification SET status = $3
+                UPDATE retravion_specification.specification SET status = $3,
+                    review_basis_revision = review_basis_revision + CASE WHEN $3 = 'Approved' THEN 1 ELSE 0 END
                 WHERE product_internal_id = $1 AND internal_id = $2 AND status = $4
                 """, connection, transaction);
             update.Parameters.AddWithValue(productId);

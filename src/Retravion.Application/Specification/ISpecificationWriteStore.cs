@@ -26,17 +26,17 @@ public interface ISpecificationWriteStore
         CancellationToken cancellationToken = default);
 
     /// <summary>Submits or replaces the user-approved current AI review and commits its audit event with the change.</summary>
-    Task<Result<SpecificationAiReview>> SubmitAiReview(Guid productInternalId, Guid internalId, SpecificationAiReviewInput input,
+    Task<Result<SpecificationAiReview>> SubmitAiReview(Guid productInternalId, Guid internalId, long expectedRevision, SpecificationAiReviewInput input,
         bool userApproved, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 
     /// <summary>Replaces the single Approved evidence report and optional PR URL (null clears it), making the evidence current.</summary>
-    Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, SpecificationEvidence? expected, string? markdown,
+    Task<Result<SpecificationEvidence>> SaveEvidence(Guid productInternalId, Guid internalId, long expectedRevision, SpecificationEvidence? expected, string? markdown,
         string? pullRequestUrl, AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 
     /// <summary>Explicitly confirms reviewed evidence after approval without replacing the report or PR URL.</summary>
-    Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, SpecificationEvidence? reviewedEvidence,
+    Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(Guid productInternalId, Guid internalId, long expectedRevision, SpecificationEvidence? reviewedEvidence,
         AuditActor.Identified actor, DateTimeOffset occurredAt, Func<Task<bool>> authorized,
         CancellationToken cancellationToken = default);
 

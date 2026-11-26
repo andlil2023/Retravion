@@ -46,22 +46,22 @@ internal sealed class SpecificationOperations(ProductOperations products, ISpeci
             return result.IsSuccess ? Result.Success(true) : Result.Failure<bool>(result.Error);
         }, cancellationToken);
 
-    public Task<Result<SpecificationAiReview>> SubmitAiReview(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+    public Task<Result<SpecificationAiReview>> SubmitAiReview(ClaimsPrincipal principal, Guid productInternalId, Guid internalId, long expectedRevision,
         SpecificationAiReviewInput input, bool userApproved, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.submit-ai-review", (actor, now, authorized) =>
-            writes.SubmitAiReview(productInternalId, internalId, input, userApproved, actor, now, authorized, cancellationToken),
+            writes.SubmitAiReview(productInternalId, internalId, expectedRevision, input, userApproved, actor, now, authorized, cancellationToken),
             cancellationToken);
 
-    public Task<Result<SpecificationEvidence>> SaveEvidence(ClaimsPrincipal principal, Guid productInternalId, Guid internalId, SpecificationEvidence? expected,
+    public Task<Result<SpecificationEvidence>> SaveEvidence(ClaimsPrincipal principal, Guid productInternalId, Guid internalId, long expectedRevision, SpecificationEvidence? expected,
         string? markdown, string? pullRequestUrl, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.save-evidence", (actor, now, authorized) =>
-            writes.SaveEvidence(productInternalId, internalId, expected, markdown, pullRequestUrl, actor, now, authorized, cancellationToken),
+            writes.SaveEvidence(productInternalId, internalId, expectedRevision, expected, markdown, pullRequestUrl, actor, now, authorized, cancellationToken),
             cancellationToken);
 
-    public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
+    public Task<Result<SpecificationEvidence>> ConfirmEvidenceCurrent(ClaimsPrincipal principal, Guid productInternalId, Guid internalId, long expectedRevision,
         SpecificationEvidence? reviewedEvidence, CancellationToken cancellationToken = default) =>
         Change(principal, "specification.confirm-evidence-current", (actor, now, authorized) =>
-            writes.ConfirmEvidenceCurrent(productInternalId, internalId, reviewedEvidence, actor, now, authorized, cancellationToken),
+            writes.ConfirmEvidenceCurrent(productInternalId, internalId, expectedRevision, reviewedEvidence, actor, now, authorized, cancellationToken),
             cancellationToken);
 
     public Task<Result<InReviewSpecification>> SubmitForReview(ClaimsPrincipal principal, Guid productInternalId, Guid internalId,
