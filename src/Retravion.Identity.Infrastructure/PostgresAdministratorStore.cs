@@ -42,6 +42,20 @@ public sealed class PostgresAdministratorStore(string connectionString) : IAdmin
     public Task<Result<Maybe<Administrator>>> LoadForSignIn(string? username, CancellationToken cancellationToken = default) =>
         ReadOne(username, cancellationToken);
 
+    /// <summary>Resolves an exact active username and holds a shared row lock in the caller's transaction.</summary>
+    public async Task<Maybe<string>> FindActiveUsernameForAssignment(string username, CancellationToken cancellationToken)
+    {
+        if (_transactionConnection is null)
+            throw new InvalidOperationException("Assignment lookup requires a transaction connection.");
+        await using var command = new NpgsqlCommand("""
+            SELECT username FROM retravion_identity.administrator
+            WHERE normalized_username = $1 AND is_active FOR SHARE
+            """, _transactionConnection);
+        command.Parameters.AddWithValue(username.ToUpperInvariant());
+        return await command.ExecuteScalarAsync(cancellationToken) is string canonicalUsername
+            ? Maybe<string>.From(canonicalUsername) : Maybe<string>.None;
+    }
+
     private async Task<Result<Maybe<Administrator>>> ReadOne(string? username, CancellationToken cancellationToken)
     {
         await using var lease = await OpenConnection(cancellationToken);

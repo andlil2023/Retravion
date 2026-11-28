@@ -101,7 +101,8 @@ public sealed partial class AccountManagementTests
             (Href: $"/requirements?product={encodedId}", Label: "Requirements", Icon: MudBlazor.Icons.Material.Outlined.ChecklistRtl),
             (Href: $"/test-cases?product={encodedId}", Label: "Test Cases", Icon: MudBlazor.Icons.Material.Outlined.FactCheck),
             (Href: $"/features?product={encodedId}", Label: "Features", Icon: MudBlazor.Icons.Material.Outlined.Extension),
-            (Href: $"/revisions?product={encodedId}", Label: "Revisions", Icon: MudBlazor.Icons.Material.Outlined.History)
+            (Href: $"/revisions?product={encodedId}", Label: "Revisions", Icon: MudBlazor.Icons.Material.Outlined.History),
+            (Href: $"/specifications?product={encodedId}", Label: "Specifications", Icon: MudBlazor.Icons.Material.Outlined.Description)
         };
         var nodes = Regex.Matches(navigation, "<a\\b(?=[^>]*class=\"[^\"]*product-navigation-item)[^>]*>[\\s\\S]*?</a>").Cast<Match>().ToArray();
         Assert.Equal(expectedNodes.Length, nodes.Length);

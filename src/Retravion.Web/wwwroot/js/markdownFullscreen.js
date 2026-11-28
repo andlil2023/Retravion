@@ -2,6 +2,7 @@
 // rendering, focus containment and background inertness; this is not the browser Fullscreen API.
 const sessions = new WeakMap();
 const splitters = new WeakMap();
+const markdownInputs = new WeakMap();
 
 function selection(editor) {
     return editor && {
@@ -130,8 +131,55 @@ export function initializeSplitter(dialog) {
     });
 }
 
+// The control event carries no text. Blazor's stream interop transfers the UTF-8
+// bytes in bounded chunks instead of placing the full value in a hub message.
+export function initializeMarkdownInput(dialog, source, callback) {
+    let timer;
+    let inFlight = false;
+    let pending = false;
+    let disposed = false;
+    const schedule = () => {
+        pending = true;
+        clearTimeout(timer);
+        if (inFlight) return;
+        timer = setTimeout(async () => {
+            pending = false;
+            inFlight = true;
+            try { await callback.invokeMethodAsync('RefreshMarkdownPreview'); }
+            catch { /* The component or circuit may have been disposed. */ }
+            finally {
+                inFlight = false;
+                if (pending && !disposed) schedule();
+            }
+        }, 250);
+    };
+    source.addEventListener('input', schedule);
+    markdownInputs.set(dialog, () => {
+        disposed = true;
+        clearTimeout(timer);
+        source.removeEventListener('input', schedule);
+    });
+}
+
+// In Unicode mode a valid surrogate pair lies outside the surrogate code point range.
+// TextEncoder would silently replace any unmatched surrogate with U+FFFD.
+export function hasUnpairedSurrogate(value) {
+    return /[\uD800-\uDFFF]/u.test(value);
+}
+
+export function readMarkdownInput(source, maxBytes) {
+    const value = source.value;
+    if (hasUnpairedSurrogate(value)) return { invalidUnicode: true, content: null };
+    if (value.length > maxBytes) return { tooLarge: true, content: null };
+    const bytes = new TextEncoder().encode(value);
+    if (bytes.length > maxBytes) return { tooLarge: true, content: null };
+    return { tooLarge: false, content: bytes.length ? DotNet.createJSStreamReference(bytes) : null };
+}
+
 export function dispose(dialog) {
     if (!dialog) return;
+    markdownInputs.get(dialog)?.();
+    markdownInputs.delete(dialog);
     finish(dialog, false, false);
     splitters.get(dialog)?.();
     splitters.delete(dialog);

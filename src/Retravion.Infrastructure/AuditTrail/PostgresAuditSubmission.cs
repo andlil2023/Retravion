@@ -72,14 +72,15 @@ public sealed class PostgresAuditSubmission(string connectionString) : IAuditSub
                 ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS revision_change jsonb;
                 ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS product_area_change jsonb;
                 ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS feature_change jsonb;
+                ALTER TABLE retravion_audit.event ADD COLUMN IF NOT EXISTS specification_change jsonb;
                 """, connection, transaction))
                 await setup.ExecuteNonQueryAsync(cancellationToken);
 
             await using var command = new NpgsqlCommand("""
                 INSERT INTO retravion_audit.event
                     (actor_kind, actor_identifier, occurred_at_utc_ticks, action,
-                        target_kind, target_identifier, outcome, product_change, user_need_change, requirement_change, ai_workflow_change, test_case_change, revision_change, product_area_change, feature_change)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                        target_kind, target_identifier, outcome, product_change, user_need_change, requirement_change, ai_workflow_change, test_case_change, revision_change, product_area_change, feature_change, specification_change)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 """, connection, transaction);
             command.Parameters.AddWithValue(information.Actor is AuditActor.Identified ? "identified" : "unknown");
             command.Parameters.AddWithValue(NpgsqlDbType.Text,
@@ -113,6 +114,8 @@ public sealed class PostgresAuditSubmission(string connectionString) : IAuditSub
                 information.ProductAreaChange is null ? DBNull.Value : JsonSerializer.Serialize(information.ProductAreaChange));
             command.Parameters.AddWithValue(NpgsqlDbType.Jsonb,
                 information.FeatureChange is null ? DBNull.Value : JsonSerializer.Serialize(information.FeatureChange));
+            command.Parameters.AddWithValue(NpgsqlDbType.Jsonb,
+                information.SpecificationChange is null ? DBNull.Value : JsonSerializer.Serialize(information.SpecificationChange));
             await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

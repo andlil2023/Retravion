@@ -19,6 +19,8 @@ internal sealed class ProductOperations(IAuthorizationService authorization, Ses
     IProductStore store, IProductChangeTransaction changes, IAuditSubmission submission, TimeProvider time,
     ILogger<ProductOperations> logger)
 {
+    internal Task<bool> CanView(ClaimsPrincipal actor) => Allowed(actor);
+
     private async Task<bool> Allowed(ClaimsPrincipal actor) =>
         sessions.IsActive(actor.FindFirstValue(SessionTicketStore.SessionClaim)) &&
         (await authorization.AuthorizeAsync(actor, "CompletedPasswordReplacement")).Succeeded;

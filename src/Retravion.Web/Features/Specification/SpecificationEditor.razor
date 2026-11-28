@@ -1,0 +1,181 @@
+@page "/specifications/create"
+@page "/specifications/edit"
+@using Microsoft.JSInterop
+@using System.Text.Json
+@implements IDisposable
+@inject IJSRuntime JS
+@inject SpecificationOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>@Heading · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="@Heading" BackHref="@BackPath" BackText="@(_editing ? "Specification" : "Specifications")" />
+</SectionContent>
+@if (_product is not null)
+{
+    <p aria-label="Product context">@_product.Id · @_product.Name</p>
+    <DescriptionEditor @key="_loadVersion" InitialDescription="@_description" Optional="true" Busy="_busy"
+                       StreamedInputMaxBytes="@(1024 * 1024)"
+                       OnSave="Save" FormId="specification-form" SubmitText="@(_editing ? "Save changes" : "Create Draft")" CancelHref="@BackPath">
+        <ChildContent>
+            @* Keep live values browser-side until submit. Binding even on blur would send the full value in one hub message. *@
+            <div class="specification-field">
+                <label for="specification-id">Specification ID</label>
+                <input @ref="_idInput" id="specification-id" type="text" value="@_id" required disabled="@_busy" />
+            </div>
+            <div class="specification-field">
+                <label for="specification-title">Title</label>
+                <input @ref="_titleInput" id="specification-title" type="text" value="@_title" required disabled="@_busy" />
+            </div>
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" role="alert" Class="my-4">@_error</MudAlert>
+            }
+        </ChildContent>
+    </DescriptionEditor>
+}
+else if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+}
+else
+{
+    <p role="status">Loading Specification form…</p>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public string? Id { get; set; }
+
+    private Retravion.Domain.Product.Product? _product;
+    private DraftSpecification? _draft;
+    private ElementReference _idInput, _titleInput;
+    private string _id = "", _title = "", _description = "";
+    private string? _error;
+    private bool _editing, _busy;
+    private int _loadVersion;
+
+    private string Heading => _editing ? "Edit Draft Specification" : "Create Draft Specification";
+    private string BackPath => _editing && Guid.TryParse(Id, out var id) && id != Guid.Empty
+        ? SpecificationPresentation.DetailsPath(_product?.Id ?? ProductId, id)
+        : SpecificationPresentation.ListPath(_product?.Id ?? ProductId);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var version = ++_loadVersion;
+        var productId = ProductId;
+        var validId = Guid.TryParse(Id, out var id) && id != Guid.Empty;
+        _editing = Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/').EndsWith("/edit", StringComparison.OrdinalIgnoreCase);
+        _product = null;
+        _draft = null;
+        _error = null;
+        _id = _title = _description = "";
+        if (_editing && !validId) { _error = "Specification not found in this Product."; return; }
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var product = await Products.Retrieve(actor, productId);
+        if (version != _loadVersion) return;
+        if (product.IsFailure) { _error = product.Error; return; }
+        if (!product.Value.IsActive) { _error = "Product retired: Specifications are read-only."; return; }
+        if (_editing)
+        {
+            var specification = await Operations.Find(actor, product.Value.InternalId, id);
+            if (version != _loadVersion) return;
+            if (specification.IsFailure) { _error = specification.Error; return; }
+            if (specification.Value.HasNoValue) { _error = "Specification not found in this Product."; return; }
+            if (specification.Value.Value is not DraftSpecification draft)
+            {
+                _error = "Only Draft Specification content can be edited.";
+                return;
+            }
+            _draft = draft;
+            (_id, _title, _description) = (draft.Id, draft.Title, draft.Description);
+        }
+        _product = product.Value;
+    }
+
+    private async Task Save(string description)
+    {
+        if (_busy || _product is not { IsActive: true } product) return;
+        var version = _loadVersion;
+        var draft = _draft;
+        _error = null;
+        _busy = true;
+        try
+        {
+            var (heading, error) = await ReadHeading(_idInput, _titleInput);
+            if (version != _loadVersion) return;
+            if (heading is null) { _error = error; return; }
+
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            if (version != _loadVersion) return;
+            var result = draft is null
+                ? await Operations.Create(actor, product.InternalId, heading.Id, heading.Title, description)
+                : await Operations.EditContent(actor, product.InternalId, draft,
+                    PreserveHeading(draft.Id, heading.Id), PreserveHeading(draft.Title, heading.Title),
+                    description == draft.Description.Replace("\r\n", "\n").Replace('\r', '\n') ? draft.Description : description);
+            if (version != _loadVersion) return;
+            if (result.IsSuccess)
+            {
+                Navigation.NavigateTo(SpecificationPresentation.DetailsPath(product.Id, result.Value.InternalId));
+                return;
+            }
+
+            _error = result.Error;
+            // Keep the mounted editor and its inputs for correctable errors, but never
+            // offer another write against a Product or Draft that is no longer eligible.
+            var current = await Products.Retrieve(actor, product.Id);
+            if (version != _loadVersion) return;
+            if (current.IsFailure || !current.Value.IsActive || current.Value.InternalId != product.InternalId)
+            {
+                _product = null;
+                return;
+            }
+            if (draft is not null)
+            {
+                var specification = await Operations.Find(actor, product.InternalId, draft.InternalId);
+                if (version != _loadVersion) return;
+                if (specification.IsFailure || specification.Value.HasNoValue || specification.Value.Value is not DraftSpecification)
+                    _product = null;
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    // A single-line input removes CR/LF and a textarea exposes LF line endings.
+    // If the submitted value still matches the browser's projection, keep the stored text exactly.
+    private static string PreserveHeading(string original, string submitted) =>
+        submitted == original.Replace("\r", "").Replace("\n", "") ? original : submitted;
+
+    private async Task<(DraftHeading? Heading, string? Error)> ReadHeading(ElementReference id, ElementReference title)
+    {
+        const string readError = "The Specification ID and title could not be read. Try again.";
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/specificationDraft.js");
+            var input = await module.InvokeAsync<HeadingInput>("streamSpecificationHeading", id, title);
+            await using var content = input.Content;
+            if (input.InvalidField is "id" or "title")
+            {
+                var label = input.InvalidField == "id" ? "Specification ID" : "Title";
+                return (null, $"{label} contains invalid Unicode. Replace the invalid characters and try again.");
+            }
+            if (content is null) return (null, readError);
+            // The hub receives bounded chunks, without introducing a field size limit here.
+            await using var stream = await content.OpenReadStreamAsync(long.MaxValue);
+            var heading = await JsonSerializer.DeserializeAsync<DraftHeading>(stream, JsonSerializerOptions.Web);
+            return heading is null ? (null, readError) : (heading, null);
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or IOException
+            or JsonException or OperationCanceledException or TimeoutException)
+        {
+            return (null, readError);
+        }
+    }
+
+    private sealed record HeadingInput(string? InvalidField, IJSStreamReference? Content);
+    private sealed record DraftHeading(string Id, string Title);
+
+    public void Dispose() => _loadVersion++;
+}

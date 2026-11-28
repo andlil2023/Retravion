@@ -29,6 +29,14 @@ The first release supports creating, listing, viewing, editing, reviewing, appro
 
 Configurable description templates are deferred.
 
+### Exact-version persistence and coordination
+
+The User Need, Requirement and Test Case stores each expose a minimal Product-scoped projection of their exact version rows. The projection returns the owning record identity for navigation and the version identity, label, version number and approval status; it never follows the default-version projection. An uninitialized owner has no available versions. Specification reads apply existing Product view access and emit no business-change audit.
+
+The Specification owns its link rows, keyed by specification, target kind and exact version UUID. UUIDs are unique within each owning version table. Draft replacement validates the complete set against the owning stores in the caller's transaction; owner version rows are retained when successors are created. The cross-slice check is application-owned, not a cross-schema foreign key. A link replacement locks the Specification row before reading the old set. Its success event (`specification.edit-links`) records the actor, occurrence time, immutable Specification identity, outcome and old/new sets of target kinds and exact version UUIDs in the same transaction (REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02). Validation failures and no-ops emit no success event. Denials and failed/uncertain writes use the common Specification path, without submitted values in operational logs or automatic retry.
+
+For approval and owner reopening, share the owner projection's `FOR NO KEY UPDATE` lock on the exact version row, through commit in the caller's transaction. Approval takes the Specification row first, then exact rows in kind/UUID order, and checks Product and status after obtaining each lock. Reopening takes that same exact row lock **before** checking for Approved or Implemented references, using a new statement under Read Committed; it must not lock Specification rows or read through the default-version projection. Neither side acquires another slice's schema/owner-wide locks for this check. This per-version boundary leaves unrelated versions and successor creation outside the reopening guard. Draft link editing imposes no approval requirement or reopening guard. The three owner stores run the Specification-owned reference check after the existing working-version concurrency check and before saving the exact version. A blocked reopening rolls back any tentative working-version update and emits no success audit or review history; it is a state validation failure, not an access denial. Successful reopening retains the existing owner audit and commit behavior.
+
 ## Lifecycle
 
 ### Draft
@@ -43,6 +51,8 @@ Configurable description templates are deferred.
 - An optional AI review may be performed.
 - Approval requires every linked User Need, Requirement and Test Case version to be Approved and belong to the same Product.
 - Missing link types produce a non-blocking reminder; no explanation is required.
+
+The Specification slice owns both transitions. `specification.submit-for-review` and `specification.return-to-draft` lock the Product-scoped Specification row, change only its status, and commit with the audit event in the same PostgreSQL transaction. The typed event records actor, time, action, immutable Specification identity, outcome, prior and resulting states, and the exact return reason when supplied (REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02). The reason is audit data, not editable Specification content. Reads, validation failures and ineligible transitions emit no business-change event. Denials, rollback and uncertain commits follow the common Specification write path without logging submitted values or retrying automatically.
 
 ### Approved
 
@@ -73,6 +83,10 @@ Approval remains a human-controlled decision. An organization may authorize a di
 
 Assignment is optional and can change in Draft, In Review and Approved. It does not grant or restrict editing rights, and it does not control factory ownership or execution. Permissions govern access. Assignment changes are retained in history.
 
+The Specification owns the assignment ledger. Its latest entry determines the current assignee, including a null assignee after clearing. Detail reads use existing Product access and read the record and ledger in one snapshot. The write locks the Product-scoped Specification row; the Identity-owned lookup resolves a newly selected account by normalized username and holds a shared row lock on the active account in the caller's transaction. Specifications retain canonical usernames, not credentials or a cross-schema foreign key. The ledger append can also clear an assignment in a later finalization transaction without performing a new Identity lookup.
+
+Under REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02, each effective manual change commits its history and `specification.change-assignment` event together, recording actor, time, immutable Specification identity, success and both assignees. No-ops, validation failures and reads emit no business-change event. Unauthorized changes use the common denial event; audit failure rolls back the ledger append, and uncertain outcomes are reported without retry or logging submitted values. Verification covers assignment, reassignment and clearing across the three states, Identity and access rejection, readback, audit values and rollback.
+
 ## Final implementation evidence
 
 The final evidence report is a separate record linked to the specification:
@@ -83,7 +97,11 @@ The final evidence report is a separate record linked to the specification:
 - The report should describe outcomes and limitations. It is supporting evidence, not a substitute for final release test approval.
 - Earlier factory review iterations are not required to be stored in Retravion.
 
-The initial workflow may use a human to mark the specification Implemented after merge. Automating that transition is future work.
+For PBI #266, an authorized user can save one non-empty report (at most 1 MB of UTF-8 Markdown) and an optional absolute HTTPS PR URL while Approved. Reopening retains both values and marks the evidence outdated. Reapproval does not refresh it: a user must explicitly confirm that they reviewed the retained evidence or save a replacement. This increment has no screenshot storage or factory integration.
+
+The Specification slice owns the single evidence row, keyed by immutable Specification identity. Save, confirmation and reopening use the same Product-scoped Specification lock and transaction. Under REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02, the save, confirmation or reopen event records actor, time, action, immutable target and outcome, with the initial or prior and resulting report, PR URL and freshness for effective evidence changes. Reads, no-ops and validation failures emit no business-change event. Denials use the common denial event; audit failure rolls back the evidence and any state change, and uncertain commits are reported without logging submitted values or retrying automatically. Focused PostgreSQL checks cover size and URL validation, state and access gates, retention, confirmation, audited values and rollback.
+
+For PBI #266, an authorized user explicitly attests that the implementation PR was merged. Retravion does not verify the merge externally. The Specification slice owns finalization: under the Product-scoped Specification row lock it requires Approved and validates that the retained report and HTTPS PR URL are current. It commits Implemented, the attester and time, any assignee clearing (appended to the existing ledger), and one `specification.implement` event in the same PostgreSQL transaction. That event records the actor and time of the attestation, action, immutable target, success, the prior and resulting states, the affirmative attestation and, when applicable, the old and cleared assignee (REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02). Evidence, review and exact links do not change. There is no clearing entry when already unassigned. Reads, validation failures and ineligible or repeated transitions emit no success event. The common write path handles denials, rollback on audit failure and uncertain outcomes without logging submitted values or retrying automatically. Focused PostgreSQL tests cover those gates, readback, rollback, terminal behavior and exact-link protection.
 
 ## Deletion
 
@@ -91,6 +109,10 @@ The initial workflow may use a human to mark the specification Implemented after
 - Deletion is blocked while an associated run is active or its stopped state is uncertain.
 - The user must confirm deletion after being shown the specification identity and warned that its current review, submitted evidence and associated factory activity history will also be removed.
 - Late events for a deleted run must be rejected rather than recreating its history.
+
+For PBI #266, the delete command requires confirmation of the immutable Specification identity and a separate affirmative human attestation that no run is active or uncertain. Retravion does not verify run state or store factory activity in this increment. The Specification slice locks the current record in its active Product and removes the parent and its owned links, assignment ledger, AI review and evidence in one PostgreSQL transaction. It does not delete linked versions.
+
+Under REQ-SYS-AUDIT-003, REQ-AUDIT-01 and REQ-AUDIT-02, `specification.delete` commits in the same transaction and survives cleanup. It records actor, time, action, immutable target, outcome, attestation and the pre-delete content, state, exact link IDs, assignment entries and retained review and evidence values. Review and evidence are identified by the Specification identity; no image bytes are captured. Reads, validation failures, ineligible states and repeated deletes emit no success event. Unauthorized attempts use the common denial event. Cleanup or audit failure rolls back deletion; uncertain commits are reported without logging submitted values or retrying automatically. Focused PostgreSQL tests verify the eligibility and access gates, ownership boundaries, durable snapshot, rollback and uncertain outcomes.
 
 ## Factory and project-management boundary
 

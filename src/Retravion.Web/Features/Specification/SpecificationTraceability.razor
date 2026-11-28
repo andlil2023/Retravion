@@ -1,0 +1,178 @@
+@using Retravion.Application.Specification
+@implements IDisposable
+@inject SpecificationOperations Operations
+@inject AuthenticationStateProvider Authentication
+
+<section class="mt-6" aria-labelledby="specification-links-heading">
+    <MudPaper Class="pa-4" Elevation="0">
+        <h3 id="specification-links-heading">Exact-version links</h3>
+        @if (_retained is null)
+        {
+            <p role="status">Loading linked versions…</p>
+        }
+        else if (_retained.Count == 0)
+        {
+            <p>No linked versions.</p>
+        }
+        else
+        {
+            <MudStack Spacing="1">
+                @foreach (var (target, version, error) in _retained)
+                {
+                    <div style="overflow-wrap:anywhere">
+                        @SpecificationPresentation.LinkKind(target.Kind):
+                        @if (version is not null)
+                        {
+                            <MudLink Href="@SpecificationPresentation.VersionPath(version)">@Label(version)</MudLink>
+                        }
+                        else
+                        {
+                            <span>Exact version @target.VersionId unavailable. @error</span>
+                        }
+                    </div>
+                }
+            </MudStack>
+        }
+        @if (CanEdit && _editing)
+        {
+            @if (_choiceError is not null)
+            {
+                <MudAlert Severity="Severity.Error" role="alert">@_choiceError</MudAlert>
+            }
+            else if (_choices is null)
+            {
+                <p role="status">Loading this Product's version choices…</p>
+            }
+            else
+            {
+                <p class="mt-4">Select exact versions from this Product, then save the links. No link type is required.</p>
+                @foreach (var (kind, choices) in _choices)
+                {
+                    <fieldset class="pa-2" disabled="@Busy">
+                        <legend>@SpecificationPresentation.LinkKind(kind)</legend>
+                        @if (choices.Count == 0 && !_unavailable.Any(target => target.Kind == kind))
+                        {
+                            <p>No versions available.</p>
+                        }
+                        <div style="max-height:14rem;overflow:auto;overflow-wrap:anywhere">
+                            @foreach (var choice in choices)
+                            {
+                                <div @key="choice.Target">
+                                    <label><input type="checkbox" value="@choice.Target.VersionId"
+                                                  @bind:get="_selection.Contains(choice.Target)"
+                                                  @bind:set="@(selected => Select(choice.Target, selected))" /> @Label(choice) · @(choice.IsApproved ? "Approved" : "Not Approved")</label>
+                                </div>
+                            }
+                            @foreach (var target in _unavailable.Where(target => target.Kind == kind))
+                            {
+                                <div @key="target">
+                                    <label><input type="checkbox" value="@target.VersionId"
+                                                  @bind:get="_selection.Contains(target)"
+                                                  @bind:set="@(selected => Select(target, selected))" /> Unavailable version @target.VersionId</label>
+                                </div>
+                            }
+                        </div>
+                    </fieldset>
+                }
+            }
+        }
+    </MudPaper>
+    @if (CanEdit)
+    {
+        <div class="product-actions">
+            @if (!_editing)
+            {
+                <MudButton id="specification-edit-links" Variant="Variant.Outlined" Disabled="@(Busy || _retained is null)" OnClick="OpenEditor">Edit links</MudButton>
+            }
+            else
+            {
+                <MudButton id="specification-save-links" Variant="Variant.Filled" Color="Color.Primary" Disabled="@(Busy || !HasChanges)" OnClick="Save">Save links</MudButton>
+                <MudButton Disabled="@Busy" OnClick="CloseEditor">Cancel</MudButton>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public DevelopmentSpecification Specification { get; set; } = default!;
+    [Parameter] public bool CanEdit { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<(SpecificationLinks Expected, SpecificationLink[] Targets)> OnSave { get; set; }
+
+    private List<(SpecificationLink Target, SpecificationVersionChoice? Version, string? Error)>? _retained;
+    private Dictionary<SpecificationLinkKind, IReadOnlyList<SpecificationVersionChoice>>? _choices;
+    private readonly HashSet<SpecificationLink> _selection = [];
+    private SpecificationLinks? _openedLinks;
+    private SpecificationLink[] _unavailable = [];
+    private string? _choiceError;
+    private bool _editing, _disposed;
+    private int _editorVersion;
+
+    // Detail keys this component by route and retained link set.
+    protected override async Task OnInitializedAsync()
+    {
+        var retained = new List<(SpecificationLink, SpecificationVersionChoice?, string?)>();
+        if (Specification.Links.Targets.Count != 0)
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            foreach (var target in Specification.Links.Targets)
+            {
+                if (_disposed) return;
+                var result = await Operations.ResolveVersion(actor, Specification.ProductInternalId, target);
+                retained.Add(result.IsFailure ? (target, null, result.Error) : (target, result.Value.GetValueOrDefault(), null));
+            }
+        }
+        _retained = retained;
+    }
+
+    private async Task OpenEditor()
+    {
+        if (Busy || !CanEdit || _editing) return;
+        _editing = true;
+        _choiceError = null;
+        _choices = null;
+        _selection.Clear();
+        _openedLinks = Specification.Links;
+        _selection.UnionWith(_openedLinks.Targets);
+        var edit = ++_editorVersion;
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        var choices = new Dictionary<SpecificationLinkKind, IReadOnlyList<SpecificationVersionChoice>>();
+        foreach (var kind in Enum.GetValues<SpecificationLinkKind>())
+        {
+            if (_disposed || edit != _editorVersion || !CanEdit) return;
+            var result = await Operations.ListVersions(actor, Specification.ProductInternalId, kind);
+            if (_disposed || edit != _editorVersion || !CanEdit) return;
+            if (result.IsFailure) { _choiceError = result.Error; return; }
+            choices.Add(kind, result.Value);
+        }
+        _unavailable = _selection.Except(choices.Values.SelectMany(items => items).Select(item => item.Target)).ToArray();
+        _choices = choices;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (!CanEdit && _editing) CloseEditor();
+    }
+
+    private void CloseEditor()
+    {
+        _editorVersion++;
+        _editing = false;
+    }
+
+    private void Select(SpecificationLink target, bool selected)
+    {
+        if (!CanEdit || Busy || !_editing) return;
+        if (selected) _selection.Add(target);
+        else _selection.Remove(target);
+    }
+
+    private bool HasChanges => _choices is not null && !_selection.SetEquals(Specification.Links.Targets);
+
+    private Task Save() => CanEdit && !Busy && _editing && HasChanges && _openedLinks is { } expected
+        ? OnSave.InvokeAsync((expected, _selection.ToArray())) : Task.CompletedTask;
+
+    private static string Label(SpecificationVersionChoice choice) => $"{choice.Identifier} · v{choice.VersionNumber} · {choice.Title}";
+
+    public void Dispose() => _disposed = true;
+}

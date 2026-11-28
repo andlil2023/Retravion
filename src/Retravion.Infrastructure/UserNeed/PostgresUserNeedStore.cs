@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Npgsql;
@@ -6,6 +7,8 @@ using Retravion.Application.AuditTrail;
 using Retravion.Application.UserNeed;
 using Retravion.Domain.UserNeed;
 using Retravion.Infrastructure.AuditTrail;
+using Retravion.Infrastructure.Specification;
+using Retravion.Domain.Specification;
 using Need = Retravion.Domain.UserNeed.UserNeed;
 
 namespace Retravion.Infrastructure.UserNeed;
@@ -13,6 +16,9 @@ namespace Retravion.Infrastructure.UserNeed;
 public sealed class PostgresUserNeedStore(string connectionString,
     Func<NpgsqlTransaction, CancellationToken, Task>? commit = null) : IUserNeedStore, IUserNeedChangeTransaction
 {
+    internal static readonly PostgresSpecificationVersionSource SpecificationVersions =
+        new(SpecificationLinkKind.UserNeed, "retravion_need.need_version", "id", "status = 2");
+
     // The entity row remains the default-version projection and the Product-scoped ID reservation.
     // Existing review snapshots are evidence, not reconstructed historical versions.
     private const string Setup = """
@@ -266,6 +272,12 @@ public sealed class PostgresUserNeedStore(string connectionString,
             command.Parameters.AddWithValue(NpgsqlDbType.Uuid, (object?)before.SourceVersionId ?? DBNull.Value);
             var revision = await command.ExecuteScalarAsync(token);
             if (revision is null) return Result.Failure<UserNeedSnapshot>("The User Need changed or a newer version exists. Retrieve it again.");
+            if (decision == "Reopened")
+            {
+                var protection = await PostgresSpecificationReopenProtection.Check(connection, transaction, SpecificationVersions,
+                    before.ProductInternalId, before.InternalId, before.VersionId, token);
+                if (protection.IsFailure) return Result.Failure<UserNeedSnapshot>(protection.Error);
+            }
             if (!await SaveVersion(connection, transaction, before.InternalId, token))
                 return Result.Failure<UserNeedSnapshot>("The User Need version identity is already in use.");
             if (decision is not null)
@@ -342,7 +354,7 @@ public sealed class PostgresUserNeedStore(string connectionString,
         {
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(token);
-            await using var transaction = await connection.BeginTransactionAsync(token);
+            await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
             await using (var setup = new NpgsqlCommand(Setup, connection, transaction)) await setup.ExecuteNonQueryAsync(token);
             var result = await operation(connection, transaction);
             if (result.IsSuccess)

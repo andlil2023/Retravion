@@ -1,0 +1,238 @@
+@page "/specifications/details"
+@using CSharpFunctionalExtensions
+@using Retravion.Application.Specification
+@using System.Security.Claims
+@implements IDisposable
+@inject SpecificationOperations Operations
+@inject ProductOperations Products
+@inject AuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Specification · Retravion</PageTitle>
+<SectionContent SectionName="product-page-header">
+    <PageHeader Title="Specification" BackHref="@SpecificationPresentation.ListPath(_product?.Id ?? ProductId)" BackText="Specifications" />
+</SectionContent>
+@if (_busy)
+{
+    <p role="status" aria-busy="true">Saving Specification change…</p>
+}
+@if (_mutationError is not null && !ShowEvidenceError)
+{
+    <MudAlert Severity="Severity.Error" role="alert" Class="mb-4">@_mutationError</MudAlert>
+    @if (_uncertain)
+    {
+        <p>The details below were last loaded before the operation.</p>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" id="specification-reload" OnClick="Load">Reload Specification</MudButton>
+    }
+}
+@if (_notice is not null)
+{
+    <MudAlert Severity="@(_approvalReminder ? Severity.Info : Severity.Success)" role="status" Class="mb-4">@_notice</MudAlert>
+}
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" role="alert">@_error</MudAlert>
+}
+else if (_product is null || _detail is null || _specification is null)
+{
+    <p role="status">Loading Specification…</p>
+}
+else
+{
+    <p class="specification-context" aria-label="Product context">@_product.Id · @_product.Name</p>
+    @if (!_product.IsActive)
+    {
+        <p>Product retired: this Specification is read-only.</p>
+    }
+    <MudPaper Class="pa-4" Elevation="0">
+        <div class="specification-heading">
+            <div class="specification-identity">
+                <p class="specification-id">@_specification.Id</p>
+                <h2>@_specification.Title</h2>
+            </div>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary">@SpecificationPresentation.Status(_specification)</MudChip>
+        </div>
+        <section class="specification-description" aria-labelledby="specification-description-heading">
+            <h3 id="specification-description-heading">Description</h3>
+            @if (string.IsNullOrWhiteSpace(_specification.Description))
+            {
+                <p>No description provided.</p>
+            }
+            else
+            {
+                <ProductMarkdownView Markdown="@_specification.Description" />
+            }
+        </section>
+    </MudPaper>
+    @if (CanChange && _specification is DraftSpecification)
+    {
+        <div class="product-actions">
+            <MudButton Href="@SpecificationPresentation.EditPath(_product.Id, _specification.InternalId)" Variant="Variant.Filled" Color="Color.Primary" Class="product-button" Disabled="@_busy">Edit</MudButton>
+        </div>
+    }
+    <SpecificationTraceability @key="(_loadVersion, _specification.Links)" Specification="_specification"
+                               CanEdit="@(CanChange && _specification is DraftSpecification)" Busy="_busy" OnSave="SaveLinks" />
+    @if (CanChange && _specification is not ImplementedSpecification)
+    {
+        <SpecificationReviewControls @key="(_loadVersion, _specification.GetType())" Specification="_specification"
+                                     Busy="_busy" OnSubmit="Submit" OnApprove="Approve" OnReturn="Return" />
+        <SpecificationDeleteControls @key="(_loadVersion, _specification)" Specification="_specification" ProductId="@_product.Id"
+                                     Busy="_busy" OnConfirm="Delete" />
+    }
+    var basis = _detail.ReviewBasisRevision;
+    <SpecificationAiReviewSection @key="(_loadVersion, basis, _specification.GetType(), _detail.CurrentAiReview, _reviewSaveVersion)"
+                                  Review="_detail.CurrentAiReview" CanEdit="@(CanChange && CanSubmitAiReview)" Busy="_busy" OnSubmit="input => SubmitAiReview(basis, input)" />
+    <SpecificationAssignment @key="(_loadVersion, _detail.Assignee)" Detail="_detail"
+                             CanEdit="@(CanChange && CanAssign)" Busy="_busy" OnChange="ChangeAssignment" />
+    <SpecificationEvidenceSection @key="(_loadVersion, basis, _specification.GetType(), _detail.Evidence, _evidenceSaveVersion)"
+                                  Evidence="_detail.Evidence" CanEdit="@(CanChange && CanPrepareEvidence)" Busy="_busy"
+                                  Error="@(ShowEvidenceError ? _mutationError : null)" OnSave="input => SaveEvidence(basis, input)" OnConfirm="reviewed => ConfirmEvidence(basis, reviewed)"
+                                  OnImplement="Implement" />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "product")] public string? ProductId { get; set; }
+    [SupplyParameterFromQuery(Name = "id")] public string? Id { get; set; }
+
+    private Retravion.Domain.Product.Product? _product;
+    private SpecificationDetail? _detail;
+    private DevelopmentSpecification? _specification => _detail?.Specification;
+    private string? _error, _mutationError, _notice;
+    private bool _busy, _uncertain, _approvalReminder, _evidenceMutation;
+    private int _loadVersion, _reviewSaveVersion, _evidenceSaveVersion;
+    private bool ShowEvidenceError => _evidenceMutation && !_uncertain && _error is null && _detail is not null;
+    private bool CanChange => _product is { IsActive: true } && !_uncertain;
+    private bool CanAssign => _specification is DraftSpecification or InReviewSpecification or ApprovedSpecification;
+    private bool CanSubmitAiReview => _specification is DraftSpecification or InReviewSpecification;
+    private bool CanPrepareEvidence => _specification is ApprovedSpecification;
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        var version = ++_loadVersion;
+        var productId = ProductId;
+        _product = null;
+        _detail = null;
+        _error = _mutationError = _notice = null;
+        _busy = _uncertain = _approvalReminder = _evidenceMutation = false;
+        if (!Guid.TryParse(Id, out var id) || id == Guid.Empty) { _error = "Specification not found in this Product."; return; }
+        var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+        if (version == _loadVersion) await Read(actor, productId, id, version);
+    }
+
+    private async Task Read(ClaimsPrincipal actor, string? productId, Guid id, int version, Guid? expectedProduct = null)
+    {
+        var product = await Products.Retrieve(actor, productId);
+        if (version != _loadVersion) return;
+        if (product.IsFailure || (expectedProduct is { } expected && product.Value.InternalId != expected))
+        {
+            (_product, _detail) = (null, null);
+            _error = product.IsFailure ? product.Error : "Specification not found in this Product.";
+            return;
+        }
+        var detail = await Operations.FindDetail(actor, product.Value.InternalId, id);
+        if (version != _loadVersion) return;
+        _product = product.Value;
+        _detail = detail.IsSuccess ? detail.Value.GetValueOrDefault() : null;
+        _error = detail.IsFailure ? detail.Error : _detail is null ? "Specification not found in this Product." : null;
+    }
+
+    private Task ChangeAssignment(string? assignee) => CanAssign
+        ? Change(async (actor, product, id) => (await Operations.ChangeAssignment(actor, product, id, assignee)).Map(() => true),
+            _ => _notice = assignee is null ? "Assignment cleared." : "Assignment saved.")
+        : Task.CompletedTask;
+
+    private Task SubmitAiReview(long basis, (SpecificationAiReviewInput Input, bool Approved) review) => CanSubmitAiReview && review.Approved
+        ? Change((actor, product, id) => Operations.SubmitAiReview(actor, product, id, basis, review.Input, review.Approved), _ =>
+        {
+            _reviewSaveVersion++;
+            _notice = "AI review saved.";
+        })
+        : Task.CompletedTask;
+
+    private Task SaveEvidence(long basis, (SpecificationEvidence? Expected, string Markdown, string? PullRequestUrl) input) => CanPrepareEvidence
+        ? Change((actor, product, id) => Operations.SaveEvidence(actor, product, id, basis, input.Expected, input.Markdown, input.PullRequestUrl), evidence =>
+        {
+            _evidenceSaveVersion++;
+            _notice = evidence.IsOutdated ? "Evidence is unchanged and still outdated. Confirm it or save a replacement." : "Evidence saved.";
+        }, evidenceMutation: true)
+        : Task.CompletedTask;
+
+    private Task ConfirmEvidence(long basis, SpecificationEvidence reviewed) => CanPrepareEvidence && reviewed.IsOutdated && _detail?.Evidence == reviewed
+        ? Change((actor, product, id) => Operations.ConfirmEvidenceCurrent(actor, product, id, basis, reviewed),
+            _ => _notice = "Evidence confirmed current.", evidenceMutation: true)
+        : Task.CompletedTask;
+
+    private Task Implement(string attestedPullRequestUrl) => CanPrepareEvidence
+        ? Change((actor, product, id) => Operations.Implement(actor, product, id, mergeAttested: true, attestedPullRequestUrl),
+            evidenceMutation: true)
+        : Task.CompletedTask;
+
+    private Task SaveLinks((SpecificationLinks Expected, SpecificationLink[] Targets) edit) => _specification is DraftSpecification
+        ? Change((actor, product, id) => Operations.EditLinks(actor, product, id, edit.Expected, edit.Targets), _ => _notice = "Exact-version links saved.")
+        : Task.CompletedTask;
+
+    private Task Submit() => _specification is DraftSpecification draft && !string.IsNullOrWhiteSpace(draft.Description)
+        ? Change((actor, product, id) => Operations.SubmitForReview(actor, product, id))
+        : Task.CompletedTask;
+
+    private Task Approve() => _specification is InReviewSpecification displayed
+        ? Change((actor, product, id) => Operations.Approve(actor, product, id, displayed), approval =>
+        {
+            if (approval.MissingLinkTypes.Count == 0) return;
+            _approvalReminder = true;
+            _notice = $"Specification approved. No exact-version links for: {string.Join(", ", approval.MissingLinkTypes.Select(SpecificationPresentation.LinkKind))}.";
+        }) : Task.CompletedTask;
+
+    private Task Return((string? Reason, bool Attested) input) => _specification switch
+    {
+        InReviewSpecification => Change((actor, product, id) => Operations.ReturnToDraft(actor, product, id, input.Reason)),
+        ApprovedSpecification when input.Attested => Change((actor, product, id) => Operations.Reopen(actor, product, id, input.Reason, input.Attested)),
+        _ => Task.CompletedTask
+    };
+
+    private Task Delete((Guid ConfirmedId, bool Attested) input) => _product is { } product && input.Attested &&
+        _specification is not ImplementedSpecification && _specification?.InternalId == input.ConfirmedId
+        ? Change(async (actor, productId, id) =>
+            (await Operations.Delete(actor, productId, id, input.ConfirmedId, input.Attested)).Map(() => true),
+            _ =>
+            {
+                _detail = null;
+                Navigation.NavigateTo(SpecificationPresentation.ListPath(product.Id));
+            }, reload: false)
+        : Task.CompletedTask;
+
+    private async Task Change<T>(Func<ClaimsPrincipal, Guid, Guid, Task<Result<T>>> operation, Action<T>? apply = null,
+        bool reload = true, bool evidenceMutation = false)
+    {
+        if (_busy || !CanChange || _product is not { } product || _specification is not { } target) return;
+        var version = _loadVersion;
+        _busy = true;
+        _evidenceMutation = evidenceMutation;
+        _mutationError = _notice = null;
+        _approvalReminder = false;
+        try
+        {
+            var actor = (await Authentication.GetAuthenticationStateAsync()).User;
+            if (version != _loadVersion) return;
+            var result = await operation(actor, product.InternalId, target.InternalId);
+            if (version != _loadVersion) return;
+            if (result.IsSuccess)
+            {
+                // Refresh the detail snapshot: lifecycle changes can also invalidate retained review and evidence.
+                if (reload) await Read(actor, product.Id, target.InternalId, version, product.InternalId);
+                if (version == _loadVersion && _error is null) apply?.Invoke(result.Value);
+                return;
+            }
+
+            _mutationError = result.Error;
+            // The existing store has a distinct safe message for an unconfirmed commit, not a typed outcome.
+            _uncertain = result.Error.StartsWith("The Specification operation outcome could not be confirmed.", StringComparison.Ordinal);
+            if (!_uncertain) await Read(actor, product.Id, target.InternalId, version, product.InternalId);
+        }
+        finally { if (version == _loadVersion) _busy = false; }
+    }
+
+    public void Dispose() => _loadVersion++;
+}

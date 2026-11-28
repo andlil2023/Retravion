@@ -1,0 +1,48 @@
+<section class="mt-6" aria-labelledby="specification-delete-heading" style="max-width:40rem">
+    <MudPaper Class="pa-4" Elevation="0">
+        <h3 id="specification-delete-heading">Delete Specification</h3>
+        @if (_confirming)
+        {
+            <p style="overflow-wrap:anywhere">Permanently delete <strong>@Specification.Id · @Specification.Title</strong> from Product <strong>@ProductId</strong>?</p>
+            <p>Deletion also removes the current review, submitted evidence and any associated factory activity history. Retravion does not store factory activity in this release.</p>
+            <p>Retravion does not verify factory run state.</p>
+            <label><input id="specification-delete-attestation" type="checkbox" @bind="_attested" disabled="@Busy" /> I attest that no associated factory run is active or uncertain.</label>
+        }
+    </MudPaper>
+    <div class="product-actions">
+        @if (_confirming)
+        {
+            <MudButton id="specification-confirm-delete" Variant="Variant.Filled" Color="Color.Error" Disabled="@(Busy || !_attested)" OnClick="Confirm">Confirm deletion</MudButton>
+            <MudButton id="specification-cancel-delete" Disabled="@Busy" OnClick="Cancel">Cancel</MudButton>
+        }
+        else
+        {
+            <MudButton id="specification-open-delete" Variant="Variant.Outlined" Color="Color.Error" Disabled="@Busy" OnClick="Open">Delete Specification</MudButton>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public DevelopmentSpecification Specification { get; set; } = default!;
+    [Parameter, EditorRequired] public string ProductId { get; set; } = "";
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<(Guid ConfirmedId, bool Attested)> OnConfirm { get; set; }
+
+    private bool _confirming, _attested;
+
+    private void Open()
+    {
+        if (Busy) return;
+        _attested = false;
+        _confirming = true;
+    }
+
+    private void Cancel()
+    {
+        if (Busy) return;
+        _confirming = _attested = false;
+    }
+
+    private Task Confirm() => !Busy && _confirming && _attested
+        ? OnConfirm.InvokeAsync((Specification.InternalId, _attested)) : Task.CompletedTask;
+}

@@ -1,0 +1,206 @@
+@using Microsoft.JSInterop
+@using System.Text
+@implements IDisposable
+@inject IJSRuntime JS
+
+<section class="mt-6" aria-labelledby="specification-evidence-heading">
+    <MudPaper Class="pa-4" Elevation="0">
+        <h3 id="specification-evidence-heading">Implementation evidence</h3>
+        @if (Evidence is { } evidence)
+        {
+            @if (evidence.IsOutdated)
+            {
+                <p><strong>Outdated:</strong> This evidence was retained from a previous approval and may not reflect the current Specification.</p>
+            }
+            @if (evidence.PullRequestUrl is { } url)
+            {
+                <p style="overflow-wrap:anywhere">PR URL: <a href="@url">@url</a></p>
+            }
+            else
+            {
+                <p>No PR URL provided.</p>
+            }
+            <ProductMarkdownView Markdown="@evidence.Markdown" />
+        }
+        else
+        {
+            <p>No implementation evidence saved.</p>
+        }
+        @if (CanEdit && !_editing && Evidence is { IsOutdated: true })
+        {
+            <label>
+                <input id="specification-evidence-reviewed" type="checkbox" @bind="_reviewed" disabled="@Disabled" />
+                I reviewed the retained evidence and confirm it is current for this Specification.
+            </label>
+        }
+        @if (CanEdit && !_editing)
+        {
+            @if (Evidence is null)
+            {
+                <p>Save a final evidence report and an HTTPS PR URL before marking this Specification implemented.</p>
+            }
+            else if (Evidence.IsOutdated)
+            {
+                <p>Confirm or replace the outdated evidence before marking this Specification implemented.</p>
+            }
+            else if (Evidence.PullRequestUrl is not { } currentUrl)
+            {
+                <p>Add an HTTPS PR URL before marking this Specification implemented.</p>
+            }
+            else
+            {
+                <p>This decision is final and clears the assignment. Retravion does not verify the merge.</p>
+                <label>
+                    <input id="specification-merge-attestation" type="checkbox" disabled="@Disabled"
+                           @bind:get="@(_attestedPullRequestUrl == currentUrl)"
+                           @bind:set="(bool attested) => _attestedPullRequestUrl = attested ? currentUrl : null" />
+                    I attest that the implementation PR was merged.
+                </label>
+            }
+        }
+    </MudPaper>
+    @if (Error is not null)
+    {
+        <MudAlert Severity="Severity.Error" role="alert" Class="my-4">@Error</MudAlert>
+    }
+    @if (CanEdit)
+    {
+        @if (_editing)
+        {
+            <DescriptionEditor InitialDescription="@(_editingSnapshot?.Markdown ?? string.Empty)" Label="Evidence report"
+                               InputId="specification-evidence-markdown" FormId="specification-evidence-form"
+                               StreamedInputMaxBytes="@(1024 * 1024)" ExitFullscreenOnSave="true"
+                               Busy="Disabled" ReadOnly="Disabled" SubmitText="Save evidence" OnSave="Save">
+                <ChildContent>
+                    <label for="specification-evidence-pr-url">PR URL (optional)</label>
+                    @* Like the Markdown, read the value on submit instead of sending it in a hub event. *@
+                    <input @ref="_urlInput" id="specification-evidence-pr-url" type="text" inputmode="url"
+                           class="mud-input-slot" style="display:block;width:100%;border:1px solid var(--mud-palette-lines-inputs)"
+                           value="@_editingSnapshot?.PullRequestUrl" aria-describedby="specification-evidence-pr-help" disabled="@Disabled" />
+                    <p id="specification-evidence-pr-help">Enter an absolute HTTPS URL, or leave it blank.</p>
+                    @if (_inputError is not null)
+                    {
+                        <MudAlert Severity="Severity.Error" role="alert" Class="my-4">@_inputError</MudAlert>
+                    }
+                </ChildContent>
+                <Actions><MudButton Disabled="@Disabled" OnClick="Cancel">Cancel</MudButton></Actions>
+            </DescriptionEditor>
+        }
+        else
+        {
+            <div class="product-actions">
+                <MudButton id="specification-open-evidence" Variant="Variant.Filled" Color="Color.Primary" Disabled="@Disabled" OnClick="Open">
+                    @(Evidence is null ? "Add evidence" : Evidence.IsOutdated ? "Replace evidence" : "Edit evidence")
+                </MudButton>
+                @if (Evidence is { IsOutdated: true })
+                {
+                    <MudButton id="specification-confirm-evidence" Disabled="@(Disabled || !_reviewed)" OnClick="Confirm">
+                        Confirm current evidence
+                    </MudButton>
+                }
+                <MudButton id="specification-implement" Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@(!CanImplement)" OnClick="Implement">Mark as implemented</MudButton>
+            </div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public SpecificationEvidence? Evidence { get; set; }
+    [Parameter] public bool CanEdit { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public EventCallback<(SpecificationEvidence? Expected, string Markdown, string? PullRequestUrl)> OnSave { get; set; }
+    [Parameter] public EventCallback<SpecificationEvidence> OnConfirm { get; set; }
+    [Parameter] public EventCallback<string> OnImplement { get; set; }
+
+    private ElementReference _urlInput;
+    private bool _editing, _readingUrl, _disposed;
+    private SpecificationEvidence? _reviewedSnapshot, _editingSnapshot;
+    private bool _reviewed
+    {
+        get => _reviewedSnapshot is not null && _reviewedSnapshot == Evidence;
+        set => _reviewedSnapshot = value ? Evidence : null;
+    }
+    private string? _inputError, _attestedPullRequestUrl;
+    private bool Disabled => Busy || _readingUrl;
+    private bool CanImplement => !_disposed && CanEdit && !_editing && !Disabled && _attestedPullRequestUrl is not null &&
+        Evidence is { IsOutdated: false } evidence && evidence.PullRequestUrl == _attestedPullRequestUrl;
+
+    private void Open()
+    {
+        if (!CanEdit || Disabled) return;
+        _editingSnapshot = Evidence;
+        _editing = true;
+        _reviewed = false;
+        _attestedPullRequestUrl = null;
+    }
+
+    private void Cancel()
+    {
+        if (Disabled) return;
+        _editing = false;
+        _inputError = null;
+    }
+
+    private Task Confirm()
+    {
+        if (_disposed || !CanEdit || _editing || Disabled || !_reviewed || _reviewedSnapshot is not { IsOutdated: true } snapshot)
+            return Task.CompletedTask;
+        _reviewed = false;
+        return OnConfirm.InvokeAsync(snapshot);
+    }
+
+    private Task Implement()
+    {
+        if (!CanImplement || _attestedPullRequestUrl is not { } url) return Task.CompletedTask;
+        _attestedPullRequestUrl = null;
+        return OnImplement.InvokeAsync(url);
+    }
+
+    private async Task Save(string markdown)
+    {
+        if (_disposed || !CanEdit || !_editing || Disabled) return;
+        _readingUrl = true;
+        _inputError = null;
+        // A textarea exposes LF line endings. A URL-only edit must not change the stored report.
+        if (_editingSnapshot is { } evidence && markdown == evidence.Markdown.Replace("\r\n", "\n").Replace('\r', '\n'))
+            markdown = evidence.Markdown;
+        try
+        {
+            var url = await ReadUrl();
+            if (!_disposed && CanEdit && _editing && !Busy && _inputError is null)
+                await OnSave.InvokeAsync((_editingSnapshot, markdown, url));
+        }
+        finally { _readingUrl = false; }
+    }
+
+    private async Task<string?> ReadUrl()
+    {
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/markdownFullscreen.js");
+            var input = await module.InvokeAsync<UrlInput>("readMarkdownInput", _urlInput, long.MaxValue);
+            await using var content = input.Content;
+            if (input.InvalidUnicode)
+            {
+                _inputError = "The PR URL contains invalid Unicode. Replace the invalid characters and try again.";
+                return null;
+            }
+            if (content is null) return null;
+            await using var stream = await content.OpenReadStreamAsync(long.MaxValue);
+            using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false);
+            return await reader.ReadToEndAsync();
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or IOException
+            or DecoderFallbackException or OperationCanceledException or TimeoutException)
+        {
+            _inputError = "The PR URL could not be read. Try again.";
+            return null;
+        }
+    }
+
+    private sealed record UrlInput(bool InvalidUnicode, IJSStreamReference? Content);
+
+    public void Dispose() => _disposed = true;
+}

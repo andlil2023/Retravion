@@ -127,7 +127,9 @@
         || Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("features", StringComparison.OrdinalIgnoreCase)
         || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("features/", StringComparison.OrdinalIgnoreCase)
         || Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("revisions", StringComparison.OrdinalIgnoreCase)
-        || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("revisions/", StringComparison.OrdinalIgnoreCase);
+        || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("revisions/", StringComparison.OrdinalIgnoreCase)
+        || Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/').Equals("specifications", StringComparison.OrdinalIgnoreCase)
+        || Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("specifications/", StringComparison.OrdinalIgnoreCase);
     private bool _navigationOpen;
     private bool _darkMode;
 

@@ -1,0 +1,148 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+@using Retravion.Application.Specification
+@implements IDisposable
+
+<section class="mt-6" aria-labelledby="specification-ai-review-heading">
+    <MudPaper Class="pa-4" Elevation="0">
+        <h3 id="specification-ai-review-heading">AI review</h3>
+        @if (Review is { } review)
+        {
+            @if (review.IsOutdated)
+            {
+                <p><strong>Outdated:</strong> This review may no longer reflect the current Specification.</p>
+            }
+            <ProductMarkdownView Markdown="@review.Markdown" />
+        }
+        else
+        {
+            <p>No AI review submitted.</p>
+        }
+        @if (CanEdit && _editing)
+        {
+            <p>Enter or upload up to 1 MB of UTF-8 Markdown. Retravion does not run AI or approve the Specification when you submit a review.</p>
+            <label for="specification-ai-review-method">Markdown source</label>
+            <select id="specification-ai-review-method" @bind="_method" @bind:after="ResetInput" disabled="@Disabled">
+                <option value="entered">Enter Markdown</option>
+                <option value="uploaded">Upload Markdown file</option>
+            </select>
+        }
+    </MudPaper>
+    @if (CanEdit)
+    {
+        @if (!_editing)
+        {
+            <div class="product-actions">
+                <MudButton id="specification-open-ai-review" Variant="Variant.Filled" Color="Color.Primary" Disabled="@Disabled" OnClick="Open">
+                    @(Review is null ? "Add AI review" : "Replace AI review")
+                </MudButton>
+            </div>
+        }
+        else if (_method == "uploaded")
+        {
+            <MudPaper Class="pa-4 mt-4" Elevation="0">
+                <label for="specification-ai-review-file">UTF-8 Markdown file</label>
+                <InputFile id="specification-ai-review-file" OnChange="SelectFile" accept=".md,.markdown,text/markdown" disabled="@Disabled" />
+                <div>@Approval</div>
+                @if (_fileError is not null)
+                {
+                    <MudAlert Severity="Severity.Error" role="alert">@_fileError</MudAlert>
+                }
+            </MudPaper>
+            <div class="product-actions">
+                <MudButton id="specification-submit-ai-review-file" Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@(Disabled || !_approved || _file is null)" OnClick="SubmitFile">@SubmitText</MudButton>
+                <MudButton Disabled="@Disabled" OnClick="Cancel">Cancel</MudButton>
+            </div>
+        }
+        else
+        {
+            <DescriptionEditor InitialDescription="@string.Empty" Label="AI review" InputId="specification-ai-review-markdown"
+                               FormId="specification-ai-review-form" StreamedInputMaxBytes="@MaximumBytes" ExitFullscreenOnSave="true"
+                               Busy="Disabled" ReadOnly="Disabled" SaveDisabled="@(!_approved)" SubmitText="@SubmitText" OnSave="SubmitEntered">
+                <ChildContent>@Approval</ChildContent>
+                <Actions><MudButton Disabled="@Disabled" OnClick="Cancel">Cancel</MudButton></Actions>
+            </DescriptionEditor>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public SpecificationAiReview? Review { get; set; }
+    [Parameter] public bool CanEdit { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<(SpecificationAiReviewInput Input, bool Approved)> OnSubmit { get; set; }
+
+    // Match the existing review command's UTF-8 limit before opening either browser stream.
+    private const int MaximumBytes = 1024 * 1024;
+    private bool _editing, _approved, _reading, _disposed;
+    private string _method = "entered";
+    private IBrowserFile? _file;
+    private string? _fileError;
+    private bool Disabled => Busy || _reading;
+    private string SubmitText => Review is null ? "Submit AI review" : "Replace AI review";
+
+    private RenderFragment Approval => @<label>
+        <input id="specification-ai-review-approved" type="checkbox" @bind="_approved"
+               disabled="@(Disabled || (_method == "uploaded" && _file is null))" />
+        I approve submitting this Markdown as the current AI review.
+    </label>;
+
+    private void Open() { if (CanEdit && !Disabled) _editing = true; }
+    private void Cancel()
+    {
+        if (Disabled) return;
+        _editing = false;
+        _method = "entered";
+        ResetInput();
+    }
+
+    private void ResetInput() => (_approved, _file, _fileError) = (false, null, null);
+
+    private void SelectFile(InputFileChangeEventArgs args)
+    {
+        if (!CanEdit || !_editing || Disabled || _method != "uploaded") return;
+        ResetInput();
+        if (args.FileCount != 1) return;
+        var file = args.File;
+        if (file.Size > MaximumBytes) _fileError = "The AI review file must be at most 1 MB of UTF-8 Markdown.";
+        else _file = file;
+    }
+
+    private Task SubmitEntered(string markdown) => _method == "entered"
+        ? Submit(new SpecificationAiReviewInput.Entered(markdown)) : Task.CompletedTask;
+
+    private async Task SubmitFile()
+    {
+        if (!CanEdit || !_editing || Disabled || !_approved || _method != "uploaded" || _file is not { } file) return;
+        _reading = true;
+        _fileError = null;
+        byte[] bytes;
+        try
+        {
+            await using var stream = file.OpenReadStream(MaximumBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            bytes = buffer.ToArray();
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or IOException
+            or OperationCanceledException or TimeoutException)
+        {
+            _fileError = "The Markdown file could not be read. Select the file again and try again.";
+            _approved = false;
+            return;
+        }
+        finally { _reading = false; }
+        if (ReferenceEquals(file, _file) && _method == "uploaded") await Submit(new SpecificationAiReviewInput.Uploaded(bytes));
+    }
+
+    private Task Submit(SpecificationAiReviewInput input)
+    {
+        if (_disposed || !CanEdit || !_editing || Disabled || !_approved) return Task.CompletedTask;
+        var approval = _approved;
+        _approved = false;
+        return OnSubmit.InvokeAsync((input, approval));
+    }
+
+    public void Dispose() => _disposed = true;
+}

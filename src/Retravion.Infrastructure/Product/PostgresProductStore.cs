@@ -11,6 +11,21 @@ namespace Retravion.Infrastructure.Product;
 public sealed class PostgresProductStore(string connectionString,
     Func<NpgsqlTransaction, CancellationToken, Task>? commit = null) : IProductStore, IProductChangeTransaction
 {
+    private const string Setup = """
+        SELECT pg_advisory_xact_lock(821749620110);
+        CREATE SCHEMA IF NOT EXISTS retravion_product;
+        CREATE COLLATION IF NOT EXISTS retravion_product.product_case_fold (provider = icu, locale = 'und-u-ks-level2', deterministic = false);
+        CREATE TABLE IF NOT EXISTS retravion_product.product (
+            internal_id uuid PRIMARY KEY CHECK (internal_id <> '00000000-0000-0000-0000-000000000000'),
+            id text NOT NULL CHECK (length(btrim(id)) > 0 AND char_length(id) <= 100),
+            name text NOT NULL CHECK (length(btrim(name)) > 0),
+            kind integer NOT NULL CHECK (kind BETWEEN 0 AND 3),
+            description text NOT NULL,
+            is_active boolean NOT NULL DEFAULT TRUE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS product_id_case_insensitive ON retravion_product.product (id COLLATE retravion_product.product_case_fold);
+        """;
+
     private NpgsqlConnection? enlistedConnection;
     private NpgsqlTransaction? enlistedTransaction;
     private AuditActor? actor;
@@ -126,6 +141,15 @@ public sealed class PostgresProductStore(string connectionString,
         return result.IsSuccess ? Result.Success() : Result.Failure(result.Error);
     }
 
+    // Product owns its DDL. Dependent schema initialization may provision the referenced table
+    // in the caller's transaction before creating its foreign key.
+    internal static async Task EnsureSchema(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var setup = new NpgsqlCommand(Setup, connection, transaction);
+        await setup.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private async Task<Result<T>> Execute<T>(Func<NpgsqlConnection, NpgsqlTransaction, Task<Result<T>>> operation,
         CancellationToken cancellationToken)
     {
@@ -137,21 +161,7 @@ public sealed class PostgresProductStore(string connectionString,
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-            await using (var setup = new NpgsqlCommand("""
-                SELECT pg_advisory_xact_lock(821749620110);
-                CREATE SCHEMA IF NOT EXISTS retravion_product;
-                CREATE COLLATION IF NOT EXISTS retravion_product.product_case_fold (provider = icu, locale = 'und-u-ks-level2', deterministic = false);
-                CREATE TABLE IF NOT EXISTS retravion_product.product (
-                    internal_id uuid PRIMARY KEY CHECK (internal_id <> '00000000-0000-0000-0000-000000000000'),
-                    id text NOT NULL CHECK (length(btrim(id)) > 0 AND char_length(id) <= 100),
-                    name text NOT NULL CHECK (length(btrim(name)) > 0),
-                    kind integer NOT NULL CHECK (kind BETWEEN 0 AND 3),
-                    description text NOT NULL,
-                    is_active boolean NOT NULL DEFAULT TRUE
-                );
-                CREATE UNIQUE INDEX IF NOT EXISTS product_id_case_insensitive ON retravion_product.product (id COLLATE retravion_product.product_case_fold);
-                """, connection, transaction))
-                await setup.ExecuteNonQueryAsync(cancellationToken);
+            await EnsureSchema(connection, transaction, cancellationToken);
             var result = await operation(connection, transaction);
             if (result.IsSuccess)
             {
